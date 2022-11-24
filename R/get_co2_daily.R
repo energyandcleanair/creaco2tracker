@@ -1,10 +1,12 @@
 
-get_co2_daily <- function(){
+get_co2_daily <- function(diagnostic_folder='diagnostics'){
+
+  dir.create(diagnostic_folder, F, T)
 
   #gas data
-  ng_all <- read_csv("https://api.russiafossiltracker.com/v0/overland?format=csv&date_from=2019-01-01&commodity=natural_gas")
+  ng_all <- read_csv("https://api.russiafossiltracker.com/v0/overland?format=csv&date_from=2015-01-01&commodity=natural_gas")
   entsog <- c('distribution','consumption','storage_entry','storage_exit','crossborder','production') %>% #'transmission_entry','transmission_exit',
-    pbapply::pblapply(function(x){Sys.sleep(2); read_csv(paste0('https://api.russiafossiltracker.com/v0/entsogflow?format=csv&date_from=2019-01-01&type=', x))}) %>%
+    pbapply::pblapply(function(x){Sys.sleep(2); read_csv(paste0('https://api.russiafossiltracker.com/v0/entsogflow?format=csv&date_from=2015-01-01&type=', x))}) %>%
     bind_rows()
 
   #Gas imports + production+ storage+ implied consumption
@@ -31,27 +33,30 @@ get_co2_daily <- function(){
     mutate(type='consumption')
 
   # Plot
-  # bind_rows(inflows, storage_changes, implied_cons, entsog %>% filter(type == 'production')) %>%
-  #   filter(destination_region=='EU') %>%
-  #   group_by(type, date) %>%
-  #   summarise(across(value_m3, sum, na.rm=T)) %>%
-  #   group_by(type) %>%
-  #   mutate(value_m3=zoo::rollapplyr(value_m3, 30, mean, fill=NA),
-  #          plotdate=date %>% 'year<-'(2022), year=as.factor(year(date))) %>%
-  #   filter(year(date) %in% 2021:2022, date<max(date)-7) %>%
-  #   ggplot(aes(plotdate, value_m3/1e9, col=type, alpha=year)) +
-  #   facet_wrap(~type) +
-  #   geom_line(size=1) +
-  #   labs(title='Europe gas imports, storage and implied consumption', x='',
-  #        y='billion cubic meters per day, 30-day mean',
-  #        col='flow') +
-  #   theme_crea() + scale_color_crea_d('dramatic') +
-  #   scale_alpha_manual(values=c(.5,1),
-  #                      guide = guide_legend(override.aes = list(col = c('gray50', 'black'), alpha=c(1,1))))
-  # ggsave('gas imports and consumption trends.png', width=8, height=6, bg='white')
+  if(!is.null(diagnostic_folder)){
+    plt <- bind_rows(inflows, storage_changes, implied_cons, entsog %>% filter(type == 'production')) %>%
+      filter(destination_region=='EU') %>%
+      group_by(type, date) %>%
+      summarise(across(value_m3, sum, na.rm=T)) %>%
+      group_by(type) %>%
+      mutate(value_m3=zoo::rollapplyr(value_m3, 30, mean, fill=NA),
+             plotdate=date %>% 'year<-'(2022), year=as.factor(year(date))) %>%
+      filter(year(date) %in% 2021:2022, date<max(date)-7) %>%
+      ggplot(aes(plotdate, value_m3/1e9, col=type, alpha=year)) +
+      facet_wrap(~type) +
+      geom_line(size=1) +
+      labs(title='Europe gas imports, storage and implied consumption', x='',
+           y='billion cubic meters per day, 30-day mean',
+           col='flow') +
+      theme_crea() + scale_color_crea_d('dramatic') +
+      scale_alpha_manual(values=c(.5,1),
+                         guide = guide_legend(override.aes = list(col = c('gray50', 'black'), alpha=c(1,1))))
+    ggsave(filename=file.path(diagnostic_folder, 'gas imports and consumption trends.png'),
+           plot=plt, width=8, height=6, bg='white')
+  }
 
   #Power generation by source plus total Calvin plot
-  pwr <- read_csv('https://api.energyandcleanair.org/power/generation?date_from=2016-01-01&aggregate_by=country,source,date&format=csv&region=EU')
+  pwr <- read_csv('https://api.energyandcleanair.org/power/generation?date_from=2015-01-01&aggregate_by=country,source,date&format=csv&region=EU')
 
   #add total generation
   pwr <- pwr %>%
@@ -78,26 +83,32 @@ get_co2_daily <- function(){
            output_mw_rollmean=zoo::rollapplyr(value_mw, 7, mean, fill=NA))
 
   #output range of values for several years
-  pwr_ranges <- pwr %>% filter(year %in% 2016:2021) %>%
+  pwr_ranges <- pwr %>% filter(year %in% 2015:2021) %>%
     group_by(region, country, source, plotdate) %>%
     summarise(min=min(output_mw_rollmean), max=max(output_mw_rollmean))
 
 
   #plot by source
-  # pwr %>% filter(date<max(date)-3, year %in% 2021:2022, country=='EU total') %>%
-  #   group_by(country) %>% filter(mean(value_mw, na.rm=T)>1e3) %>%
-  #   ggplot(aes(plotdate)) +
-  #   facet_wrap(~source, scales='free_y') +
-  #   geom_ribbon(data=pwr_ranges %>% filter(country=='EU total'),
-  #               aes(ymin=min/1000, ymax=max/1000), fill=crea_palettes$CREA[2]) +
-  #   geom_line(aes(y=output_mw_rollmean/1000, col=as.factor(year)), size=1) +
-  #   expand_limits(y=0) +
-  #   # scale_x_datetime(date_labels = '%b') +
-  #   labs(title='EU power generation by source', y='GW, 7-day mean', x='', col='', fill='') +
-  #   theme_crea(legend.position='top') +
-  #   scale_color_crea_d('dramatic', guide=guide_legend(nrow = 1)) +
-  #   scale_fill_crea_d(col.index = 2)
-  # ggsave('EU power generation by source.png', width=8, height=6, bg='white')
+  if(!is.null(diagnostic_folder)){
+    library(rcrea)
+
+    plt <- pwr %>% filter(date<max(date)-3, year %in% 2021:2022, country=='EU total') %>%
+      group_by(country) %>% filter(mean(value_mw, na.rm=T)>1e3) %>%
+      ggplot(aes(plotdate)) +
+      facet_wrap(~source, scales='free_y') +
+      geom_ribbon(data=pwr_ranges %>% filter(country=='EU total'),
+                  aes(ymin=min/1000, ymax=max/1000), fill=crea_palettes$CREA[2]) +
+      geom_line(aes(y=output_mw_rollmean/1000, col=as.factor(year)), size=1) +
+      expand_limits(y=0) +
+      # scale_x_datetime(date_labels = '%b') +
+      labs(title='EU power generation by source', y='GW, 7-day mean', x='', col='', fill='') +
+      theme_crea(legend.position='top') +
+      scale_color_crea_d('dramatic', guide=guide_legend(nrow = 1)) +
+      scale_fill_crea_d(col.index = 2)
+
+    ggsave(file.path(diagnostic_folder, 'EU power generation by source.png'),
+           width=8, height=6, bg='white', plot=plt)
+  }
 
 
   #Gas consumption+coal consumption (estimated from generation) + oil consumption extrapolated from Eurostat
@@ -256,23 +267,26 @@ get_co2_daily <- function(){
     bind_rows(co2_daily %>% filter(fuel_type!='total'))
 
   #plot
-  # co2_daily %>% filter(year(date)>=2018) %>%
-  #   mutate(across(c(fuel_type, sector), tolower)) %>%
-  #   group_by(sector, fuel_type) %>%
-  #   mutate(CO2_30d = zoo::rollapplyr(CO2_hybrid, 30, mean, fill=NA),
-  #          year=as.factor(year(date)), plotdate=date %>% 'year<-'(2022)) %>%
-  #   ggplot(aes(plotdate, CO2_30d/1e6, col=year)) +
-  #   geom_line(size=1) +
-  #   facet_wrap(~paste(fuel_type, sector), scales='free_y') +
-  #   expand_limits(y=0)  + scale_x_date(expand=c(0,0)) +
-  #   theme_crea() +
-  #   labs(title="EU CO2 emissions", y='Mt/day, 30-day mean', x='') +
-  #   scale_color_crea_d()
-  # ggsave('EU CO2 emissions.png', width=8, height=6, bg='white')
+  if(!is.null(diagnostic_folder)){
+    plt <- co2_daily %>% filter(year(date)>=2016) %>%
+      mutate(across(c(fuel_type, sector), tolower)) %>%
+      group_by(sector, fuel_type) %>%
+      mutate(CO2_30d = zoo::rollapplyr(CO2_hybrid, 30, mean, fill=NA),
+             year=as.factor(year(date)), plotdate=date %>% 'year<-'(2022)) %>%
+      ggplot(aes(plotdate, CO2_30d/1e6, col=year)) +
+      geom_line(size=1) +
+      facet_wrap(~paste(fuel_type, sector), scales='free_y') +
+      expand_limits(y=0)  + scale_x_date(expand=c(0,0)) +
+      theme_crea() +
+      labs(title="EU CO2 emissions", y='Mt/day, 30-day mean', x='') +
+      scale_color_crea_d()
+
+    ggsave(file.path(diagnostic_folder,'EU CO2 emissions.png'), plot=plt, width=8, height=6, bg='white')
+  }
 
   # Formatting for db
   co2_daily %>%
-    filter(year(date)>=2018) %>%
+    filter(year(date)>=2016) %>% #EUROSTAT is the limiting factor
     mutate(region='EU',
            unit='t/day') %>%
     mutate(across(c(fuel_type, sector), stringr::str_to_title),
