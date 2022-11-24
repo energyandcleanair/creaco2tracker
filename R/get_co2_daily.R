@@ -4,11 +4,14 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
   dir.create(diagnostic_folder, F, T)
 
   #gas data
-  ng_all <- read_csv("https://api.russiafossiltracker.com/v0/overland?format=csv&date_from=2015-01-01&commodity=natural_gas")
-  entsog <- c('distribution','consumption','storage_entry','storage_exit','crossborder','production') %>% #'transmission_entry','transmission_exit',
-    pbapply::pblapply(function(x){Sys.sleep(2); read_csv(paste0('https://api.russiafossiltracker.com/v0/entsogflow?format=csv&date_from=2015-01-01&type=', x))}) %>%
-    bind_rows()
+  ng_all <- read_csv("https://api.russiafossiltracker.com/v0/overland?format=csv&date_from=2016-01-01&commodity=natural_gas")
 
+  types <- c('distribution','consumption','storage_entry','storage_exit','crossborder','production')
+  entsog <- seq(2016, lubridate::year(lubridate::today())) %>%
+    pbapply::pblapply(function(x){Sys.sleep(2);
+      read_csv(sprintf('https://api.russiafossiltracker.com/v0/entsogflow?format=csv&date_from=%s-01-01&date_to=%s-12-31&type=%s', x, x, paste0(types, collapse=',')))}) %>%
+    bind_rows()
+  
   #Gas imports + production+ storage+ implied consumption
   inflows <- ng_all %>%
     filter(commodity_origin_country %in% c('Algeria', 'Azerbaijan', 'LNG', 'Libya', 'Netherlands', 'Albania', 'Russia',
@@ -56,7 +59,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
   }
 
   #Power generation by source plus total Calvin plot
-  pwr <- read_csv('https://api.energyandcleanair.org/power/generation?date_from=2015-01-01&aggregate_by=country,source,date&format=csv&region=EU')
+  pwr <- read_csv('https://api.energyandcleanair.org/power/generation?date_from=2016-01-01&aggregate_by=country,source,date&format=csv&region=EU')
 
   #add total generation
   pwr <- pwr %>%
@@ -286,7 +289,8 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
 
   # Formatting for db
   co2_daily %>%
-    filter(year(date)>=2016) %>% #EUROSTAT is the limiting factor
+    filter(year(date)>=2016,  #EUROSTAT is the limiting factor
+           date < max(entsog$date) - lubridate::days(3)) %>% 
     mutate(region='EU',
            unit='t/day') %>%
     mutate(across(c(fuel_type, sector), stringr::str_to_title),
