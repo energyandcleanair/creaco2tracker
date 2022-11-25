@@ -46,7 +46,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
       filter(year(date) %in% 2021:2022, date<max(date)-7) %>%
       ggplot(aes(plotdate, value_m3/1e9, col=type, alpha=year)) +
       facet_wrap(~type) +
-      geom_line(size=1) +
+      geom_line(linewidth=1) +
       labs(title='Europe gas imports, storage and implied consumption', x='',
            y='billion cubic meters per day, 30-day mean',
            col='flow') +
@@ -113,41 +113,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
   }
 
   # EUROSTAT
-
-  #Gas consumption+coal consumption (estimated from generation) + oil consumption extrapolated from Eurostat
-  # consumption_codes = c("nrg_cb_sffm","nrg_cb_oilm","nrg_cb_gasm")
-  #
-  # consumption_codes %>% lapply(eurostat::get_eurostat) %>% lapply(eurostat::label_eurostat) -> cons
-  # names(cons) <- c('coal', 'oil', 'gas')
-  #
-  # cons$coal %>% filter(grepl('Transformation input|Final consumption.*(industry sector$|other sectors$)', nrg_bal)) %>%
-  #   mutate(sector=ifelse(grepl('electricity', nrg_bal), 'electricity', 'others')) %>%
-  #   group_by(geo, sector, time, unit, siec) %>% summarise_at('values', sum, na.rm=T) %>%
-  #   mutate(fuel_type='Coal') ->
-  #   coal_cons
-  #
-  # cons$oil %>% filter((grepl('Gross inland deliveries.*observed', nrg_bal) & siec=='Oil products') |
-  #                       (grepl('Direct use', nrg_bal) & grepl('Crude oil, NGL', siec))) %>%
-  #   group_by(geo, time, unit, siec) %>% summarise_at('values', sum, na.rm=T) %>%
-  #   mutate(fuel_type='Oil', sector='all') ->
-  #   oil_cons
-  #
-  # cons$gas %>% filter(grepl('Inland consumption.*observed|Transformation input', nrg_bal),
-  #                     unit=='Million cubic metres') %>%
-  #   mutate(sector=ifelse(grepl('electricity', nrg_bal), 'electricity', 'all')) %>%
-  #   group_by(geo, sector, time, unit, siec) %>% summarise_at('values', sum, na.rm=T) ->
-  #   gas_cons
-
-  # cons$gas %>%
-  #   mutate(values=values*ifelse(sector=='electricity', -1, 1)) %>%
-  #   group_by(geo, time, unit, siec) %>%
-  #   summarise_at('values', sum, na.rm=T) %>%
-  #   mutate(sector='others') %>%
-  #   bind_rows(cons$gas %>% filter(sector=='electricity')) %>%
-  #   mutate(fuel_type='gas') ->
-  #   cons$gas
-
-  cons <- get_eurostat_cons()
+  cons <- get_eurostat_cons(diagnostic_folder = diagnostic_folder)
 
   #calculate CO2 emissions
   bind_rows(cons$coal, cons$oil, cons$gas) %>%
@@ -162,7 +128,6 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
     cons_agg
 
   # save.image('EU energy data.RData')
-  #
   # load('EU energy data.RData')
 
   #dates for which to output daily estimates
@@ -276,26 +241,25 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
 
   #plot
   if(!is.null(diagnostic_folder)){
-    plt <- co2_daily %>% filter(year(date)>=2016) %>%
+    plt <- co2_daily %>% filter(year(date)>=1990) %>%
       mutate(across(c(fuel_type, sector), tolower)) %>%
       group_by(sector, fuel_type) %>%
       mutate(CO2_30d = zoo::rollapplyr(CO2_hybrid, 30, mean, fill=NA),
              year=as.factor(year(date)), plotdate=date %>% 'year<-'(2022)) %>%
       ggplot(aes(plotdate, CO2_30d/1e6, col=year)) +
-      geom_line(size=1) +
+      geom_line(size=0.2) +
       facet_wrap(~paste(fuel_type, sector), scales='free_y') +
       expand_limits(y=0)  + scale_x_date(expand=c(0,0)) +
       theme_crea() +
-      labs(title="EU CO2 emissions", y='Mt/day, 30-day mean', x='') +
-      scale_color_crea_d()
+      labs(title="EU CO2 emissions", y='Mt/day, 30-day mean', x='')
+      # scale_color_crea_d()
 
     ggsave(file.path(diagnostic_folder,'EU CO2 emissions.png'), plot=plt, width=8, height=6, bg='white')
   }
 
   # Formatting for db
   co2_daily %>%
-    filter(year(date)>=2016,  #EUROSTAT is the limiting factor
-           date < max(entsog$date) - lubridate::days(3)) %>% 
+    filter(date < max(entsog$date) - lubridate::days(3)) %>% 
     mutate(region='EU',
            unit='t/day') %>%
     mutate(across(c(fuel_type, sector), stringr::str_to_title),
@@ -305,7 +269,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
 }
 
 
-get_eurostat_cons <- function(){
+get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
 
   consumption_codes = c("nrg_cb_sffm","nrg_cb_oilm","nrg_cb_gasm")
   cons_monthly_raw <- consumption_codes %>% lapply(eurostat::get_eurostat) %>% lapply(eurostat::label_eurostat)
@@ -407,18 +371,26 @@ get_eurostat_cons <- function(){
 
 
   # Visual check that we kept the right sectors for each fuel
-  bind_rows(
-    do.call(bind_rows, cons_yearly) %>% mutate(source='yearly'),
-    do.call(bind_rows, cons_monthly) %>% mutate(source='monthly')) %>%
-
-    filter(grepl('European union', geo, T)) %>%
-    filter(siec %in% .[.$source=='monthly',]$siec) %>%
-    group_by(year=lubridate::year(time), siec, source, fuel_type, sector) %>%
-    summarise(values=sum(values)) %>%
-    ggplot(aes(year, values, col=siec, linetype=source)) +
-    geom_line() +
-    facet_grid(fuel_type~sector, scales='free_y') +
-    theme(legend.position = 'bottom')
+  
+  if(!is.null(diagnostic_folder)){
+    library(rcrea)
+    
+    plt <- bind_rows(
+      do.call(bind_rows, cons_yearly) %>% mutate(source='yearly'),
+      do.call(bind_rows, cons_monthly) %>% mutate(source='monthly')) %>%
+      
+      filter(grepl('European union', geo, T)) %>%
+      filter(siec %in% .[.$source=='monthly',]$siec) %>%
+      group_by(year=lubridate::year(time), siec, source, fuel_type, sector) %>%
+      summarise(values=sum(values)) %>%
+      ggplot(aes(year, values, col=siec, linetype=source)) +
+      geom_line() +
+      facet_grid(fuel_type~sector, scales='free_y') +
+      theme(legend.position = 'bottom') +
+      rcrea::scale_y_crea_zero()
+    
+    ggsave(file.path(diagnostic_folder,'eurostat_annual_vs_monthly_yearly.png'), plot=plt, width=8, height=6, bg='white')
+  }
 
 
   # Seasonal adjusment
@@ -470,19 +442,40 @@ get_eurostat_cons <- function(){
     ungroup()
 
   # Visual check
-  cons_combined %>%
-    group_by(geo, sector, time, unit, siec, fuel_type) %>%
-    arrange(source) %>%
-    slice(1) %>%
-    ungroup() %>%
-    filter(grepl('European union', geo, T)) %>%
-    ggplot(aes(time, values, col=siec, linetype=source)) +
-    geom_line() +
-    facet_grid(fuel_type~sector, scales='free_y')
+  if(!is.null(diagnostic_folder)){
+    plt <- cons_combined %>%
+      # group_by(geo, sector, time, unit, siec, fuel_type) %>%
+      # arrange(source) %>%
+      # slice(1) %>%
+      # ungroup() %>%
+      filter(grepl('European union', geo, T)) %>%
+      ggplot(aes(time, values, col=siec, linetype=source)) +
+      geom_line() +
+      facet_grid(fuel_type~sector, scales='free_y') +
+      theme(legend.position='bottom')+
+      rcrea::scale_y_crea_zero()
+    
+    ggsave(file.path(diagnostic_folder,'eurostat_annual_vs_monthly_monthly.png'), plot=plt, width=8, height=6, bg='white')
+    
+    plt <- cons_combined %>%
+      group_by(geo, sector, time, unit, siec, fuel_type) %>%
+      arrange(source) %>%
+      slice(1) %>%
+      ungroup() %>%
+      filter(grepl('European union', geo, T)) %>%
+      ggplot(aes(time, values, col=siec, linetype=source)) +
+      geom_line() +
+      facet_grid(fuel_type~sector, scales='free_y') +
+      theme(legend.position='bottom')+
+      rcrea::scale_y_crea_zero()
+    
+    ggsave(file.path(diagnostic_folder,'eurostat_combined.png'), plot=plt, width=8, height=6, bg='white')
+  }
+  
 
   # Remove overlaps
   cons <- cons_combined  %>%
-    group_by(geo, sector, time, unit, siec, values, fuel_type) %>%
+    group_by(geo, sector, time, unit, siec, fuel_type) %>%
     arrange(source) %>%
     # Keep monthly when both are available
     slice(1) %>%
