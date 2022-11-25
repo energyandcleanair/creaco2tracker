@@ -17,7 +17,6 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
     summarise(across(value_m3, sum)) %>%
     mutate(type='imports')
 
-
   storage_changes <- entsog %>% filter(type %in% c('storage_entry','storage_exit')) %>%
     mutate(value_m3 = value_m3 * ifelse(type=='storage_exit', -1, 1)) %>%
     group_by(across(c(starts_with('destination'), date))) %>%
@@ -110,39 +109,45 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
            width=8, height=6, bg='white', plot=plt)
   }
 
+  # EUROSTAT
 
   #Gas consumption+coal consumption (estimated from generation) + oil consumption extrapolated from Eurostat
-  consumption_codes = c("nrg_cb_sffm","nrg_cb_oilm","nrg_cb_gasm")
+  # consumption_codes = c("nrg_cb_sffm","nrg_cb_oilm","nrg_cb_gasm")
+  #
+  # consumption_codes %>% lapply(eurostat::get_eurostat) %>% lapply(eurostat::label_eurostat) -> cons
+  # names(cons) <- c('coal', 'oil', 'gas')
+  #
+  # cons$coal %>% filter(grepl('Transformation input|Final consumption.*(industry sector$|other sectors$)', nrg_bal)) %>%
+  #   mutate(sector=ifelse(grepl('electricity', nrg_bal), 'electricity', 'others')) %>%
+  #   group_by(geo, sector, time, unit, siec) %>% summarise_at('values', sum, na.rm=T) %>%
+  #   mutate(fuel_type='Coal') ->
+  #   coal_cons
+  #
+  # cons$oil %>% filter((grepl('Gross inland deliveries.*observed', nrg_bal) & siec=='Oil products') |
+  #                       (grepl('Direct use', nrg_bal) & grepl('Crude oil, NGL', siec))) %>%
+  #   group_by(geo, time, unit, siec) %>% summarise_at('values', sum, na.rm=T) %>%
+  #   mutate(fuel_type='Oil', sector='all') ->
+  #   oil_cons
+  #
+  # cons$gas %>% filter(grepl('Inland consumption.*observed|Transformation input', nrg_bal),
+  #                     unit=='Million cubic metres') %>%
+  #   mutate(sector=ifelse(grepl('electricity', nrg_bal), 'electricity', 'all')) %>%
+  #   group_by(geo, sector, time, unit, siec) %>% summarise_at('values', sum, na.rm=T) ->
+  #   gas_cons
 
-  consumption_codes %>% lapply(eurostat::get_eurostat) %>% lapply(eurostat::label_eurostat) -> cons
-  names(cons) <- c('coal', 'oil', 'gas')
+  # cons$gas %>%
+  #   mutate(values=values*ifelse(sector=='electricity', -1, 1)) %>%
+  #   group_by(geo, time, unit, siec) %>%
+  #   summarise_at('values', sum, na.rm=T) %>%
+  #   mutate(sector='others') %>%
+  #   bind_rows(cons$gas %>% filter(sector=='electricity')) %>%
+  #   mutate(fuel_type='gas') ->
+  #   cons$gas
 
-  cons$coal %>% filter(grepl('Transformation input|Final consumption.*(industry sector$|other sectors$)', nrg_bal)) %>%
-    mutate(sector=ifelse(grepl('electricity', nrg_bal), 'electricity', 'others')) %>%
-    group_by(geo, sector, time, unit, siec) %>% summarise_at('values', sum, na.rm=T) %>%
-    mutate(fuel_type='Coal') ->
-    coal_cons
-
-  cons$oil %>% filter((grepl('Gross inland deliveries.*observed', nrg_bal) & siec=='Oil products') |
-                        (grepl('Direct use', nrg_bal) & grepl('Crude oil, NGL', siec))) %>%
-    group_by(geo, time, unit, siec) %>% summarise_at('values', sum, na.rm=T) %>%
-    mutate(fuel_type='Oil', sector='all') ->
-    oil_cons
-
-  cons$gas %>% filter(grepl('Inland consumption.*observed|Transformation input', nrg_bal),
-                      unit=='Million cubic metres') %>%
-    mutate(sector=ifelse(grepl('electricity', nrg_bal), 'electricity', 'all')) %>%
-    group_by(geo, sector, time, unit, siec) %>% summarise_at('values', sum, na.rm=T) ->
-    gas_cons
-
-  gas_cons %>% mutate(values=values*ifelse(sector=='electricity', -1, 1)) %>%
-    group_by(geo, time, unit, siec) %>% summarise_at('values', sum, na.rm=T) %>%
-    mutate(sector='others') %>% bind_rows(gas_cons %>% filter(sector=='electricity')) %>%
-    mutate(fuel_type='gas') ->
-    gas_cons
+  cons <- get_eurostat_cons()
 
   #calculate CO2 emissions
-  bind_rows(coal_cons, oil_cons, gas_cons) %>%
+  bind_rows(cons$coal, cons$oil, cons$gas) %>%
     mutate(CO2.factor = case_when(siec=='Hard coal'~29.3*5000/7000*94.6,
                                   siec=='Brown coal'~10*102,
                                   siec=='Peat'~9.7*106,
@@ -295,6 +300,194 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
     select(region, date, fuel=fuel_type, sector, unit, frequency, version, value=CO2_hybrid)
 }
 
+
+get_eurostat_cons <- function(){
+
+  consumption_codes = c("nrg_cb_sffm","nrg_cb_oilm","nrg_cb_gasm")
+  cons_monthly_raw <- consumption_codes %>% lapply(eurostat::get_eurostat) %>% lapply(eurostat::label_eurostat)
+  names(cons_monthly_raw) <- c('coal', 'oil', 'gas')
+
+  consumption_codes_yearly = c("nrg_cb_sff", "nrg_cb_oil", "nrg_cb_gas")
+  cons_yearly_raw <- consumption_codes_yearly %>% lapply(eurostat::get_eurostat) %>% lapply(eurostat::label_eurostat)
+  names(cons_yearly_raw) <- c('coal', 'oil', 'gas')
+
+  filter_coal_monthly <- function(x){
+    x %>%
+      filter(grepl('Transformation input|Final consumption.*(industry sector$|other sectors$)', nrg_bal)) %>%
+      mutate(sector=ifelse(grepl('electricity', nrg_bal), 'electricity', 'others'))
+  }
+
+  filter_coal_yearly <- function(x){
+    x %>%
+      filter(grepl(paste('Transformation input - coke ovens',
+                         'Transformation input - electricity and heat generation - main activity producer',
+                         'Final consumption - industry sector',
+                         'Final consumption - other sectors', sep='|'),
+                   nrg_bal)) %>%
+      mutate(sector=ifelse(grepl('electricity', nrg_bal), 'electricity', 'others'))
+  }
+
+  filter_oil_monthly <- function(x){
+    x %>% filter((grepl('Gross inland deliveries.*observed', nrg_bal) & siec=='Oil products') |
+                   (grepl('Direct use', nrg_bal) & grepl('Crude oil, NGL', siec))) %>%
+      mutate(sector='all')
+  }
+
+  filter_oil_yearly <- function(x){
+    x %>%
+      filter((grepl('Gross inland deliveries.*observed', nrg_bal) & siec=='Oil products') |
+                   (grepl('Direct use', nrg_bal) & grepl('Crude oil, NGL.*hydrocarbons$', siec))) %>%
+      mutate(sector='all')
+  }
+
+  filter_gas_monthly <- function(x){
+    x %>%
+      filter(grepl('Inland consumption.*observed|Transformation input', nrg_bal),
+             unit=='Million cubic metres') %>%
+      mutate(sector=ifelse(grepl('electricity', nrg_bal), 'electricity', 'all'))
+  }
+
+  filter_gas_yearly <- function(x){
+
+    # The values we are after aren't indicated in mcm
+    gcv <- x %>%
+      filter(values>0) %>%
+      tidyr::spread(unit, values) %>%
+      mutate(gcv=`Terajoule (gross calorific value - GCV)`/`Million cubic metres`) %>%
+      pull(gcv) %>%
+      median(na.rm=T)
+
+    x %>%
+      filter(grepl(paste('Inland consumption.*observed',
+                         'Transformation input - electricity and heat generation - main activity producer',
+                         sep='|'), nrg_bal),
+             grepl('Terajoule', unit)) %>%
+      mutate(values=values/gcv,
+             unit='Million cubic metres',
+             sector=ifelse(grepl('electricity', nrg_bal), 'electricity', 'all'))
+  }
+
+  deall_gas <- function(x){
+    x %>%
+      mutate(values=values*ifelse(sector=='electricity', -1, 1)) %>%
+      group_by(geo, time, unit, siec) %>%
+      summarise_at('values', sum, na.rm=T) %>%
+      mutate(sector='others') %>%
+      bind_rows(x %>% filter(sector=='electricity')) %>%
+      mutate(fuel_type='gas')
+  }
+
+  aggregate <- function(x){
+    lapply(names(x), function(commodity){
+      x[[commodity]] %>%
+        group_by(geo, sector, time, unit, siec) %>%
+        summarise_at('values', sum, na.rm=T) %>%
+        mutate(fuel_type=commodity)
+    }) %>%
+      `names<-`(names(x))
+  }
+
+  cons_monthly <- list(
+    coal = filter_coal_monthly(cons_monthly_raw$coal),
+    oil = filter_oil_monthly(cons_monthly_raw$oil),
+    gas = filter_gas_monthly(cons_monthly_raw$gas) %>% deall_gas()
+  ) %>%
+    aggregate()
+
+  cons_yearly <- list(
+    coal = filter_coal_yearly(cons_yearly_raw$coal),
+    oil = filter_oil_yearly(cons_yearly_raw$oil),
+    gas = filter_gas_yearly(cons_yearly_raw$gas) %>% deall_gas()
+  ) %>%
+    aggregate()
+
+
+  # Visual check that we kept the right sectors for each fuel
+  bind_rows(
+    do.call(bind_rows, cons_yearly) %>% mutate(source='yearly'),
+    do.call(bind_rows, cons_monthly) %>% mutate(source='monthly')) %>%
+
+    filter(grepl('European union', geo, T)) %>%
+    filter(siec %in% .[.$source=='monthly',]$siec) %>%
+    group_by(year=lubridate::year(time), siec, source, fuel_type, sector) %>%
+    summarise(values=sum(values)) %>%
+    ggplot(aes(year, values, col=siec, linetype=source)) +
+    geom_line() +
+    facet_grid(fuel_type~sector, scales='free_y') +
+    theme(legend.position = 'bottom')
+
+
+  # Seasonal adjusment
+  month_shares <- lapply(cons_monthly, function(cons){
+
+    month_shares <- cons %>%
+      group_by(sector, siec, unit, geo, fuel_type, year=lubridate::year(time)) %>%
+      mutate(count=n()) %>%
+      filter(count==12) %>%
+      group_by(sector, siec, unit, geo, fuel_type, month=lubridate::month(time)) %>%
+      summarise(values = sum(values, na.rm=T)) %>%
+      group_by(sector, siec, unit, geo, fuel_type) %>%
+      mutate(month_share = values / sum(values, na.rm=T)) %>%
+      mutate(month_share = replace_na(month_share, 1/12),
+             month_share = case_when(is.infinite(month_share) ~ 1/12,
+                                     T ~ month_share)
+      ) %>%
+      select(-c(values))
+
+    # Check ~1
+    if(!all(month_shares %>%
+            group_by(sector, siec, unit, geo, fuel_type) %>%
+            summarise(one=round(sum(month_share), 5)) %>%
+            pull(one) %>%
+            unique() == 1)){stop('Wrong monthly shares')}
+
+    return(month_shares)
+  })
+
+
+  # Apply monthly adjustment
+  cons_yearly_monthly <- lapply(names(cons_yearly), function(commodity){
+    cons_yearly[[commodity]] %>%
+      mutate(year=lubridate::year(time)) %>%
+      # filter(time < min(cons$coal$time)) %>%
+      inner_join(month_shares[[commodity]]) %>%
+      arrange(sector, siec, unit, geo, fuel_type, time) %>%
+      mutate(time=as.Date(sprintf('%s-%0d-01', year, month)),
+             values=values * month_share)   %>%
+      select(-c(year, month, month_share))
+  }) %>%
+    `names<-`(names(cons_yearly))
+
+  # Combine
+  cons_combined <- bind_rows(
+    do.call(bind_rows, cons_yearly_monthly) %>% mutate(source='yearly'),
+    do.call(bind_rows, cons_monthly) %>% mutate(source='monthly'),
+  ) %>%
+    ungroup()
+
+  # Visual check
+  cons_combined %>%
+    group_by(geo, sector, time, unit, siec, fuel_type) %>%
+    arrange(source) %>%
+    slice(1) %>%
+    ungroup() %>%
+    filter(grepl('European union', geo, T)) %>%
+    ggplot(aes(time, values, col=siec, linetype=source)) +
+    geom_line() +
+    facet_grid(fuel_type~sector, scales='free_y')
+
+  # Remove overlaps
+  cons <- cons_combined  %>%
+    group_by(geo, sector, time, unit, siec, values, fuel_type) %>%
+    arrange(source) %>%
+    # Keep monthly when both are available
+    slice(1) %>%
+    ungroup() %>%
+    select(-c(source)) %>%
+    split(.$fuel_type)
+
+  return(cons)
+}
 
 
 
