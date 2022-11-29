@@ -100,7 +100,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
       facet_wrap(~source, scales='free_y') +
       geom_ribbon(data=pwr_ranges %>% filter(country=='EU total'),
                   aes(ymin=min/1000, ymax=max/1000), fill=crea_palettes$CREA[2]) +
-      geom_line(aes(y=output_mw_rollmean/1000, col=as.factor(year)), size=1) +
+      geom_line(aes(y=output_mw_rollmean/1000, col=as.factor(year)), linewidth=1) +
       expand_limits(y=0) +
       # scale_x_datetime(date_labels = '%b') +
       labs(title='EU power generation by source', y='GW, 7-day mean', x='', col='', fill='') +
@@ -172,7 +172,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
   pwr %>% filter(source %in% c('Coal', 'Fossil Gas'), country=='EU total') %>%
     group_by(source) %>%
     mutate(crea_yoy = get_yoy(value_mw, date),
-           fuel_type = recode(source, 'Fossil Gas'='gas'),
+           fuel_type = recode(source, 'Fossil Gas'='gas', 'Coal'='coal'),
            sector='electricity') %>%
     rename(value=value_mw) ->
     pwr_yoy
