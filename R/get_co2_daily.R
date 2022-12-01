@@ -139,7 +139,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
     group_by(geo, time, fuel_type, sector) %>%
     summarise_at('CO2_emissions', sum, na.rm=T) %>%
     group_by(geo, fuel_type, sector) %>%
-    expand.dates('time', dts) %>% arrange(time) %>%
+    expand_dates('time', dts) %>% arrange(time) %>%
     group_modify(function(df, ...) {
       df %<>% group_by(month=month(time)) %>%
         mutate(mean3y = CO2_emissions %>% lag %>% zoo::rollapplyr(3, mean, na.rm=F, fill=NA),

@@ -2,8 +2,10 @@ export(get_co2_daily)
 export(upload_co2_daily)
 export(update_co2_daily)
 
-importFrom(countrycode,countrycode)
+importFrom(creahelpers,get_yoy)
+importFrom(creahelpers,expand_dates)
 
+importFrom(countrycode,countrycode)
 
 importFrom(dplyr,all_vars)
 importFrom(dplyr,across)
