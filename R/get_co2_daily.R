@@ -3,40 +3,14 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
 
   dir.create(diagnostic_folder, F, T)
 
-  #gas data
-  ng_all <- read_csv("https://api.russiafossiltracker.com/v0/overland?format=csv&date_from=2016-01-01&commodity=natural_gas")
-
-  types <- c('distribution','consumption','storage_entry','storage_exit','crossborder','production')
-  entsog <- seq(2016, lubridate::year(lubridate::today())) %>%
-    pbapply::pblapply(function(x){Sys.sleep(2);
-      read_csv(sprintf('https://api.russiafossiltracker.com/v0/entsogflow?format=csv&date_from=%s-01-01&date_to=%s-12-31&type=%s', x, x, paste0(types, collapse=',')))}) %>%
-    bind_rows()
-  
-  #Gas imports + production+ storage+ implied consumption
-  inflows <- ng_all %>%
-    filter(commodity_origin_country %in% c('Algeria', 'Azerbaijan', 'LNG', 'Libya', 'Netherlands', 'Albania', 'Russia',
-                                           'United Kingdom', 'Norway')) %>%
-    group_by(across(c(starts_with('destination'), date))) %>%
-    summarise(across(value_m3, sum)) %>%
-    mutate(type='imports')
-
-  storage_changes <- entsog %>% filter(type %in% c('storage_entry','storage_exit')) %>%
-    mutate(value_m3 = value_m3 * ifelse(type=='storage_exit', -1, 1)) %>%
-    group_by(across(c(starts_with('destination'), date))) %>%
-    summarise(across(value_m3, sum)) %>%
-    mutate(type='storage drawdown')
-
-  implied_cons <- entsog %>% filter(type == 'production') %>%
-    filter(commodity_origin_country %in% c('Algeria', 'LNG', 'Libya', 'Netherlands', 'Albania', 'Russia',
-                                           'United Kingdom', 'Norway')) %>%
-    bind_rows(inflows, storage_changes) %>%
-    group_by(across(c(starts_with('destination'), date))) %>%
-    summarise(across(value_m3, sum)) %>%
-    mutate(type='consumption')
+  allflows <- get_entsog()
+  implied_cons <- allflows %>% filter(type=='consumption')
 
   # Plot
   if(!is.null(diagnostic_folder)){
-    plt <- bind_rows(inflows, storage_changes, implied_cons, entsog %>% filter(type == 'production')) %>%
+    saveRDS(allflows, 'diagnostics/allflows.RDS')
+    
+    plt <- allflows %>%
       filter(destination_region=='EU') %>%
       group_by(type, date) %>%
       summarise(across(value_m3, sum, na.rm=T)) %>%
@@ -57,25 +31,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
            plot=plt, width=8, height=6, bg='white')
   }
 
-  #Power generation by source plus total Calvin plot
-  pwr <- read_csv('https://api.energyandcleanair.org/power/generation?date_from=2016-01-01&aggregate_by=country,source,date&format=csv&region=EU')
-
-  #add total generation
-  pwr <- pwr %>%
-    filter(source!='Total') %>%
-    group_by(region, country, date) %>%
-    dplyr::summarise_at("value_mw", sum, na.rm=T) %>%
-    mutate(source='Total') %>%
-    bind_rows(pwr %>% filter(source!='Total'))
-
-  #add EU total
-  pwr <- pwr %>%
-    filter(country!='EU total') %>%
-    group_by(date, source) %>%
-    filter(region=='EU') %>%
-    dplyr::summarise_at("value_mw", sum, na.rm=T) %>%
-    mutate(country='EU total') %>%
-    bind_rows(pwr %>% filter(country!='EU total'))
+  pwr <- get_entsoe()
 
   #add rolling mean
   pwr <- pwr %>%
@@ -93,6 +49,8 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
   #plot by source
   if(!is.null(diagnostic_folder)){
     library(rcrea)
+    
+    pwr %>% saveRDS('diagnostics/pwr.RDS')
 
     plt <- pwr %>% filter(date<max(date)-3, year %in% 2021:2022, country=='EU total') %>%
       group_by(country) %>% filter(mean(value_mw, na.rm=T)>1e3) %>%
@@ -127,8 +85,8 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
            CO2_emissions=values*CO2.factor) ->
     cons_agg
 
-  # save.image('EU energy data.RData')
-  # load('EU energy data.RData')
+  #save.image('diagnostics/EU energy data.RData')
+  
 
   #dates for which to output daily estimates
   dts <- cons %>% bind_rows() %>% use_series(time) %>% min() %>%
@@ -139,7 +97,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
     group_by(geo, time, fuel_type, sector) %>%
     summarise_at('CO2_emissions', sum, na.rm=T) %>%
     group_by(geo, fuel_type, sector) %>%
-    expand.dates('time', dts) %>% arrange(time) %>%
+    expand_dates('time', dts) %>% arrange(time) %>%
     group_modify(function(df, ...) {
       df %<>% group_by(month=month(time)) %>%
         mutate(mean3y = CO2_emissions %>% lag %>% zoo::rollapplyr(3, mean, na.rm=F, fill=NA),
@@ -157,7 +115,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
   #add EU
   cons_filled <- cons_filled %>%
     ungroup %>%
-    mutate(iso2c=countrycode(geo, 'country.name', 'iso2c'),
+    mutate(iso2c=countrycode::countrycode(geo, 'country.name', 'iso2c'),
            EU=iso2c %in% countrycode::codelist$iso2c[!is.na(countrycode::codelist$eu28)] & iso2c != 'GB')
 
   #aggregate by fuel type and sector
@@ -487,4 +445,61 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
 }
 
 
+get_entsoe <- function() {
+  #Power generation by source plus total Calvin plot
+  pwr <- read_csv('https://api.energyandcleanair.org/power/generation?date_from=2016-01-01&aggregate_by=country,source,date&format=csv&region=EU')
+  
+  #add total generation
+  pwr <- pwr %>%
+    filter(source!='Total') %>%
+    group_by(region, country, date) %>%
+    dplyr::summarise_at("value_mw", sum, na.rm=T) %>%
+    mutate(source='Total') %>%
+    bind_rows(pwr %>% filter(source!='Total'))
+  
+  #add EU total
+  pwr <- pwr %>%
+    filter(country!='EU total') %>%
+    group_by(date, source) %>%
+    filter(region=='EU') %>%
+    dplyr::summarise_at("value_mw", sum, na.rm=T) %>%
+    mutate(country='EU total') %>%
+    bind_rows(pwr %>% filter(country!='EU total'))
+  
+  return(pwr)
+}
 
+get_entsog <- function() {
+  #gas data
+  ng_all <- read_csv("https://api.russiafossiltracker.com/v0/overland?format=csv&date_from=2016-01-01&commodity=natural_gas")
+  
+  types <- c('distribution','consumption','storage_entry','storage_exit','crossborder','production')
+  entsog <- seq(2016, lubridate::year(lubridate::today())) %>%
+    pbapply::pblapply(function(x){Sys.sleep(2);
+      read_csv(sprintf('https://api.russiafossiltracker.com/v0/entsogflow?format=csv&date_from=%s-01-01&date_to=%s-12-31&type=%s', x, x, paste0(types, collapse=',')))}) %>%
+    bind_rows()
+  
+  #Gas imports + production+ storage+ implied consumption
+  inflows <- ng_all %>%
+    filter(commodity_origin_country %in% c('Algeria', 'Azerbaijan', 'LNG', 'Libya', 'Netherlands', 'Albania', 'Russia',
+                                           'United Kingdom', 'Norway')) %>%
+    group_by(across(c(starts_with('destination'), date))) %>%
+    summarise(across(value_m3, sum)) %>%
+    mutate(type='imports')
+  
+  storage_changes <- entsog %>% filter(type %in% c('storage_entry','storage_exit')) %>%
+    mutate(value_m3 = value_m3 * ifelse(type=='storage_exit', -1, 1)) %>%
+    group_by(across(c(starts_with('destination'), date))) %>%
+    summarise(across(value_m3, sum)) %>%
+    mutate(type='storage drawdown')
+  
+  implied_cons <- entsog %>% filter(type == 'production') %>%
+    filter(commodity_origin_country %in% c('Algeria', 'LNG', 'Libya', 'Netherlands', 'Albania', 'Russia',
+                                           'United Kingdom', 'Norway')) %>%
+    bind_rows(inflows, storage_changes) %>%
+    group_by(across(c(starts_with('destination'), date))) %>%
+    summarise(across(value_m3, sum)) %>%
+    mutate(type='consumption')
+  
+  bind_rows(inflows, storage_changes, implied_cons, entsog %>% filter(type == 'production'))
+}
