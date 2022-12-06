@@ -27,6 +27,6 @@ Imports:
     dbx,
     RPostgres
 Remotes:
-    energyandcleanair/creahelpers
+    energyandcleanair/creahelpers,
     energyandcleanair/rcrea
 RoxygenNote: 7.1.1
