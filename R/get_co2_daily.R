@@ -217,7 +217,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
 
   # Formatting for db
   co2_daily %>%
-    filter(date < max(entsog$date) - lubridate::days(3)) %>% 
+    filter(date < max(allflows$date) - lubridate::days(3)) %>% 
     mutate(region='EU',
            unit='t/day') %>%
     mutate(across(c(fuel_type, sector), stringr::str_to_title),
