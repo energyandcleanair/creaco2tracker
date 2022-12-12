@@ -2,6 +2,7 @@ require(tidyverse)
 require(magrittr)
 require(lubridate)
 require(rcrea)
+require(countrycode)
 
 source('R/get_co2_daily.R')
 
@@ -118,13 +119,18 @@ pwr <- readRDS('diagnostics/pwr.RDS')
 
 
 #hdd and cdd
-read_csv("https://api.energyandcleanair.org/v1/weather?variable=HDD,CDD&region_id=EU&format=csv") ->
+read_csv("https://api.energyandcleanair.org/v1/weather?variable=HDD,CDD&format=csv") ->
   dd
 
 dd %<>% mutate(across(variable, tolower))
 
-pwr_demand <- pwr %>% filter(country=='EU total', source=='Total')
-dd %>% select(date, variable, value) %>% spread(variable, value) %>% left_join(pwr_demand, .) -> pwr_demand
+pwr_demand <- pwr %>% filter(country=='EU total', source=='Total') %>% 
+  mutate(region_id = countrycode(country, 'country.name.en', 'iso2c', 
+                                 custom_match=c('EU total'='EU')))
+
+dd %>% select(region_id, date, variable, value) %>% 
+  spread(variable, value) %>% left_join(pwr_demand, .) -> pwr_demand
+
 pwr_demand %>% lm(value_mw ~ hdd + cdd + as.factor(wday(date)), data=.) -> m_pwr
 
 m_pwr %>% summary()
@@ -138,7 +144,7 @@ pwr_demand %>% mutate(anomaly = value_mw - value_mw_pred,
   filter(date>='2020-01-28') ->
   pwr_plotdata
 
-pwr_plotdata %>% 
+pwr_plotdata %>% filter(!grepl('corrected', name), date<today()-4) %>% 
   ggplot(aes(date, value, col=name)) + geom_line() +
   labs(title='EU power demand')
 
@@ -155,8 +161,10 @@ pwr_plotdata %>% group_by(name) %>%
 co2 %>% filter(sector=='Others', fuel=='Gas') %>% mutate(value_TWh = value / 55 / 3.6 / 1000) %>% 
   select(date, value_TWh) -> gas_demand
 
-dd %>% select(date, variable, value) %>% spread(variable, value) %>% left_join(gas_demand, .) -> gas_demand
-gas_demand %>% lm(value_TWh ~ hdd + as.factor(wday(date)), data=.) -> m_gas
+dd %>% select(region_id, date, variable, value) %>% 
+  spread(variable, value) %>% left_join(gas_demand, .) -> gas_demand
+gas_demand %>% filter(date>='2021-01-01') %>% 
+  lm(value_TWh ~ hdd + as.factor(wday(date)), data=.) -> m_gas
 
 m_gas %>% summary()
 predict(m_gas, gas_demand) -> gas_demand$value_TWh_pred
@@ -169,7 +177,7 @@ gas_demand %>% mutate(anomaly = value_TWh - value_TWh_pred,
   filter(date>='2020-01-28') ->
   gas_plotdata
 
-gas_plotdata %>% 
+gas_plotdata %>% filter(!grepl('corrected', name), date<today()-7) %>% 
   ggplot(aes(date, value, col=name)) + geom_line() +
   labs(title='EU gas demand',
        subtitle='outside power sector')
@@ -181,7 +189,7 @@ gas_plotdata %>% mutate(plotdate = date %>% 'year<-'(2022), year=year(date)) %>%
        subtitle='outside power sector')
 
 gas_plotdata %>% group_by(name) %>% 
-  mutate(yoy=get_yoy(value, date)) %>% select(yoy) %>% 
+  mutate(yoy=get_yoy(value, date)) %>% select(date, yoy) %>% 
   slice_tail(n=1)
 
 

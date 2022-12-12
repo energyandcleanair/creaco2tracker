@@ -194,43 +194,54 @@ quicksave(file.path(output_dir, 'Pipeline gas exports ZH.png'))
 
 
 #Power generation by source plus total Calvin plot
-read_csv('https://api.energyandcleanair.org/power/generation?date_from=2016-01-01&aggregate_by=country,source,date&format=csv') ->
+2016:2022 %>% 
+  lapply(function(yr) read_csv(paste0('https://api.energyandcleanair.org/power/generation?date_from=',
+  yr,'-01-01&date_to=',yr,'-12-31&aggregate_by=country,source,date&region=EU&format=csv'))) ->
   pwrdata
 
+pwrdata %<>% bind_rows %>% filter(region=='EU')
+
 #add total generation
-pwrdata %>% 
+pwrdata %<>% 
   filter(source!='Total') %>% 
   group_by(region, country, date) %>% 
   summarise(across(value_mw, sum, na.rm=T)) %>% 
   mutate(source='Total') %>% 
-  bind_rows(pwrdata %>% filter(source!='Total')) ->
-  pwr
+  bind_rows(pwrdata %>% filter(source!='Total'))
 
 #add EU total
-pwr %<>% filter(country!='EU total') %>% 
+pwrdata %<>% filter(country!='EU total') %>% 
   group_by(date, source) %>% 
   filter(region=='EU') %>% 
   summarise(across(value_mw, sum, na.rm=T)) %>% 
   mutate(country='EU total') %>% 
   bind_rows(pwr %>% filter(country!='EU total'))
 
+rollmean_date <- function(x, dates, width=7) {
+  x.out <- x
+  x.out[] <- NA
+  for(i in 1:length(x))
+    x.out[i] <- sum(x[dates %in% (dates[i]-0:(width-1))], na.rm=T)/width
+  return(x.out)
+}
+
 #add rolling mean
-pwr %<>% group_by(region, country, source) %>% arrange(date) %>% 
+pwrdata %<>% group_by(region, country, source) %>% arrange(date) %>% 
   mutate(date=date(date),
          plotdate = date %>% 'year<-'(2022), year=year(date),
          output_mw_rollmean=rollmean_date(value_mw, date, 28))
 
 #output range of values for several years
-pwr %>% filter(year %in% 2016:2021, date>min(date)+27) %>% 
+pwrdata %>% filter(year %in% 2016:2021, date>min(date)+27) %>% 
   group_by(region, country, source, plotdate) %>% 
   summarise(min=min(output_mw_rollmean), max=max(output_mw_rollmean)) ->
   pwr_ranges
 
 
 #plot by source
-pwr %>% filter(date<max(date)-3, year %in% 2021:2022, country=='EU total') %>% 
+pwrdata %>% filter(date<max(date)-3, year %in% 2021:2022, country=='EU total') %>% 
   group_by(country) %>% filter(mean(value_mw, na.rm=T)>1e3) %>% 
-  write_csv(file.path(output_dir, 'EU power generation by source.csv')) %>% 
+  #write_csv(file.path(output_dir, 'EU power generation by source.csv')) %>% 
   ggplot(aes(plotdate)) +
   facet_wrap(~source, scales='free_y') + 
   geom_ribbon(data=pwr_ranges %>% filter(country=='EU total'), 
@@ -272,7 +283,7 @@ quicksave(file.path(output_dir, 'EU power generation by source ZH.png'))
 
 #Thermal power fuel mix
 #plot fuel mix
-pwr %>% mutate(across(date, lubridate::date)) %>% 
+pwrdata %>% mutate(across(date, lubridate::date)) %>% 
   filter(source %in% c('Coal', 'Fossil Gas', 'Other'), 
          source != 'Total', year(date) %in% 2018:2022,
          country=='EU total') %>% 
