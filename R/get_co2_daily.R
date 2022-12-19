@@ -486,7 +486,7 @@ get_entsog <- function() {
   #Gas imports + production+ storage+ implied consumption
   inflows <- ng_all %>%
     filter(commodity_origin_country %in% c('Algeria', 'Azerbaijan', 'LNG', 'Libya', 'Netherlands', 'Albania', 'Russia',
-                                           'United Kingdom', 'Norway')) %>%
+                                           'United Kingdom', 'Norway', 'Tunisia')) %>%
     group_by(across(c(starts_with('destination'), date))) %>%
     summarise(across(value_m3, sum)) %>%
     mutate(type='imports')
