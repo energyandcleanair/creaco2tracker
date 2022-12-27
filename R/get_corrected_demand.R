@@ -191,7 +191,7 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
            unit='GW',
            frequency='daily',
            region_id='EU',
-           region_type='iso2')
+           region_type='region')
   
   return(bind_rows(corrected_gas_demand,
                    corrected_electricity_demand))

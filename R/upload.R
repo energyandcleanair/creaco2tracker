@@ -54,3 +54,23 @@ upload_corrected_demand <- function(corrected_demand, production=T, clear_all_fi
   dbx::dbxUpsert(db, "demand", p, where_cols=unique_cols)
   dbx::dbxDisconnect(db)
 }
+
+
+upload_gas_demand <- function(gas_demand, production=T, clear_all_first=F){
+  
+  print(sprintf("=== Uploading corrected_demand (%s) ===", ifelse(production,"production","development")))
+  
+  unique_cols <-  c('region_id', 'date', 'fuel', 'data_source', 'sector', 'unit', 'frequency')
+  
+  p <- gas_demand %>%
+    select(region_id, region_type, date, fuel, data_source, sector, unit, frequency, value)
+  
+  db <- dbx::dbxConnect(adapter="postgres",
+                        url=get_energy_pg_url(production=production))
+  if(clear_all_first){
+    dbx::dbxExecute(db, sprintf("DELETE FROM demand WHERE data_source='%s';", unique(gas_demand$data_source)))
+  }
+  
+  dbx::dbxUpsert(db, "demand", p, where_cols=unique_cols)
+  dbx::dbxDisconnect(db)
+}
