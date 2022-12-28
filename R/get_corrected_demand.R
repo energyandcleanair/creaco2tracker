@@ -2,8 +2,7 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
                                  use_co2_in_db=T){
 
   dir.create(diagnostic_folder, F, T)
-  
-  eu_members <- countrycode::codelist$iso2c[!is.na(countrycode::codelist$eu28)][-28]
+  eu_members <- setdiff(countrycode::codelist$iso2c[which(countrycode::codelist$eu28=="EU")], "GB")
   
   # load data
   # co2 <- get_co2_daily()
@@ -179,7 +178,7 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
            unit='TWh/day',
            frequency='daily',
            region_id='EU',
-           region_type='iso2')
+           region_type='region')
   
   corrected_electricity_demand <- pwr_model$data %>%
     ungroup() %>%

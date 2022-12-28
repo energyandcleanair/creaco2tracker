@@ -191,7 +191,8 @@ keep_best<- function(consumption, diagnostic_folder, min_r2=0.95, max_rrse=0.4){
              method,
              date=lubridate::floor_date(date, 'month')) %>%
     summarise(value_m3=sum(value_m3)) %>%
-    ungroup()
+    ungroup() %>%
+    tidyr::complete(date, method, iso2, fill=list(value_m3=0))
   
   
   rsq <- function (x, y) cor(x, y) ^ 2
