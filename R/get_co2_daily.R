@@ -4,7 +4,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
   dir.create(diagnostic_folder, F, T)
 
   gas_demand <- download_gas_demand(region_id='EU')
-  pwr <- get_entsoe()
+  pwr <- get_pwr_demand()
 
   #add rolling mean
   pwr <- pwr %>%
@@ -424,9 +424,9 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
 }
 
 
-get_entsoe <- function() {
+get_pwr_demand <- function(region=NULL) {
   #Power generation by source plus total Calvin plot
-  pwr <- read_csv('https://api.energyandcleanair.org/power/generation?date_from=2016-01-01&aggregate_by=country,source,date&format=csv&region=EU')
+  pwr <- read_csv('https://api.energyandcleanair.org/power/generation?date_from=2016-01-01&aggregate_by=country,source,date&format=csv&region=EU') 
   
   #add total generation
   pwr <- pwr %>%
