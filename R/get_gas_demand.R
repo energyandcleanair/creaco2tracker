@@ -27,7 +27,7 @@ get_gas_demand <- function(diagnostic_folder='diagnostics'){
   apparent <- get_gas_demand_apparent(years=years)
   
   # Keep the best ones, and only those that match quality criteria
-  keep_best(consumption=bind_rows(consdist,apparent),
+  gas_demand <- keep_best(consumption=bind_rows(consdist,apparent),
             min_comparison_points = 12,
             diagnostic_folder=diagnostic_folder,
             min_r2=0.95,
