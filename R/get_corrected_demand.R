@@ -20,7 +20,7 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
   
   
   gas_demand2 <- download_gas_demand(region_id='EU') %>%
-    mutate(value_TWh=value*gcv_kWh_per_m3/1e9)
+    mutate(value_TWh=value*gcv_kWh_m3/1e9)
   
   
   bind_rows(gas_demand1 %>% mutate(source='co2'), gas_demand2 %>% mutate(source='demand') %>% filter(region_id=='EU')) %>%
