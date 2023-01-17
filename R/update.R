@@ -12,3 +12,9 @@ update_corrected_demand <- function(production=T){
   corrected_demand <- get_corrected_demand()
   upload_corrected_demand(corrected_demand, production=production)
 }
+
+update_all <- function(production=T){
+  update_gas_demand(production=production)
+  update_co2_daily(production=production)
+  update_corrected_demand(production=production)
+}
