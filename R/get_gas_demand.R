@@ -25,9 +25,12 @@ get_gas_demand <- function(diagnostic_folder='diagnostics'){
   # Estimate with two different methods
   consdist <- get_gas_demand_consdist(years=years)
   apparent <- get_gas_demand_apparent(years=years)
+  apparent_w_agsi <- get_gas_demand_apparent(years=years, use_agsi_for_storage=T)
   
   # Keep the best ones, and only those that match quality criteria
-  gas_demand <- keep_best(consumption=bind_rows(consdist,apparent),
+  gas_demand <- keep_best(consumption=bind_rows(consdist,
+                                                apparent,
+                                                apparent_w_agsi),
             min_comparison_points = 12,
             diagnostic_folder=diagnostic_folder,
             min_r2=0.95,
@@ -87,7 +90,7 @@ get_gas_demand_consdist <- function(years){
 #' @export
 #'
 #' @examples
-get_gas_demand_apparent <- function(years){
+get_gas_demand_apparent <- function(years, use_agsi_for_storage=F){
   
   
   eu_iso2 <- setdiff(countrycode::codelist$iso2c[which(countrycode::codelist$eu28=="EU")], "GB")
@@ -99,6 +102,25 @@ get_gas_demand_apparent <- function(years){
       read_csv(sprintf('https://api.russiafossiltracker.com/v0/entsogflow?format=csv&date_from=%s-01-01&date_to=%s-12-31&type=%s', x, x, paste0(types, collapse=',')),
                show_col_types = FALSE)}) %>%
     bind_rows()
+  
+  
+  if(use_agsi_for_storage){
+    # In some instances, AGSI is better than ENTSOG
+    # Well, at least for Austria which has no storage data in ENTSOG
+    storage_drawdown <- agsi.get_storage_change(date_from=min(entsog$date),
+                                                date_to=max(entsog$date),
+                                                iso2=eu_iso2)
+    entsog <- entsog %>%
+      filter(type!='storage') %>%
+      bind_rows(
+        storage_drawdown %>%
+          select(destination_iso2=iso2,
+                 date,
+                 value_m3) %>%
+          mutate(type='storage')
+      )
+  }
+  
   
   # We're missing some flows within EU, so we take at the borders only
   # i.e. not doing this: entsog_eu <- entsog %>%
@@ -140,7 +162,6 @@ get_gas_demand_apparent <- function(years){
   
   storage_drawdown <- entsog_all %>%
     filter(type %in% c('storage')) %>%
-    # mutate(value_m3 = value_m3) %>%
     group_by(destination_iso2, date) %>%
     summarise(across(value_m3, sum)) %>%
     mutate(type='storage_drawdown')
@@ -157,7 +178,7 @@ get_gas_demand_apparent <- function(years){
     ungroup() %>%
     tidyr::complete(date=seq.Date(min(entsog$date), max(entsog$date), by='day'),
                     fill=list(value_m3=0)) %>%
-    mutate(method='apparent')
+    mutate(method=ifelse(use_agsi_for_storage, 'apparent_agsi', 'apparent'))
   
   return(apparent)
 }
@@ -200,6 +221,9 @@ keep_best<- function(consumption,
   # We test the correlation for several starting dates
   # The older the better, but often it becomes accurate only after a certain date
   date_froms <- seq.Date(as.Date(min_start), as.Date(max_start), by='month')
+  consumption_date_to <- consumption %>%
+    group_by(iso2, method) %>%
+    summarise(date_to=max(date))
   
   consumption_monthly <- consumption %>%
     filter(date < max(lubridate::floor_date(date, 'month'))) %>%
@@ -229,13 +253,21 @@ keep_best<- function(consumption,
     do.call(bind_rows, .)
   
   best <- bests %>%
+    left_join(consumption_date_to) %>%
     filter(valid, count >= min_comparison_points) %>%
     group_by(iso2) %>%
     arrange(date_from) %>%
     # Avoid initial gaps
-    filter(rrse < lead(rrse + 0.02)) %>%
+    filter(rrse < lead(rrse) + 0.02) %>%
+    # Avoid sub-optimal
+    filter(rrse < min(rrse) + 0.1) %>%
+    # Avoid those that aren't updated
+    filter(date_to > max(date_to) - lubridate::days(10)) %>%
+    # Take earlier one
     filter(date_from==min(date_from)) %>%
-    filter(r2==max(r2))
+    filter(r2==max(r2)) %>%
+    # Sometimes apparent strictly equivalent to apparent_asgi
+    distinct(iso2, .keep_all = T)
   
   if(!is.null(diagnostic_folder)){
     plt <- best %>%
@@ -251,13 +283,15 @@ keep_best<- function(consumption,
       mutate(country = countrycode::countrycode(iso2, 'iso2c', 'country.name',
                                                 custom_match = c('EU'='EU'))) %>%
       mutate(method=factor(method,
-                           levels=c('apparent', 'consdist', 'eurostat'),
+                           levels=c('apparent', 'apparent_agsi', 'consdist', 'eurostat'),
                            labels=c('CREA estimate',
+                                    'CREA estimate',
                                     'CREA estimate',
                                     'Eurostat'))) %>%
       ggplot() +
       geom_line(aes(date, value_m3/1e6, col=method, size=method)) +
-      facet_wrap(~country, scales='free_y') +
+      facet_wrap(~country, scales='free_y',
+                 ncol=3) +
       rcrea::scale_y_crea_zero() +
       scale_color_manual(values=c('Apparent consumption'=rcrea::pal_crea[['Turquoise']],
                                   'Reported consumtion'=rcrea::pal_crea[['Blue']],
@@ -269,17 +303,20 @@ keep_best<- function(consumption,
                                  'CREA estimate'=1,
                                   'Eurostat'=0.3
       )) +
-      labs(title='Fossil gas consumption',
-           subtitle='CREA estimate vs Eurostat',
+      labs(title='Fossil gas consumption - CREA estimate vs Eurostat',
+           subtitle='Million cubic meter per month',
            x=NULL,
-           y='mcm / month',
+           y=NULL,
            color=NULL,
            size=NULL,
            caption='Note: Only the best estimate is shown for each country.') +
-      rcrea::theme_crea() 
+      rcrea::theme_crea() +
+      theme(legend.position = 'bottom') +
+      guides(size=guide_legend(nrow=1),
+             color=guide_legend(nrow=1))
     plt
     ggsave(filename=file.path(diagnostic_folder, 'gas_consumption_estimates.png'),
-           plot=plt, width=10, height=6, bg='white')
+           plot=plt, width=10, height=10, bg='white')
   }
   
   best %>%
