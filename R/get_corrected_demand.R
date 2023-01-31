@@ -13,28 +13,24 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
   }
   
   
-  gas_demand1 <- co2 %>%
+  gas_demand <- co2 %>%
     filter(sector=='Others', fuel=='Gas') %>%
     mutate(value_TWh = value / 55 / 3.6 / 1000) %>% 
     select(date, value_TWh)
   
+  # gas_demand2 <- download_gas_demand(region_id='EU') %>%
+  #   mutate(value_TWh=value*gcv_kwh_m3/1e9)
+  # 
+  # 
+  # bind_rows(gas_demand1 %>% mutate(source='co2'), gas_demand2 %>% mutate(source='demand') %>% filter(region_id=='EU')) %>%
+  #   ggplot() +
+  #   geom_line(aes(date, value_TWh, col=source))
+  #   
+  #   filter(sector=='Others', fuel=='Gas') %>%
+  #   mutate(value_TWh = value / 55 / 3.6 / 1000) %>% 
+  #   select(date, value_TWh)
   
-  gas_demand2 <- download_gas_demand(region_id='EU') %>%
-    mutate(value_TWh=value*gcv_kWh_m3/1e9)
-  
-  
-  bind_rows(gas_demand1 %>% mutate(source='co2'), gas_demand2 %>% mutate(source='demand') %>% filter(region_id=='EU')) %>%
-    ggplot() +
-    geom_line(aes(date, value_TWh, col=source))
-    
-    filter(sector=='Others', fuel=='Gas') %>%
-    mutate(value_TWh = value / 55 / 3.6 / 1000) %>% 
-    select(date, value_TWh)
-  
-  
-  
-  
-  pwr <- get_entsoe()
+  pwr <- get_pwr_demand()
   
   pwr_demand <- pwr %>% 
     filter(region=='EU') %>%
