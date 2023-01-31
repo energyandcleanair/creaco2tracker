@@ -270,7 +270,8 @@ keep_best<- function(consumption,
     distinct(iso2, .keep_all = T)
   
   if(!is.null(diagnostic_folder)){
-    plt <- best %>%
+    
+    plt_data <- best %>%
       ungroup() %>%
       left_join(consumption_monthly) %>%
       filter(date >= date_from) %>%
@@ -287,8 +288,8 @@ keep_best<- function(consumption,
                            labels=c('CREA estimate',
                                     'CREA estimate',
                                     'CREA estimate',
-                                    'Eurostat'))) %>%
-      ggplot() +
+                                    'Eurostat')))
+    plt <- ggplot(plt_data) +
       geom_line(aes(date, value_m3/1e6, col=method, size=method)) +
       facet_wrap(~country, scales='free_y',
                  ncol=3) +
@@ -317,6 +318,11 @@ keep_best<- function(consumption,
     plt
     ggsave(filename=file.path(diagnostic_folder, 'gas_consumption_estimates.png'),
            plot=plt, width=10, height=10, bg='white')
+    
+    # Export a version for Flourish
+    plt_data %>%
+      tidyr::spread(method, value_m3) %>%
+      write_csv(file.path(diagnostic_folder, 'gas_consumption_estimates_wide.csv'))
   }
   
   best %>%
