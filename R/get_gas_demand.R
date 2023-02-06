@@ -22,6 +22,8 @@
 get_gas_demand <- function(diagnostic_folder='diagnostics'){
   years <- seq(2018, lubridate::year(lubridate::today()))
   
+  if(!is.null(diagnostic_folder)) dir.create(diagnostic_folder)
+  
   # Estimate with two different methods
   consdist <- get_gas_demand_consdist(years=years)
   apparent <- get_gas_demand_apparent(years=years)
