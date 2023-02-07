@@ -7,6 +7,8 @@ require(countrycode)
 
 source('R/get_co2_daily.R')
 
+load('Feb2023.RData')
+
 co2 <- get_co2_daily()
 saveRDS(co2, 'diagnostics/CO2.RDS')
 co2 <- readRDS('diagnostics/CO2.RDS')
@@ -25,8 +27,9 @@ co2 %<>% filter(fuel == 'Gas', sector %in% c('Electricity', 'Others')) %>%
 
 dates_to_label <- tibble(date=ymd(c('2020-03-11', '2022-02-24')),
                          value=3e6,
-                         event=c('WHO declares COVID-19 pandemic',
-                                 'Russia invades Ukraine'))
+                         event=c('世卫组织宣布 COVID-19 大流行
+俄罗斯入侵乌克兰'),
+                         eventZH=c('', '俄国'))
 
 co2 %>% 
   group_by(fuel, date) %>% summarise(across(value, sum)) %>% 
@@ -34,31 +37,40 @@ co2 %>%
   filter(!grepl('total', fuel, ignore.case=T), date>='2005-01-01') ->
   coal_plotdata
 
+showtext_auto(enable=F)
 coal_plotdata %>% filter(fuel=='Coal') %>% 
   ggplot(aes(date, value/1e6*365)) + 
   geom_area(fill=crea_palettes$CREA[2]) +
   geom_vline(data=dates_to_label, aes(xintercept=date), linetype='dotted', linewidth=1) +
   geom_smooth(data=coal_plotdata %>% filter(year(date) %in% 2005:2019, fuel=='Coal'),
               method='lm', fullrange=T, aes(color='pre-pandemic trend')) +
-  geom_label(data=dates_to_label, aes(label=event), hjust=1, nudge_y=c(0,-70), nudge_x=-80) +
+  #geom_label(data=dates_to_label, aes(label=event), hjust=1, nudge_y=c(0,-70), nudge_x=-80, angle=90) +
   theme_crea(legend.position='top') +
   labs(title='EU CO2 emissions from coal', x='', y='Mt/year, 12-month rolling mean', color='') +
   scale_color_crea_d(guide=guide_legend(override.aes = list(fill=NA))) +
-  snug_x_date + x_at_zero() ->
+  scale_x_date(date_breaks = '2 years', expand=expansion(), date_labels = '%Y') + 
+  x_at_zero() ->
   plt
-quicksave(file.path(output_dir, 'EU CO2 emissions from coal.png'), plot=plt)
+quicksave(file.path(output_dir, 'EU CO2 emissions from coal nolabel.png'), plot=plt)
+
+library(showtext)
+showtext_auto(enable=T)
 
 coal_plotdata %>% filter(fuel=='Coal') %>% 
-  ggplot(aes(date, value/1e6*365)) + 
+  ggplot(aes(date, value/1e8*365)) + 
   geom_area(fill=crea_palettes$CREA[2]) +
   geom_vline(data=dates_to_label, aes(xintercept=date), linetype='dotted', linewidth=1) +
   geom_smooth(data=coal_plotdata %>% filter(year(date) %in% 2005:2019, fuel=='Coal'),
-              method='lm', fullrange=T, aes(color='新冠疫情之前的趋势')) +
-  geom_label(data=dates_to_label, aes(label=event), hjust=1, nudge_y=c(0,-70), nudge_x=-80) +
+              method='lm', fullrange=T, aes(color='非新冠疫情影响的常态排放趋势')) +
+  #geom_label(data=dates_to_label, aes(label=event), hjust=1, nudge_y=c(0,-70), nudge_x=-80) +
   theme_crea(legend.position='top') +
-  labs(title='欧盟燃煤碳排放', x='', y='亿吨/年，12个月移动平均', color='') +
-  scale_color_crea_d(guide=guide_legend(override.aes = list(fill=NA))) +
-  snug_x_date + x_at_zero() ->
+  theme(text = element_text(family = "Source Sans", size=32, lineheight=1),
+        plot.title = element_text(size=48),
+        legend.title = element_text(size=10)) +
+  labs(title='欧盟煤炭消费产生的碳排放量', x='', y='亿吨/年，12个月移动平均') +
+  scale_color_crea_d(guide=guide_legend(override.aes = list(fill=NA)), name=' ') +
+  scale_x_date(date_breaks = '2 years', expand=expansion(), date_labels = '%Y年') + 
+  x_at_zero() ->
   plt
 quicksave(file.path(output_dir, 'EU CO2 emissions from coal ZH.png'), plot=plt)
 
