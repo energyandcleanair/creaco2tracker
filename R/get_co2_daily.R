@@ -453,42 +453,42 @@ get_pwr_demand <- function(region=NULL) {
 
 
 
-get_entsog <- function() {
-  
-  #gas data
-  ng_all <- seq(2016, lubridate::year(lubridate::today())) %>%
-    pbapply::pblapply(function(x){Sys.sleep(2);
-      read_csv(sprintf('https://api.russiafossiltracker.com/v0/overland?format=csv&date_from=%s-01-01&date_to=%s-12-31&commodity=natural_gas&bypass_maintenance=true', x, x))}) %>%
-    bind_rows()
-  
-  types <- c('distribution','consumption','storage_entry','storage_exit','crossborder','production')
-  entsog <- seq(2016, lubridate::year(lubridate::today())) %>%
-    pbapply::pblapply(function(x){Sys.sleep(2);
-      read_csv(sprintf('https://api.russiafossiltracker.com/v0/entsogflow?format=csv&date_from=%s-01-01&date_to=%s-12-31&type=%s', x, x, paste0(types, collapse=',')))}) %>%
-    bind_rows()
-  
-  #Gas imports + production+ storage+ implied consumption
-  inflows <- ng_all %>%
-    filter(commodity_origin_country %in% c('Algeria', 'Azerbaijan', 'LNG', 'Libya', 'Netherlands', 'Albania', 'Russia',
-                                           'United Kingdom', 'Norway', 'Tunisia')) %>%
-    group_by(across(c(starts_with('destination'), date))) %>%
-    summarise(across(value_m3, sum)) %>%
-    mutate(type='imports')
-  
-  storage_changes <- entsog %>% filter(type %in% c('storage_entry','storage_exit')) %>%
-    mutate(value_m3 = value_m3 * ifelse(type=='storage_exit', -1, 1)) %>%
-    group_by(across(c(starts_with('destination'), date))) %>%
-    summarise(across(value_m3, sum)) %>%
-    mutate(type='storage drawdown')
-  
-  implied_cons <- entsog %>% filter(type == 'production') %>%
-    filter(commodity_origin_country %in% c('Algeria', 'LNG', 'Libya', 'Netherlands', 'Albania', 'Russia',
-                                           'United Kingdom', 'Norway')) %>%
-    bind_rows(inflows, storage_changes) %>%
-    group_by(across(c(starts_with('destination'), date))) %>%
-    summarise(across(value_m3, sum)) %>%
-    mutate(type='consumption')
-  
-  bind_rows(inflows, storage_changes, implied_cons, entsog %>% filter(type == 'production'))
-}
+# get_entsog <- function() {
+#   
+#   #gas data
+#   ng_all <- seq(2016, lubridate::year(lubridate::today())) %>%
+#     pbapply::pblapply(function(x){Sys.sleep(2);
+#       read_csv(sprintf('https://api.russiafossiltracker.com/v0/overland?format=csv&date_from=%s-01-01&date_to=%s-12-31&commodity=natural_gas&bypass_maintenance=true', x, x))}) %>%
+#     bind_rows()
+#   
+#   types <- c('distribution','consumption','storage_entry','storage_exit','crossborder','production')
+#   entsog <- seq(2016, lubridate::year(lubridate::today())) %>%
+#     pbapply::pblapply(function(x){Sys.sleep(2);
+#       read_csv(sprintf('https://api.russiafossiltracker.com/v0/entsogflow?format=csv&date_from=%s-01-01&date_to=%s-12-31&type=%s', x, x, paste0(types, collapse=',')))}) %>%
+#     bind_rows()
+#   
+#   #Gas imports + production+ storage+ implied consumption
+#   inflows <- ng_all %>%
+#     filter(commodity_origin_country %in% c('Algeria', 'Azerbaijan', 'LNG', 'Libya', 'Netherlands', 'Albania', 'Russia',
+#                                            'United Kingdom', 'Norway', 'Tunisia')) %>%
+#     group_by(across(c(starts_with('destination'), date))) %>%
+#     summarise(across(value_m3, sum)) %>%
+#     mutate(type='imports')
+#   
+#   storage_changes <- entsog %>% filter(type %in% c('storage_entry','storage_exit')) %>%
+#     mutate(value_m3 = value_m3 * ifelse(type=='storage_exit', -1, 1)) %>%
+#     group_by(across(c(starts_with('destination'), date))) %>%
+#     summarise(across(value_m3, sum)) %>%
+#     mutate(type='storage drawdown')
+#   
+#   implied_cons <- entsog %>% filter(type == 'production') %>%
+#     filter(commodity_origin_country %in% c('Algeria', 'LNG', 'Libya', 'Netherlands', 'Albania', 'Russia',
+#                                            'United Kingdom', 'Norway')) %>%
+#     bind_rows(inflows, storage_changes) %>%
+#     group_by(across(c(starts_with('destination'), date))) %>%
+#     summarise(across(value_m3, sum)) %>%
+#     mutate(type='consumption')
+#   
+#   bind_rows(inflows, storage_changes, implied_cons, entsog %>% filter(type == 'production'))
+# }
 

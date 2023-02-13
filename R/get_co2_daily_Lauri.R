@@ -446,6 +446,9 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
 
 
 get_entsoe <- function() {
+  
+  pwr <- read_csv('https://api.energyandcleanair.org/power/generation?date_from=2016-01-01&aggregate_by=country,source,date&format=csv&region=EU')
+  
   #Power generation by source plus total Calvin plot
   pwr <- pwr %>%
     filter(source!='Total') %>%
@@ -461,7 +464,7 @@ get_entsoe <- function() {
     filter(region=='EU') %>%
     dplyr::summarise_at("value_mw", sum, na.rm=T) %>%
     mutate(country='EU total') %>%
-    bind_rows(pwr %>% filter(country!='EU total'))  pwr <- read_csv('https://api.energyandcleanair.org/power/generation?date_from=2016-01-01&aggregate_by=country,source,date&format=csv&region=EU')
+    bind_rows(pwr %>% filter(country!='EU total'))  
   
   #add total generation
   
