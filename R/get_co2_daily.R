@@ -195,7 +195,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
   }
 
   # Formatting for db
-  co2_daily %>%
+  co2_daily <- co2_daily %>%
     filter(date < min(max(pwr$date), max(gas_demand$date)) - lubridate::days(3)) %>% 
     mutate(region='EU',
            unit='t/day') %>%
@@ -203,6 +203,8 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
            frequency='daily',
            version=as.character(packageVersion("creaco2tracker"))) %>%
     select(region, date, fuel=fuel_type, sector, unit, frequency, version, value=CO2_hybrid)
+  
+  return(co2_daily)
 }
 
 
@@ -456,7 +458,7 @@ get_entsog <- function() {
   #gas data
   ng_all <- seq(2016, lubridate::year(lubridate::today())) %>%
     pbapply::pblapply(function(x){Sys.sleep(2);
-      read_csv(sprintf('https://api.russiafossiltracker.com/v0/overland?format=csv&date_from=%s-01-01&date_to=%s-12-31&commodity=natural_gas', x, x))}) %>%
+      read_csv(sprintf('https://api.russiafossiltracker.com/v0/overland?format=csv&date_from=%s-01-01&date_to=%s-12-31&commodity=natural_gas&bypass_maintenance=true', x, x))}) %>%
     bind_rows()
   
   types <- c('distribution','consumption','storage_entry','storage_exit','crossborder','production')
