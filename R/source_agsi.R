@@ -7,7 +7,7 @@ agsi.get_storage_change <- function(date_from, date_to, iso2){
     data <- jsonlite::read_json(url)
     data <- data$data
     data <- lapply(data, function(x){x$info=NULL; as.data.frame(x)}) %>%
-      do.call(bind_rows, .) %>%
+      data.table::rbindlist() %>%
       tibble()
     
     if(nrow(data)==0 || !'netWithdrawal' %in% names(data)){
