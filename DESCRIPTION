@@ -3,7 +3,7 @@ Type: Package
 Title: CO2 tracker from CREA
 Version: 0.2
 Authors@R: c(
-    person("Lauri", "Myllyvirta", email = "lauri@energyandcleanair.org", role = c("cre", "aut"));
+    person("Lauri", "Myllyvirta", email = "lauri@energyandcleanair.org", role = c("cre", "aut")),
     person("Hubert", "Thieriot", email = "hubert@energyandcleanair.org", role = c("aut"))
     )
 Maintainer: Hubert Thieriot <hubert@energyandcleanair.org>
