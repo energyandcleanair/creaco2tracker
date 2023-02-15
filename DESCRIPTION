@@ -1,9 +1,10 @@
 Package: creaco2tracker
 Type: Package
 Title: CO2 tracker from CREA
-Version: 0.1
+Version: 0.2
 Authors@R: c(
-    person("Lauri", "Myllyvirta", email = "lauri@energyandcleanair.org", role = c("cre", "aut"))
+    person("Lauri", "Myllyvirta", email = "lauri@energyandcleanair.org", role = c("cre", "aut"));
+    person("Hubert", "Thieriot", email = "hubert@energyandcleanair.org", role = c("aut"))
     )
 Maintainer: Hubert Thieriot <hubert@energyandcleanair.org>
 Description: A R package to estimate daily EU CO2 emissions using EUROSTAT, ENTSOG and ENTSOE data. Include functions to upload results in CREA's database.
