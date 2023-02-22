@@ -39,7 +39,7 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
     mutate(source='Total', country='EU total')
   
   # hdd and cdd
-  read_csv("https://api.energyandcleanair.org/v1/weather?variable=HDD,CDD&format=csv") %>% 
+  read_csv("https://api.energyandcleanair.org/v1/weather?variable=HDD,CDD&format=csv&region_id=EU") %>% 
     mutate(across(variable, tolower)) ->
     dd
   

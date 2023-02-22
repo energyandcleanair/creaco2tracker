@@ -1,20 +1,20 @@
 
-get_co2_daily <- function(diagnostic_folder='diagnostics', 
+get_co2_daily_lauri <- function(diagnostic_folder='diagnostics',
                           rollmean_days=28){
 
   dir.create(diagnostic_folder, F, T)
 
   implied_cons_all <- get_entsog()
 
-  implied_cons_all %>% filter(commodity_destination_region=='EU') %>% 
+  implied_cons_all %>% filter(commodity_destination_region=='EU') %>%
     group_by(date) %>% summarise(across(value_m3, sum, na.rm=T)) ->
     implied_cons
-  
+
   # Plot
   if(!is.null(diagnostic_folder)){
     saveRDS(implied_cons_all, file.path(diagnostic_folder, 'implied_cons.RDS'))
-    
-    plt <- implied_cons %>% 
+
+    plt <- implied_cons %>%
       mutate(value_m3=zoo::rollapplyr(value_m3, rollmean_days, mean, fill=NA),
              plotdate=date %>% 'year<-'(2022), year=as.factor(year(date))) %>%
       filter(year(date) %in% 2021:2023, date<max(date)-7) %>%
@@ -49,7 +49,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics',
   #plot by source
   if(!is.null(diagnostic_folder)){
     library(rcrea)
-    
+
     pwr %>% saveRDS(file.path(diagnostic_folder, 'pwr.RDS'))
 
     plt <- pwr %>% filter(date<max(date)-3, year %in% 2021:2023, country=='EU total') %>%
@@ -86,7 +86,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics',
     cons_agg
 
   #save.image('diagnostics/EU energy data.RData')
-  
+
 
   #dates for which to output daily estimates
   dts <- cons %>% bind_rows() %>% use_series(time) %>% min() %>%
@@ -135,7 +135,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics',
     rename(value=value_mw) ->
     pwr_yoy
 
-  implied_cons %>% 
+  implied_cons %>%
     group_by(date) %>%
     summarise(across(value_m3, sum)) %>%
     mutate(crea_yoy = get_yoy(value_m3, date), fuel_type='gas', sector='all') %>%
@@ -217,7 +217,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics',
 
   # Formatting for db
   co2_daily %>%
-    filter(date < max(implied_cons$date) - lubridate::days(3)) %>% 
+    filter(date < max(implied_cons$date) - lubridate::days(3)) %>%
     mutate(region='EU',
            unit='t/day') %>%
     mutate(across(c(fuel_type, sector), stringr::str_to_title),
@@ -329,14 +329,14 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
 
 
   # Visual check that we kept the right sectors for each fuel
-  
+
   if(!is.null(diagnostic_folder)){
     library(rcrea)
-    
+
     plt <- bind_rows(
       do.call(bind_rows, cons_yearly) %>% mutate(source='yearly'),
       do.call(bind_rows, cons_monthly) %>% mutate(source='monthly')) %>%
-      
+
       filter(grepl('European union', geo, T)) %>%
       filter(siec %in% .[.$source=='monthly',]$siec) %>%
       group_by(year=lubridate::year(time), siec, source, fuel_type, sector) %>%
@@ -346,7 +346,7 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
       facet_grid(fuel_type~sector, scales='free_y') +
       theme(legend.position = 'bottom') +
       rcrea::scale_y_crea_zero()
-    
+
     ggsave(file.path(diagnostic_folder,'eurostat_annual_vs_monthly_yearly.png'), plot=plt, width=8, height=6, bg='white')
   }
 
@@ -412,9 +412,9 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
       facet_grid(fuel_type~sector, scales='free_y') +
       theme(legend.position='bottom')+
       rcrea::scale_y_crea_zero()
-    
+
     ggsave(file.path(diagnostic_folder,'eurostat_annual_vs_monthly_monthly.png'), plot=plt, width=8, height=6, bg='white')
-    
+
     plt <- cons_combined %>%
       group_by(geo, sector, time, unit, siec, fuel_type) %>%
       arrange(source) %>%
@@ -426,10 +426,10 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
       facet_grid(fuel_type~sector, scales='free_y') +
       theme(legend.position='bottom')+
       rcrea::scale_y_crea_zero()
-    
+
     ggsave(file.path(diagnostic_folder,'eurostat_combined.png'), plot=plt, width=8, height=6, bg='white')
   }
-  
+
 
   # Remove overlaps
   cons <- cons_combined  %>%
@@ -446,6 +446,9 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
 
 
 get_entsoe <- function() {
+
+  pwr <- read_csv('https://api.energyandcleanair.org/power/generation?date_from=2016-01-01&aggregate_by=country,source,date&format=csv&region=EU')
+
   #Power generation by source plus total Calvin plot
   pwr <- pwr %>%
     filter(source!='Total') %>%
@@ -453,7 +456,7 @@ get_entsoe <- function() {
     dplyr::summarise_at("value_mw", sum, na.rm=T) %>%
     mutate(source='Total') %>%
     bind_rows(pwr %>% filter(source!='Total'))
-  
+
   #add EU total
   pwr <- pwr %>%
     filter(country!='EU total') %>%
@@ -461,11 +464,11 @@ get_entsoe <- function() {
     filter(region=='EU') %>%
     dplyr::summarise_at("value_mw", sum, na.rm=T) %>%
     mutate(country='EU total') %>%
-    bind_rows(pwr %>% filter(country!='EU total'))  pwr <- read_csv('https://api.energyandcleanair.org/power/generation?date_from=2016-01-01&aggregate_by=country,source,date&format=csv&region=EU')
-  
+    bind_rows(pwr %>% filter(country!='EU total'))
+
   #add total generation
-  
-  
+
+
   return(pwr)
 }
 
@@ -474,11 +477,11 @@ get_entsog <- function(start_date='2016-01-01', end_date=lubridate::today(),
                        types='consumption') {
   #gas data
   dates <- seq.Date(ymd(start_date), ymd(end_date), by='30 days')
-  
+
   data=list()
   for(i in seq_along(dates)[-1]) {
     message('getting data...', dates[i])
-    read_csv(sprintf('https://api.russiafossiltracker.com/v0/entsogflow?format=csv&date_from=%s&date_to=%s&type=%s', 
+    read_csv(sprintf('https://api.russiafossiltracker.com/v0/entsogflow?format=csv&date_from=%s&date_to=%s&type=%s',
                      dates[i-1], dates[i], types)) ->
       data[[i]]
     Sys.sleep(2)
@@ -490,21 +493,21 @@ get_entsog <- function(start_date='2016-01-01', end_date=lubridate::today(),
 
 get_entsog_old <- function(years=seq(2016, lubridate::year(lubridate::today()))) {
   #gas data
-  
+
   years %>% lapply(function(yr) {
     Sys.sleep(2)
     paste0("https://api.russiafossiltracker.com/v0/overland?format=csv&date_from=",yr,
-           "-01-01&date_to=",yr,"-12-31&commodity=natural_gas") %>% 
+           "-01-01&date_to=",yr,"-12-31&commodity=natural_gas") %>%
     read_csv()
   }) %>% bind_rows ->ng_all
-  
+
   types <- c('distribution','consumption','storage_entry','storage_exit','crossborder','production')
   entsog <- years %>%
     pbapply::pblapply(function(x){
       Sys.sleep(2);
       read_csv(sprintf('https://api.russiafossiltracker.com/v0/entsogflow?format=csv&date_from=%s-01-01&date_to=%s-12-31&type=%s', x, x, paste0(types, collapse=',')))}) %>%
     bind_rows()
-  
+
   #Gas imports + production+ storage+ implied consumption
   inflows <- ng_all %>%
     filter(commodity_origin_country %in% c('Algeria', 'Azerbaijan', 'LNG', 'Libya', 'Netherlands', 'Albania', 'Russia',
@@ -512,13 +515,13 @@ get_entsog_old <- function(years=seq(2016, lubridate::year(lubridate::today())))
     group_by(across(c(starts_with('destination'), date))) %>%
     summarise(across(value_m3, sum)) %>%
     mutate(type='imports')
-  
+
   storage_changes <- entsog %>% filter(type %in% c('storage_entry','storage_exit')) %>%
     mutate(value_m3 = value_m3 * ifelse(type=='storage_exit', -1, 1)) %>%
     group_by(across(c(starts_with('destination'), date))) %>%
     summarise(across(value_m3, sum)) %>%
     mutate(type='storage drawdown')
-  
+
   implied_cons <- entsog %>% filter(type == 'production') %>%
     filter(commodity_origin_country %in% c('Algeria', 'LNG', 'Libya', 'Netherlands', 'Albania', 'Russia',
                                            'United Kingdom', 'Norway')) %>%
@@ -526,6 +529,6 @@ get_entsog_old <- function(years=seq(2016, lubridate::year(lubridate::today())))
     group_by(across(c(starts_with('destination'), date))) %>%
     summarise(across(value_m3, sum)) %>%
     mutate(type='consumption')
-  
+
   bind_rows(inflows, storage_changes, implied_cons, entsog %>% filter(type == 'production'))
 }
