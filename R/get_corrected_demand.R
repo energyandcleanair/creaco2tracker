@@ -117,6 +117,7 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
   pwr_demand %>%
     rename(value=value_mw) %>% 
     mutate(value=value/1e3, name='electricity demand', unit='GW') %>%
+    mutate(date=as.Date(date)) %>%
     fit_model() ->
     pwr_model
   
@@ -124,6 +125,7 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
     filter(date>='2021-01-01') %>% 
     rename(value=value_TWh) %>% 
     mutate(name='gas demand outside the power sector', unit='TWh/day') %>%
+    mutate(date=as.Date(date)) %>%
     fit_model() ->
     gas_model
   
@@ -136,6 +138,7 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
     dd_plot
   
   plt <- dd_plot %>% 
+    mutate(plotdate=as.Date(plotdate)) %>%
     mutate(year=as.factor(year(date)),
            variable_name=ifelse(variable=='cdd', 'cooling', 'heating')) %>% 
     ggplot(aes(plotdate, value, alpha=year, col=variable_name)) + 
@@ -158,6 +161,7 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
   
   
   plt_zh <- dd_plot %>% 
+    mutate(plotdate=as.Date(plotdate)) %>%
     mutate(year=as.factor(paste0(year(date),'年')),
            variable_name=ifelse(variable=='cdd', '制冷', '采暖')) %>% 
     ggplot(aes(plotdate, value, alpha=year, col=variable_name)) + 
