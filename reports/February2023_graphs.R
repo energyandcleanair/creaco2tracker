@@ -26,10 +26,9 @@ co2 %<>% filter(fuel == 'Gas', sector %in% c('Electricity', 'Others')) %>%
   bind_rows(co2)
 
 dates_to_label <- tibble(date=ymd(c('2020-03-11', '2022-02-24')),
-                         value=3e6,
-                         event=c('世卫组织宣布 COVID-19 大流行
-俄罗斯入侵乌克兰'),
-                         eventZH=c('', '俄国'))
+                         event=c('WHO declares COVID-19 pandemic',
+                                 'Russia invades Ukraine'),
+                         eventZH=c('世卫组织宣布新冠大流行', '俄罗斯入侵乌克兰'))
 
 co2 %>% 
   group_by(fuel, date) %>% summarise(across(value, sum)) %>% 
@@ -37,14 +36,21 @@ co2 %>%
   filter(!grepl('total', fuel, ignore.case=T), date>='2005-01-01') ->
   coal_plotdata
 
+library(showtext)
 showtext_auto(enable=F)
 coal_plotdata %>% filter(fuel=='Coal') %>% 
-  ggplot(aes(date, value/1e6*365)) + 
+  mutate(value=value/1e6*365) %>% 
+  (function(df) {
+    df %>% filter(year(date) %in% 2005:2019) %>% 
+      lm(value~date, data=.) -> m
+    df %>% mutate(trend=predict(m, df))
+  }) %>% 
+  write_csv('~/EU CO2 emissions from coal.csv') %>% 
+  ggplot(aes(date, value)) + 
   geom_area(fill=crea_palettes$CREA[2]) +
   geom_vline(data=dates_to_label, aes(xintercept=date), linetype='dotted', linewidth=1) +
-  geom_smooth(data=coal_plotdata %>% filter(year(date) %in% 2005:2019, fuel=='Coal'),
-              method='lm', fullrange=T, aes(color='pre-pandemic trend')) +
-  #geom_label(data=dates_to_label, aes(label=event), hjust=1, nudge_y=c(0,-70), nudge_x=-80, angle=90) +
+  geom_smooth(aes(y=trend, color='pre-pandemic trend')) +
+  geom_label(data=dates_to_label, aes(y=1000, label=event), hjust=1, nudge_y=c(0,-70), nudge_x=-80, angle=90) +
   theme_crea(legend.position='top') +
   labs(title='EU CO2 emissions from coal', x='', y='Mt/year, 12-month rolling mean', color='') +
   scale_color_crea_d(guide=guide_legend(override.aes = list(fill=NA))) +
@@ -53,7 +59,6 @@ coal_plotdata %>% filter(fuel=='Coal') %>%
   plt
 quicksave(file.path(output_dir, 'EU CO2 emissions from coal nolabel.png'), plot=plt)
 
-library(showtext)
 showtext_auto(enable=T)
 
 coal_plotdata %>% filter(fuel=='Coal') %>% 
@@ -62,7 +67,7 @@ coal_plotdata %>% filter(fuel=='Coal') %>%
   geom_vline(data=dates_to_label, aes(xintercept=date), linetype='dotted', linewidth=1) +
   geom_smooth(data=coal_plotdata %>% filter(year(date) %in% 2005:2019, fuel=='Coal'),
               method='lm', fullrange=T, aes(color='非新冠疫情影响的常态排放趋势')) +
-  #geom_label(data=dates_to_label, aes(label=event), hjust=1, nudge_y=c(0,-70), nudge_x=-80) +
+  geom_label(data=dates_to_label, aes(y=10, label=eventZH), hjust=1, nudge_y=c(0,-.7), nudge_x=-80, size=10) +
   theme_crea(legend.position='top') +
   theme(text = element_text(family = "Source Sans", size=32, lineheight=1),
         plot.title = element_text(size=48),
@@ -110,13 +115,16 @@ pwr_ranges <- pwr %>% filter(year %in% 2015:2021) %>%
   summarise(min=min(output_mw_rollmean, na.rm=T), max=max(output_mw_rollmean, na.rm=T))
 
 
-pwr %>% filter(date<max(date)-3, year %in% 2021:2023, country=='EU total') %>%
+pwr %>% left_join(pwr_ranges) %>% 
+  filter(date<max(date)-3, year %in% 2021:2023, country=='EU total') %>%
   group_by(country) %>% filter(mean(value_mw, na.rm=T)>1e3) %>%
+  select(date, source, country, plotdate, year, output_mw_rollmean, min, max) %>% 
+  mutate(across(c(output_gw_rollmean=output_mw_rollmean, min, max), ~.x/1000)) %>% 
+  write_csv('~/EU power generation by source.csv') %>% 
   ggplot(aes(plotdate)) +
   facet_wrap(~source, scales='free_y', ncol=2) +
-  geom_ribbon(data=pwr_ranges %>% filter(country=='EU total'),
-              aes(ymin=min/1000, ymax=max/1000, fill='2016–2021 range')) +
-  geom_line(aes(y=output_mw_rollmean/1000, col=as.factor(year)), linewidth=1) +
+  geom_ribbon(aes(ymin=min, ymax=max, fill='2016–2021 range')) +
+  geom_line(aes(y=output_gw_rollmean, col=as.factor(year)), linewidth=1) +
   expand_limits(y=0) +
   # scale_x_datetime(date_labels = '%b') +
   labs(title='EU power generation by source', y='GW, 30-day mean', x='', col='', fill='') +
