@@ -7,15 +7,6 @@ get_pg_url <- function(production){
   }
 }
 
-get_energy_pg_url <- function(production){
-  readRenviron(".Renviron")
-  if(production){
-    Sys.getenv("POWER_DB_PRODUCTION")
-  }else{
-    Sys.getenv("POWER_DB_DEVELOPMENT")
-  }
-}
-
 upload_co2_daily <- function(co2_daily, production=T, clear_all_first=F){
 
   print(sprintf("=== Uploading co2_daily (%s) ===", ifelse(production,"production","development")))
@@ -46,12 +37,12 @@ upload_corrected_demand <- function(corrected_demand, production=T, clear_all_fi
     select(region_id, region_type, date, fuel, data_source, sector, unit, frequency, value)
   
   db <- dbx::dbxConnect(adapter="postgres",
-                        url=get_energy_pg_url(production=production))
+                        url=get_pg_url(production=production))
   if(clear_all_first){
-    dbx::dbxExecute(db, sprintf("DELETE FROM demand WHERE data_source='%s';", unique(gas_demand$data_source)))
+    dbx::dbxExecute(db, sprintf("DELETE FROM energy.demand WHERE data_source='%s';", unique(gas_demand$data_source)))
   }
-  
-  dbx::dbxUpsert(db, "demand", p, where_cols=unique_cols)
+  table <- DBI::Id(schema="energy", table="demand")
+  dbx::dbxUpsert(db, table, p, where_cols=unique_cols)
   dbx::dbxDisconnect(db)
 }
 
@@ -66,14 +57,14 @@ upload_gas_demand <- function(gas_demand, production=T, clear_all_first=F){
     select(region_id, region_type, date, fuel, data_source, sector, unit, frequency, value)
   
   db <- dbx::dbxConnect(adapter="postgres",
-                        url=get_energy_pg_url(production=production))
+                        url=get_pg_url(production=production))
   if(clear_all_first){
-    dbx::dbxExecute(db, sprintf("DELETE FROM demand WHERE fuel='%s' and sector='%s' and data_source='%s';",
+    dbx::dbxExecute(db, sprintf("DELETE FROM energy.demand WHERE fuel='%s' and sector='%s' and data_source='%s';",
                                 unique(gas_demand$fuel),
                                 unique(gas_demand$sector),
                                 unique(gas_demand$data_source)))
   }
-  
-  dbx::dbxUpsert(db, "demand", p, where_cols=unique_cols)
+  table <- DBI::Id(schema="energy", table="demand")
+  dbx::dbxUpsert(db, table, p, where_cols=unique_cols)
   dbx::dbxDisconnect(db)
 }
