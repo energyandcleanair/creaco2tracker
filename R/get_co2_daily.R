@@ -120,7 +120,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
   bind_rows(pwr_yoy, gas_yoy) %>%
     ungroup %>%
     mutate(date=as.Date(date)) %>%
-    filter(date<=today()-5) %>%
+    filter(date<=max(gas_yoy$date) - lubridate::days(3)) %>%
     select(date, fuel_type, sector, crea_value=value, crea_yoy) ->
     crea_yoy
 
