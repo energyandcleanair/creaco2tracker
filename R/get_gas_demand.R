@@ -187,7 +187,7 @@ get_gas_demand_apparent <- function(years, use_agsi_for_storage=F){
 
 
 get_eurostat_gas <- function(years){
-  gas_consumption <- get_eurostat_from_code("nrg_cb_gasm")
+  gas_consumption <- eurostat::get_eurostat("nrg_cb_gasm")
   gas_consumption %>%
     filter(unit=='MIO_M3',
            siec=="G3000") %>%
@@ -201,7 +201,7 @@ get_eurostat_gas <- function(years){
     )) %>%
     filter(!is.na(type)) %>%
     mutate(values=ifelse(type %in% c('minus_exports', 'storage'), -values, values)) %>%
-    select(iso2=geo, date=time, value_m3=values, type) %>%
+    select(iso2=geo, date=TIME_PERIOD, value_m3=values, type) %>%
     mutate(value_m3=value_m3*1e6,
            unit='m3',
            iso2=recode(iso2, 'UK'='GB', 'EU27_2020'='EU'),
