@@ -208,13 +208,15 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
 }
 
 
-get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
+get_eurostat_from_code <- function(code){
 
-  get_eurostat_from_code <- function(code){
     eurostat::get_eurostat(code) %>%
-      eurostat::label_eurostat(code="nrg_bal") %>% # Keep nrg_bal code as well
-      dplyr::rename(time=TIME_PERIOD) # Column changed with new EUROSTAT version
-  }
+    eurostat::label_eurostat(code="nrg_bal") %>% # Keep nrg_bal code as well
+    dplyr::rename(time=TIME_PERIOD) # Column changed with new EUROSTAT version
+}
+
+
+get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
 
   consumption_codes = c("nrg_cb_sffm", "nrg_cb_oilm", "nrg_cb_gasm")
   cons_monthly_raw <- consumption_codes %>% lapply(get_eurostat_from_code)
