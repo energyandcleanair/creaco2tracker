@@ -22,7 +22,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
   #plot by source
   if(!is.null(diagnostic_folder)){
     library(rcrea)
-    
+
     pwr %>% saveRDS('diagnostics/pwr.RDS')
 
     plt <- pwr %>%
@@ -61,7 +61,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
     cons_agg
 
   #save.image('diagnostics/EU energy data.RData')
-  
+
 
   #dates for which to output daily estimates
   dts <- cons %>% bind_rows() %>% use_series(time) %>% min() %>%
@@ -196,26 +196,32 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
 
   # Formatting for db
   co2_daily <- co2_daily %>%
-    filter(date < min(max(pwr$date), max(gas_demand$date)) - lubridate::days(3)) %>% 
+    filter(date < min(max(pwr$date), max(gas_demand$date)) - lubridate::days(3)) %>%
     mutate(region='EU',
            unit='t/day') %>%
     mutate(across(c(fuel_type, sector), stringr::str_to_title),
            frequency='daily',
            version=as.character(packageVersion("creaco2tracker"))) %>%
     select(region, date, fuel=fuel_type, sector, unit, frequency, version, value=CO2_hybrid)
-  
+
   return(co2_daily)
 }
 
 
 get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
 
-  consumption_codes = c("nrg_cb_sffm","nrg_cb_oilm","nrg_cb_gasm")
-  cons_monthly_raw <- consumption_codes %>% lapply(eurostat::get_eurostat) %>% lapply(eurostat::label_eurostat)
+  get_eurostat_from_code <- function(code){
+    eurostat::get_eurostat(code) %>%
+      eurostat::label_eurostat(code="nrg_bal") %>% # Keep nrg_bal code as well
+      dplyr::rename(time=TIME_PERIOD) # Column changed with new EUROSTAT version
+  }
+
+  consumption_codes = c("nrg_cb_sffm", "nrg_cb_oilm", "nrg_cb_gasm")
+  cons_monthly_raw <- consumption_codes %>% lapply(get_eurostat_from_code)
   names(cons_monthly_raw) <- c('coal', 'oil', 'gas')
 
   consumption_codes_yearly = c("nrg_cb_sff", "nrg_cb_oil", "nrg_cb_gas")
-  cons_yearly_raw <- consumption_codes_yearly %>% lapply(eurostat::get_eurostat) %>% lapply(eurostat::label_eurostat)
+  cons_yearly_raw <- consumption_codes_yearly %>% lapply(get_eurostat_from_code)
   names(cons_yearly_raw) <- c('coal', 'oil', 'gas')
 
   filter_coal_monthly <- function(x){
@@ -235,16 +241,21 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
   }
 
   filter_oil_monthly <- function(x){
-    x %>% filter((grepl('Gross inland deliveries.*observed', nrg_bal) & siec=='Oil products') |
-                   (grepl('Direct use', nrg_bal) & grepl('Crude oil, NGL', siec))) %>%
+    x %>%
+      filter((grepl('Gross inland deliveries.*observed', nrg_bal) & siec=='Oil products') |
+               (grepl('Direct use', nrg_bal) & grepl('Crude oil, NGL', siec))) %>%
       mutate(sector='all')
+               # (nrg_bal_code == "TI_EHG_MAPE" & siec=='Oil products')) %>%
+      # mutate(sector=ifelse(grepl('electricity', nrg_bal), 'electricity', 'all'))
   }
 
   filter_oil_yearly <- function(x){
     x %>%
       filter((grepl('Gross inland deliveries.*observed', nrg_bal) & siec=='Oil products') |
-                   (grepl('Direct use', nrg_bal) & grepl('Crude oil, NGL.*hydrocarbons$', siec))) %>%
+               (grepl('Direct use', nrg_bal) & grepl('Crude oil, NGL.*hydrocarbons$', siec))) %>%
       mutate(sector='all')
+               # (nrg_bal_code == "TI_EHG_MAPE" & siec=='Oil products')) %>%
+      # mutate(sector=ifelse(grepl('electricity', nrg_bal), 'electricity', 'all'))
   }
 
   filter_gas_monthly <- function(x){
@@ -310,14 +321,14 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
 
 
   # Visual check that we kept the right sectors for each fuel
-  
+
   if(!is.null(diagnostic_folder)){
     library(rcrea)
-    
+
     plt <- bind_rows(
       do.call(bind_rows, cons_yearly) %>% mutate(source='yearly'),
       do.call(bind_rows, cons_monthly) %>% mutate(source='monthly')) %>%
-      
+
       filter(grepl('European union', geo, T)) %>%
       filter(siec %in% .[.$source=='monthly',]$siec) %>%
       group_by(year=lubridate::year(time), siec, source, fuel_type, sector) %>%
@@ -327,7 +338,7 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
       facet_grid(fuel_type~sector, scales='free_y') +
       theme(legend.position = 'bottom') +
       rcrea::scale_y_crea_zero()
-    
+
     ggsave(file.path(diagnostic_folder,'eurostat_annual_vs_monthly_yearly.png'), plot=plt, width=8, height=6, bg='white')
   }
 
@@ -393,9 +404,9 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
       facet_grid(fuel_type~sector, scales='free_y') +
       theme(legend.position='bottom')+
       rcrea::scale_y_crea_zero()
-    
+
     ggsave(file.path(diagnostic_folder,'eurostat_annual_vs_monthly_monthly.png'), plot=plt, width=8, height=6, bg='white')
-    
+
     plt <- cons_combined %>%
       group_by(geo, sector, time, unit, siec, fuel_type) %>%
       arrange(source) %>%
@@ -407,10 +418,10 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
       facet_grid(fuel_type~sector, scales='free_y') +
       theme(legend.position='bottom')+
       rcrea::scale_y_crea_zero()
-    
+
     ggsave(file.path(diagnostic_folder,'eurostat_combined.png'), plot=plt, width=8, height=6, bg='white')
   }
-  
+
 
   # Remove overlaps
   cons <- cons_combined  %>%
@@ -428,25 +439,25 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
 
 get_pwr_demand <- function(region=NULL) {
   #Power generation by source plus total Calvin plot
-  pwr <- read_csv('https://api.energyandcleanair.org/power/generation?date_from=2016-01-01&aggregate_by=country,source,date&format=csv&region=EU') 
-  
+  pwr <- read_csv('https://api.energyandcleanair.org/power/generation?date_from=2016-01-01&aggregate_by=country,source,date&format=csv&region=EU')
+
   #add total generation
   pwr <- pwr %>%
     filter(source!='Total') %>%
     group_by(region, country, date) %>%
-    dplyr::summarise_at("value_mw", sum, na.rm=T) %>%
+    dplyr::summarise_at(c("value_mw", "value_mwh"), sum, na.rm=T) %>%
     mutate(source='Total') %>%
     bind_rows(pwr %>% filter(source!='Total'))
-  
+
   #add EU total
   pwr <- pwr %>%
     filter(country!='EU total') %>%
     group_by(date, source) %>%
     filter(region=='EU') %>%
-    dplyr::summarise_at("value_mw", sum, na.rm=T) %>%
+    dplyr::summarise_at(c("value_mw", "value_mwh"), sum, na.rm=T) %>%
     mutate(country='EU total') %>%
     bind_rows(pwr %>% filter(country!='EU total'))
-  
+
   return(pwr)
 }
 
@@ -454,19 +465,19 @@ get_pwr_demand <- function(region=NULL) {
 
 
 # get_entsog <- function() {
-#   
+#
 #   #gas data
 #   ng_all <- seq(2016, lubridate::year(lubridate::today())) %>%
 #     pbapply::pblapply(function(x){Sys.sleep(2);
 #       read_csv(sprintf('https://api.russiafossiltracker.com/v0/overland?format=csv&date_from=%s-01-01&date_to=%s-12-31&commodity=natural_gas&bypass_maintenance=true', x, x))}) %>%
 #     bind_rows()
-#   
+#
 #   types <- c('distribution','consumption','storage_entry','storage_exit','crossborder','production')
 #   entsog <- seq(2016, lubridate::year(lubridate::today())) %>%
 #     pbapply::pblapply(function(x){Sys.sleep(2);
 #       read_csv(sprintf('https://api.russiafossiltracker.com/v0/entsogflow?format=csv&date_from=%s-01-01&date_to=%s-12-31&type=%s', x, x, paste0(types, collapse=',')))}) %>%
 #     bind_rows()
-#   
+#
 #   #Gas imports + production+ storage+ implied consumption
 #   inflows <- ng_all %>%
 #     filter(commodity_origin_country %in% c('Algeria', 'Azerbaijan', 'LNG', 'Libya', 'Netherlands', 'Albania', 'Russia',
@@ -474,13 +485,13 @@ get_pwr_demand <- function(region=NULL) {
 #     group_by(across(c(starts_with('destination'), date))) %>%
 #     summarise(across(value_m3, sum)) %>%
 #     mutate(type='imports')
-#   
+#
 #   storage_changes <- entsog %>% filter(type %in% c('storage_entry','storage_exit')) %>%
 #     mutate(value_m3 = value_m3 * ifelse(type=='storage_exit', -1, 1)) %>%
 #     group_by(across(c(starts_with('destination'), date))) %>%
 #     summarise(across(value_m3, sum)) %>%
 #     mutate(type='storage drawdown')
-#   
+#
 #   implied_cons <- entsog %>% filter(type == 'production') %>%
 #     filter(commodity_origin_country %in% c('Algeria', 'LNG', 'Libya', 'Netherlands', 'Albania', 'Russia',
 #                                            'United Kingdom', 'Norway')) %>%
@@ -488,7 +499,7 @@ get_pwr_demand <- function(region=NULL) {
 #     group_by(across(c(starts_with('destination'), date))) %>%
 #     summarise(across(value_m3, sum)) %>%
 #     mutate(type='consumption')
-#   
+#
 #   bind_rows(inflows, storage_changes, implied_cons, entsog %>% filter(type == 'production'))
 # }
 
