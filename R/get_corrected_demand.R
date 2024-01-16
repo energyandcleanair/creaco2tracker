@@ -33,15 +33,27 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
   pwr <- get_pwr_demand()
 
   pwr_demand <- pwr %>%
-    filter(region=='EU') %>%
-    group_by(region, date) %>%
+    filter(region=='EU', source=='Total') %>%
+    group_by(source, region, date) %>%
     dplyr::summarise(across(value_mw, sum, na.rm=T)) %>%
-    mutate(source='Total', country='EU')
+    mutate(country='EU')
 
   # hdd and cdd
   read_csv("https://api.energyandcleanair.org/v1/weather?variable=HDD,CDD&format=csv&region_id=EU") %>%
     mutate(across(variable, tolower)) ->
     dd
+
+  # Fill na values
+  dd %>%
+    mutate(date=lubridate::date(date)) %>%
+    ungroup() %>%
+    tidyr::complete(date=seq.Date(min(date), max(date), by='day'),
+                    tidyr::nesting(variable, unit, region_id, region_type, region_iso2, averaging_period, source, region_name)) %>%
+    group_by(variable, unit, region_id, region_type, region_iso2, averaging_period, source, region_name) %>%
+    arrange(date) %>%
+    ungroup() %>%
+    fill(value) ->
+  dd
 
   #defaults for saving plots
   quicksave <- function(file, width=8, height=6, bg='white', ...) {

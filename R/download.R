@@ -45,6 +45,27 @@ download_electricity <- function(region_id=NULL, data_source=NULL){
     rename(region_id=iso2)
 }
 
+download_corrected_demand <- function(region_id=NULL, sector='total'){
+
+  # https://api.energyandcleanair.org/energy/demand?fuel=electricity_temperature_corrected&region_id=EU&format=csv&aggregate_by=year,date_without_year,fuel,sector,region_id&date_from=2019-01-01&pivot_by=year&rolling_days=7&pivot_fill_value=nan&rolling_fill_with_zero=False&sector=total&columns_order=date_without_year
+  params <- list(
+    fuel='electricity_temperature_corrected,fossil_gas_temperature_corrected',
+    sector=sector,
+    date_from='2015-01-01',
+    format='csv',
+    region_id=region_id
+  )
+
+  # Remove null elements
+  params <- purrr::compact(params)
+
+  # Create URL params
+  url_params <- paste(names(params), params, sep = "=", collapse = "&")
+
+  readr::read_csv(sprintf('https://api.energyandcleanair.org/energy/demand?%s', url_params)) %>%
+    select(region_id, date, fuel, sector, unit, frequency, value)
+}
+
 
 #' Get power plant effiency directly from IEA data.
 #'
