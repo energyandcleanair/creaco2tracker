@@ -439,9 +439,9 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
 }
 
 
-get_pwr_demand <- function(region=NULL) {
+get_pwr_demand <- function(date_from="2016-01-01", region=NULL) {
   #Power generation by source plus total Calvin plot
-  pwr <- read_csv('https://api.energyandcleanair.org/power/generation?date_from=2016-01-01&aggregate_by=country,source,date&format=csv&region=EU')
+  pwr <- read_csv('https://api.energyandcleanair.org/power/generation?date_from={date_from}&aggregate_by=country,source,date&format=csv&region=EU')
 
   #add total generation
   pwr <- pwr %>%
