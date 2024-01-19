@@ -458,7 +458,8 @@ get_pwr_demand <- function(date_from="2016-01-01", region=NULL) {
     filter(region=='EU') %>%
     dplyr::summarise_at(c("value_mw", "value_mwh"), sum, na.rm=T) %>%
     mutate(country='EU total') %>%
-    bind_rows(pwr %>% filter(country!='EU total'))
+    bind_rows(pwr %>% filter(country!='EU total')) %>%
+    ungroup()
 
   return(pwr)
 }
