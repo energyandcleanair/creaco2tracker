@@ -10,7 +10,8 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
   pwr <- pwr %>%
     group_by(region, country, source) %>%
     arrange(date) %>%
-    mutate(plotdate = date %>% 'year<-'(2022), year=year(date),
+    mutate(plotdate = date %>% 'year<-'(2022),
+           year=year(date),
            output_mw_rollmean=zoo::rollapplyr(value_mw, 7, mean, fill=NA))
 
   #output range of values for several years
@@ -64,7 +65,10 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
   
 
   #dates for which to output daily estimates
-  dts <- cons %>% bind_rows() %>% use_series(time) %>% min() %>%
+  dts <- cons %>%
+    bind_rows() %>%
+    use_series(time) %>%
+    min() %>%
     seq.Date(today() %>% 'day<-'(1), by='month')
 
   #fill data to present assuming deviation from 3-year average stays same as in last 3 months of data
