@@ -67,7 +67,8 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
                         plot_moving_average_days=7) {
     dd %>%
       select(region_id, date, variable, value) %>%
-      filter(region_id %in% countries) %>%
+      filter(region_id %in% countries,
+             date %in% data$date) %>%
       unite(variable, variable, region_id) %>%
       spread(variable, value) %>%
       left_join(data, .) -> modeldata
