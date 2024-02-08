@@ -61,8 +61,6 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
            CO2_emissions=values*CO2.factor) ->
     cons_agg
 
-  #save.image('diagnostics/EU energy data.RData')
-
 
   #dates for which to output daily estimates
   dts <- cons %>%
@@ -76,8 +74,10 @@ get_co2_daily <- function(diagnostic_folder='diagnostics'){
     group_by(geo, time, fuel_type, sector) %>%
     summarise_at('CO2_emissions', sum, na.rm=T) %>%
     group_by(geo, fuel_type, sector) %>%
-    expand_dates('time', dts) %>% arrange(time) %>%
+    expand_dates('time', dts) %>%
+    arrange(time) %>%
     group_modify(function(df, ...) {
+
       df %<>% group_by(month=month(time)) %>%
         mutate(mean3y = CO2_emissions %>% lag %>% zoo::rollapplyr(3, mean, na.rm=F, fill=NA),
                yoy = CO2_emissions / mean3y - 1) %>% ungroup %>% select(-month)
@@ -444,8 +444,13 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
 
 
 get_pwr_demand <- function(date_from="2016-01-01", region=NULL) {
+
   #Power generation by source plus total Calvin plot
-  pwr <- read_csv(glue('https://api.energyandcleanair.org/power/generation?date_from={date_from}&aggregate_by=country,source,date&format=csv&region=EU'))
+  pwr <- creahelpers::api.get('api.energyandcleanair.org/power/generation',
+                              date_from=date_from,
+                              aggregate_by='country,source,date',
+                              region='EU',
+                              split_by = 'year')
 
   #add total generation
   pwr <- pwr %>%

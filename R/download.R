@@ -1,5 +1,5 @@
 download_co2_daily <- function(date_from="2015-01-01"){
-  readr::read_csv(glue('https://api.energyandcleanair.org/co2/emission?date_from={date_from}&format=csv')) %>%
+  creahelpers::api.get("api.energyandcleanair.org/co2/emission", date_from=date_from) %>%
     select(region, date, fuel, sector, unit, frequency, value, version)
 }
 
@@ -16,10 +16,7 @@ download_gas_demand <- function(region_id=NULL){
   # Remove null elements
   params <- purrr::compact(params)
 
-  # Create URL params
-  url_params <- paste(names(params), params, sep = "=", collapse = "&")
-
-  readr::read_csv(sprintf('https://api.energyandcleanair.org/energy/demand?%s', url_params)) %>%
+  creahelpers::api.get("api.energyandcleanair.org/energy/demand", params=params) %>%
     select(region_id, date, fuel, sector, unit, frequency, value)
 }
 
@@ -38,10 +35,7 @@ download_electricity <- function(region_id=NULL, data_source=NULL){
   params <- purrr::compact(params)
 
   # Create URL params
-  url_params <- paste(names(params), params, sep = "=", collapse = "&")
-
-
-  readr::read_csv(sprintf('https://api.energyandcleanair.org/power/generation?%s', url_params)) %>%
+  creahelpers::api.get("api.energyandcleanair.org/power/generation", params=params, split_by = 'year') %>%
     rename(region_id=iso2)
 }
 
@@ -59,10 +53,7 @@ download_corrected_demand <- function(region_id=NULL, sector='total'){
   # Remove null elements
   params <- purrr::compact(params)
 
-  # Create URL params
-  url_params <- paste(names(params), params, sep = "=", collapse = "&")
-
-  readr::read_csv(sprintf('https://api.energyandcleanair.org/energy/demand?%s', url_params)) %>%
+  creahelpers::api.get("api.energyandcleanair.org/energy/demand", params=params) %>%
     select(region_id, date, fuel, sector, unit, frequency, value)
 }
 
@@ -93,7 +84,7 @@ download_thermal_efficiency <- function(region_id=NULL){
   # Create URL params
   url_params <- paste(names(params), params, sep = "=", collapse = "&")
 
-  eff <- readr::read_csv(sprintf('https://api.energyandcleanair.org/energy/iea_balance?%s', url_params)) %>%
+  eff <-  creahelpers::api.get('https://api.energyandcleanair.org/energy/iea_balance', params=params) %>%
     mutate(value=value/100) %>%
     select(region_id=iso2, product_raw, flow_raw, unit, year, value)
 
@@ -103,4 +94,6 @@ download_thermal_efficiency <- function(region_id=NULL){
       tidyr::complete(region_id=unique(!!region_id), product_raw, flow_raw, unit, year,
                       fill=list(value=median(eff$value)))
   }
+
+  return(eff)
 }
