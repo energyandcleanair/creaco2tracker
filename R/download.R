@@ -1,9 +1,13 @@
-download_co2_daily <- function(date_from="2015-01-01"){
-  creahelpers::api.get("api.energyandcleanair.org/co2/emission", date_from=date_from) %>%
+download_co2_daily <- function(date_from="2015-01-01", use_cache = F, refresh_cache = F){
+  creahelpers::api.get("http://localhost:8080/co2/emission",
+                       date_from=date_from,
+                       use_cache = use_cache,
+                       refresh_cache = refresh_cache,
+                       cache_folder = "cache") %>%
     select(region, date, fuel, sector, unit, frequency, value, version)
 }
 
-download_gas_demand <- function(region_id=NULL){
+download_gas_demand <- function(region_id=NULL, use_cache = F, refresh_cache = F){
 
   params <- list(
     fuel='fossil_gas',
@@ -16,12 +20,16 @@ download_gas_demand <- function(region_id=NULL){
   # Remove null elements
   params <- purrr::compact(params)
 
-  creahelpers::api.get("api.energyandcleanair.org/energy/demand", params=params) %>%
+  creahelpers::api.get("http://localhost:8080/energy/demand",
+                       params=params,
+                       use_cache = use_cache,
+                       refresh_cache = refresh_cache,
+                       cache_folder = "cache") %>%
     select(region_id, date, fuel, sector, unit, frequency, value)
 }
 
 
-download_electricity <- function(region_id=NULL, data_source=NULL){
+download_electricity <- function(region_id=NULL, data_source=NULL, use_cache = F, refresh_cache = F){
 
   params <- list(
     aggregate_by='country,source,date',
@@ -35,13 +43,18 @@ download_electricity <- function(region_id=NULL, data_source=NULL){
   params <- purrr::compact(params)
 
   # Create URL params
-  creahelpers::api.get("api.energyandcleanair.org/power/generation", params=params, split_by = 'year') %>%
+  creahelpers::api.get("http://localhost:8080/power/generation",
+                       params=params,
+                       split_by = 'year',
+                       use_cache = use_cache,
+                       refresh_cache = refresh_cache,
+                       cache_folder = "cache") %>%
     rename(region_id=iso2)
 }
 
-download_corrected_demand <- function(region_id=NULL, sector='total'){
+download_corrected_demand <- function(region_id=NULL, sector='total', use_cache = F, refresh_cache = F){
 
-  # https://api.energyandcleanair.org/energy/demand?fuel=electricity_temperature_corrected&region_id=EU&format=csv&aggregate_by=year,date_without_year,fuel,sector,region_id&date_from=2019-01-01&pivot_by=year&rolling_days=7&pivot_fill_value=nan&rolling_fill_with_zero=False&sector=total&columns_order=date_without_year
+  # https://http://localhost:8080/energy/demand?fuel=electricity_temperature_corrected&region_id=EU&format=csv&aggregate_by=year,date_without_year,fuel,sector,region_id&date_from=2019-01-01&pivot_by=year&rolling_days=7&pivot_fill_value=nan&rolling_fill_with_zero=False&sector=total&columns_order=date_without_year
   params <- list(
     fuel='electricity_temperature_corrected,fossil_gas_temperature_corrected',
     sector=sector,
@@ -53,7 +66,11 @@ download_corrected_demand <- function(region_id=NULL, sector='total'){
   # Remove null elements
   params <- purrr::compact(params)
 
-  creahelpers::api.get("api.energyandcleanair.org/energy/demand", params=params) %>%
+  creahelpers::api.get("http://localhost:8080/energy/demand",
+                       params=params,
+                       use_cache = use_cache,
+                       refresh_cache = refresh_cache,
+                       cache_folder = "cache") %>%
     select(region_id, date, fuel, sector, unit, frequency, value)
 }
 
@@ -84,7 +101,7 @@ download_thermal_efficiency <- function(region_id=NULL){
   # Create URL params
   url_params <- paste(names(params), params, sep = "=", collapse = "&")
 
-  eff <-  creahelpers::api.get('https://api.energyandcleanair.org/energy/iea_balance', params=params) %>%
+  eff <-  creahelpers::api.get('https://http://localhost:8080/energy/iea_balance', params=params) %>%
     mutate(value=value/100) %>%
     select(region_id=iso2, product_raw, flow_raw, unit, year, value)
 

@@ -71,6 +71,7 @@ importFrom(lubridate,ymd)
 importFrom(lubridate,ymd_h)
 
 importFrom(magrittr,"%<>%")
+importFrom(magrittr,"%T>%")
 importFrom(magrittr,add)
 importFrom(magrittr,use_series)
 importFrom(magrittr,subtract)

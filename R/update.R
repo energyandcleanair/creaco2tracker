@@ -16,6 +16,10 @@ update_corrected_demand <- function(production=T){
 update_all <- function(production=T){
   library(tidyverse)
   library(lubridate)
+  library(tidytext)
+  library(countrycode)
+  library(plotly)
+
   update_gas_demand(production=production)
   update_co2_daily(production=production)
   update_corrected_demand(production=production)
