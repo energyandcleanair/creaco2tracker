@@ -52,7 +52,7 @@ validate_co2 <- function(co2_daily=NULL, folder="diagnostics"){
       ggplot() +
       geom_line(aes(year, value/1e3, col=source, linewidth=source, alpha=source, linetype=type)) +
       scale_x_continuous(limits=c(min(co2_crea$year), NA)) +
-      scale_alpha_manual(values=c(0.7, 1, 1, 1, 1)) +
+      scale_alpha_manual(values=c(0.9, 1, 1, 1, 1)) +
       scale_linewidth_manual(values=c(1.6, 0.5, 0.5, 0.5, 0.5)) +
       scale_color_manual(values=unname(rcrea::pal_crea[c("Blue", "Dark.red", "Dark.blue", "Orange", "Red")])) +
       rcrea::theme_crea() +

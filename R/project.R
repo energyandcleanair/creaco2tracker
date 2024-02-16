@@ -1,40 +1,44 @@
 
-project_until_now <- function(cons_agg, pwr, dts){
+project_until_now <- function(co2, pwr){
+
+  dts_month <- seq.Date(min(co2$time), today() %>% 'day<-'(1), by='month')
 
   # Add missing dates
-  cons_agg_filled1 <- cons_agg %>%
-    group_by(geo, fuel_type, sector) %>%
-    expand_dates('time', dts) %>%
+  co2_filled1 <- co2 %>%
+    group_by(iso2, geo, fuel_type, sector) %>%
+    expand_dates('time', dts_month) %>%
     arrange(desc(time)) %>%
     ungroup()
 
   # First fill electricity sector using power generation
-  cons_agg_filled2 <-
+  co2_filled2 <-
     bind_rows(
-      cons_agg_filled1 %>% filter(grepl('elec', sector)) %>%
-        project_until_now_elec(pwr=pwr, dts=dts),
-      cons_agg_filled1 %>% filter(!grepl('elec', sector)),
+      co2_filled1 %>% filter(sector==SECTOR_ELEC) %>%
+        project_until_now_elec(pwr=pwr, dts_month=dts_month),
+      co2_filled1 %>% filter(sector!=SECTOR_ELEC),
     )
 
-  if(!nrow(cons_agg_filled2) == nrow(cons_agg_filled1)) stop("Unexpected change in rows")
+  if(!nrow(co2_filled2) == nrow(co2_filled1)) stop("Unexpected change in rows")
 
   # Fill all missing (can be electricity as well if model wasn't good enough)
-  cons_agg_filled3 <- project_until_now_yoy(cons_agg_filled2, dts=dts)
-  if(!nrow(cons_agg_filled3) == nrow(cons_agg_filled1)) stop("Unexpected change in rows")
+  co2_filled3 <- project_until_now_yoy(co2_filled2, dts_month=dts_month)
+  if(!nrow(co2_filled3) == nrow(co2_filled1)) stop("Unexpected change in rows")
 
-  return(cons_agg_filled3)
+
+  return(ungroup(co2_filled3))
 }
 
-project_until_now_elec <- function(cons_agg, pwr, dts, last_years=5, min_r2=0.85){
+project_until_now_elec <- function(co2, pwr, dts_month, last_years=5, min_r2=0.85){
 
-  cons_agg %>%
-    group_by(geo, fuel_type, sector) %>%
+  co2 %>%
+    group_by(iso2, geo, fuel_type, sector) %>%
     group_modify(function(df, keys, ...) {
 
       iso2 <- keys %>% add_iso2() %>% pull(iso2)
       fuel_type <- unique(keys$fuel_type)
       geo <- unique(keys$geo)
       pwr_group <- pwr %>%
+        ungroup() %>%
         filter(iso2==!!iso2) %>%
         filter(source==case_when(fuel_type=='coal' ~ 'Coal',
                                  fuel_type=='gas' ~ 'Fossil Gas')) %>%
@@ -44,7 +48,7 @@ project_until_now_elec <- function(cons_agg, pwr, dts, last_years=5, min_r2=0.85
         arrange(desc(time))
 
       data <- df %>%
-        left_join(pwr_group)
+        left_join(pwr_group, by="time")
 
       data_training <- data %>%
         filter(CO2_emissions>0,
@@ -76,15 +80,15 @@ project_until_now_elec <- function(cons_agg, pwr, dts, last_years=5, min_r2=0.85
 
       df$CO2_emissions <- coalesce(df$CO2_emissions, predict(model, data))
       df
-    })
-
+    }) %>%
+    ungroup()
 }
 
-project_until_now_yoy <- function(cons_agg, dts){
+project_until_now_yoy <- function(co2, dts_month){
   #fill data to present assuming deviation from 3-year average stays same as in last 3 months of data
-  cons_agg %>%
-    group_by(geo, fuel_type, sector) %>%
-    expand_dates('time', dts) %>%
+  co2 %>%
+    group_by(iso2, geo, fuel_type, sector) %>%
+    expand_dates('time', dts_month) %>%
     arrange(time) %>%
     group_modify(function(df, ...) {
 
@@ -100,5 +104,6 @@ project_until_now_yoy <- function(cons_agg, dts){
                                            mean3y * (1+latest_yoy),
                                            CO2_emissions)) %>%
         select(-c(mean3y, yoy))
-    })
+    }) %>%
+    ungroup()
 }

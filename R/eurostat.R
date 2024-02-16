@@ -13,7 +13,7 @@ get_eurostat_from_code <- function(code, use_cache=T){
 }
 
 
-get_eurostat_cons <- function(diagnostic_folder='diagnostics', use_cache=F){
+get_eurostat_cons <- function(diagnostic_folder='diagnostics', use_cache=F, iso2s=NULL){
 
   consumption_codes_monthly = c("nrg_cb_sffm", "nrg_cb_oilm", "nrg_cb_gasm")
   cons_monthly_raw <- consumption_codes_monthly %>% lapply(get_eurostat_from_code, use_cache=use_cache)
@@ -288,21 +288,26 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics', use_cache=F){
   }
 
 
-  # Remove overlaps
+  # Keep monthly when both are available
   cons <- cons_combined  %>%
     group_by(geo, sector, time, unit, siec, fuel_type) %>%
     arrange(source) %>%
-    # Keep monthly when both are available
     slice(1) %>%
     ungroup() %>%
-    select(-c(source)) %>%
-    split(.$fuel_type)
+    select(-c(source))
 
-
-  cons <- bind_rows(conss$coal, conss$oil, conss$gas) %>%
+  # Add infos
+  cons <- cons %>%
     add_iso2() %>%
     recode_siec()
 
+  # Keep regions of interest
+  if(!is.null(iso2s)){
+    cons <- cons %>%
+      filter(iso2 %in% iso2s)
+  }
+
+  # Remove last incomplete month for each region
   cons <- cons %>%
     remove_last_incomplete()
 
