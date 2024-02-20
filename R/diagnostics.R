@@ -115,7 +115,7 @@ diagnostic_co2 <- function(co2_daily, diagnostics_folder="diagnostics"){
   diagnostic_co2_simple(co2_daily, diagnostics_folder)
   diagnostic_co2_benchmark_yearly(co2_daily, diagnostics_folder)
   diagnostic_co2_benchmark_monthly(co2_daily, diagnostics_folder)
-  diagnostic_co2_versions()
+  diagnostic_co2_versions(diagnostics_folder=diagnostics_folder)
 }
 
 
@@ -286,6 +286,7 @@ diagnostic_co2_benchmark_yearly <- function(co2_daily, diagnostics_folder="diagn
 diagnostic_co2_benchmark_monthly <- function(co2_daily, diagnostics_folder="diagnostics"){
 
   #TODO add diagnostics data to package
+  if(!is.null(diagnostics_folder)){
 
   co2_crea <- co2_daily %>%
     filter(fuel_type!='total') %>%
@@ -383,7 +384,6 @@ diagnostic_co2_benchmark_monthly <- function(co2_daily, diagnostics_folder="diag
 
 plt
 
-if(!is.null(diagnostics_folder)){
   quicksave(file.path(diagnostics_folder, "co2_benchmark_carbonmonitor.jpg"), plot=plt,
             width=8, height=4, scale=1, logo=F, dpi=600)
             # height=min(30,max(4, 1.5*length(unique(co2_crea$iso2)))),
@@ -401,7 +401,7 @@ if(!is.null(diagnostics_folder)){
 #' @export
 #'
 #' @examples
-diagnostic_co2_versions <- function(iso2s="EU", versions=c("0.2", "0.3")){
+diagnostic_co2_versions <- function(iso2s="EU", versions=c("0.2", "0.3"), diagnostics_folder="diagnostics"){
 
   # Read the data
   co2 <- lapply(versions, function(version) download_co2_daily(iso2s=iso2s, version=version)) %>%
