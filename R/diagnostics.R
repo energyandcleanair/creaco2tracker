@@ -1,6 +1,6 @@
-diagnostic_pwr <- function(pwr_demand, diagnostic_folder="diagnostics"){
+diagnostic_pwr <- function(pwr_demand, diagnostics_folder="diagnostics"){
 
-  dir.create(diagnostic_folder, showWarnings = FALSE)
+  dir.create(diagnostics_folder, showWarnings = FALSE)
 
   #add rolling mean
   pwr_demand <- pwr_demand %>%
@@ -17,7 +17,7 @@ diagnostic_pwr <- function(pwr_demand, diagnostic_folder="diagnostics"){
               .groups="drop")
 
   #plot by source
-  if(!is.null(diagnostic_folder)){
+  if(!is.null(diagnostics_folder)){
 
     plt <- pwr_demand %>%
       filter(date<max(date)-3, year %in% 2021:2022, country=='EU total') %>%
@@ -35,15 +35,15 @@ diagnostic_pwr <- function(pwr_demand, diagnostic_folder="diagnostics"){
       rcrea::scale_color_crea_d('dramatic', guide=guide_legend(nrow = 1)) +
       rcrea::scale_fill_crea_d(col.index = 2)
 
-    ggsave(file.path(diagnostic_folder, 'EU power generation by source.png'),
+    ggsave(file.path(diagnostics_folder, 'EU power generation by source.png'),
            width=8, height=6, bg='white', plot=plt)
   }
 }
 
 
-diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, cons_combined, diagnostic_folder="diagnostics"){
+diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, cons_combined, diagnostics_folder="diagnostics"){
 
-  if(!is.null(diagnostic_folder)){
+  if(!is.null(diagnostics_folder)){
     (plt <- bind_rows(
       do.call(bind_rows, cons_yearly) %>% mutate(source='yearly'),
       do.call(bind_rows, cons_monthly) %>% mutate(source='monthly')) %>%
@@ -59,7 +59,7 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, c
         theme(legend.position = 'bottom') +
         rcrea::scale_y_crea_zero())
 
-    ggsave(file.path(diagnostic_folder,'eurostat_annual_vs_monthly_yearly.png'), plot=plt, width=12, height=6, bg='white')
+    ggsave(file.path(diagnostics_folder,'eurostat_annual_vs_monthly_yearly.png'), plot=plt, width=12, height=6, bg='white')
 
     plt <- cons_combined %>%
       filter(grepl('European union', geo, T)) %>%
@@ -69,7 +69,7 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, c
       theme(legend.position='bottom')+
       rcrea::scale_y_crea_zero()
 
-    ggsave(file.path(diagnostic_folder,'eurostat_annual_vs_monthly_monthly.png'), plot=plt, width=8, height=6, bg='white')
+    ggsave(file.path(diagnostics_folder,'eurostat_annual_vs_monthly_monthly.png'), plot=plt, width=8, height=6, bg='white')
 
     plt <- cons_combined %>%
       group_by(geo, sector, time, unit, siec, fuel_type) %>%
@@ -83,18 +83,18 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, c
       theme(legend.position='bottom')+
       rcrea::scale_y_crea_zero()
 
-    ggsave(file.path(diagnostic_folder,'eurostat_combined.png'), plot=plt, width=8, height=6, bg='white')
+    ggsave(file.path(diagnostics_folder,'eurostat_combined.png'), plot=plt, width=8, height=6, bg='white')
   }
 
 }
 
-diagnostic_eurostat_cons <- function(eurostat_cons, iso2s, diagnostic_folder="diagnostics"){
+diagnostic_eurostat_cons <- function(eurostat_cons, iso2s, diagnostics_folder="diagnostics"){
 
-  dir.create(diagnostic_folder, showWarnings = FALSE)
+  dir.create(diagnostics_folder, showWarnings = FALSE)
 
   # Plot heatmap of consumption by sector
 
-  if(!is.null(diagnostic_folder)){
+  if(!is.null(diagnostics_folder)){
     (plt <- eurostat_cons %>%
        filter(iso2 %in% iso2s) %>%
        group_by(geo, fuel_type, sector, unit, time) %>%
@@ -106,24 +106,24 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s, diagnostic_folder="di
       # facet_wrap(geo ~ glue("{fuel_type} ({unit})"), scales='free_y')) +
       rcrea::theme_crea())
 
-    ggsave(file.path(diagnostic_folder, 'eurostat_cons.png'),
+    ggsave(file.path(diagnostics_folder, 'eurostat_cons.png'),
            width=10, height=min(30,max(4, 1.5*length(iso2s))), bg='white', plot=plt, scale=1.5)
   }
 }
 
-diagnostic_co2 <- function(co2_daily, diagnostic_folder="diagnostics"){
-  diagnostic_co2_simple(co2_daily, diagnostic_folder)
-  diagnostic_co2_benchmark_yearly(co2_daily, diagnostic_folder)
-  diagnostic_co2_benchmark_monthly(co2_daily, diagnostic_folder)
+diagnostic_co2 <- function(co2_daily, diagnostics_folder="diagnostics"){
+  diagnostic_co2_simple(co2_daily, diagnostics_folder)
+  diagnostic_co2_benchmark_yearly(co2_daily, diagnostics_folder)
+  diagnostic_co2_benchmark_monthly(co2_daily, diagnostics_folder)
   diagnostic_co2_versions()
 }
 
 
-diagnostic_co2_simple <- function(co2_daily, diagnostic_folder="diagnostics"){
+diagnostic_co2_simple <- function(co2_daily, diagnostics_folder="diagnostics"){
 
-  dir.create(diagnostic_folder, showWarnings = FALSE)
+  dir.create(diagnostics_folder, showWarnings = FALSE)
 
-  if(!is.null(diagnostic_folder)){
+  if(!is.null(diagnostics_folder)){
     (plt <- co2_daily %>%
        mutate(across(c(fuel_type, sector), tolower)) %>%
        group_by(sector, fuel_type) %>%
@@ -138,11 +138,11 @@ diagnostic_co2_simple <- function(co2_daily, diagnostic_folder="diagnostics"){
        rcrea::scale_y_crea_zero() +
        labs(title="EU CO2 emissions", y='Mt/day, 30-day mean', x=''))
 
-    ggsave(file.path(diagnostic_folder,'EU CO2 emissions.png'), plot=plt, width=8, height=6, bg='white', scale=1)
+    ggsave(file.path(diagnostics_folder,'EU CO2 emissions.png'), plot=plt, width=8, height=6, bg='white', scale=1)
   }
 }
 
-diagnostic_co2_benchmark_yearly <- function(co2_daily, diagnostic_folder="diagnostics"){
+diagnostic_co2_benchmark_yearly <- function(co2_daily, diagnostics_folder="diagnostics"){
 
   co2_crea <- co2_daily %>%
     filter(sector=='all',
@@ -235,7 +235,7 @@ diagnostic_co2_benchmark_yearly <- function(co2_daily, diagnostic_folder="diagno
     co2_validate,
     # co2_projected %>% mutate(type='projected')
   ) %>%
-      write_csv(file.path(diagnostic_folder, "co2_benchmark.csv")) %>%
+      write_csv(file.path(diagnostics_folder, "co2_benchmark.csv")) %>%
       # filter(type=="estimated") %>%
       mutate(
         # source=factor(source, levels=c("CREA", unique(co2_validate$source)))
@@ -277,13 +277,13 @@ diagnostic_co2_benchmark_yearly <- function(co2_daily, diagnostic_folder="diagno
            caption="Note: PRIMAP refers to PRIMAP-hist v2.5 and includes non-fossil fuels related emissions.") -> plt)
 
   plt
-  if(!is.null(diagnostic_folder)){
-    quicksave(file.path(diagnostic_folder, "co2_benchmark.jpg"), plot=plt, width=8, height=4, scale=1, logo=F, dpi=600)
+  if(!is.null(diagnostics_folder)){
+    quicksave(file.path(diagnostics_folder, "co2_benchmark.jpg"), plot=plt, width=8, height=4, scale=1, logo=F, dpi=600)
   }
 }
 
 
-diagnostic_co2_benchmark_monthly <- function(co2_daily, diagnostic_folder="diagnostics"){
+diagnostic_co2_benchmark_monthly <- function(co2_daily, diagnostics_folder="diagnostics"){
 
   #TODO add diagnostics data to package
 
@@ -383,8 +383,8 @@ diagnostic_co2_benchmark_monthly <- function(co2_daily, diagnostic_folder="diagn
 
 plt
 
-if(!is.null(diagnostic_folder)){
-  quicksave(file.path(diagnostic_folder, "co2_benchmark_carbonmonitor.jpg"), plot=plt,
+if(!is.null(diagnostics_folder)){
+  quicksave(file.path(diagnostics_folder, "co2_benchmark_carbonmonitor.jpg"), plot=plt,
             width=8, height=4, scale=1, logo=F, dpi=600)
             # height=min(30,max(4, 1.5*length(unique(co2_crea$iso2)))),
 
@@ -440,8 +440,8 @@ diagnostic_co2_versions <- function(iso2s="EU", versions=c("0.2", "0.3")){
     subtitle="Year-on-year changes of EU CO2 emissions",
     y=NULL, x=NULL, fill="Version") -> plt)
 
-  if(!is.null(diagnostic_folder)){
-    quicksave(file.path(diagnostic_folder, "co2_comparison_versions.jpg"), plot=plt,
+  if(!is.null(diagnostics_folder)){
+    quicksave(file.path(diagnostics_folder, "co2_comparison_versions.jpg"), plot=plt,
               width=8, height=4, scale=1, logo=F, dpi=600)
     # height=min(30,max(4, 1.5*length(unique(co2_crea$iso2)))),
 
@@ -477,8 +477,8 @@ diagnostic_co2_versions <- function(iso2s="EU", versions=c("0.2", "0.3")){
            subtitle="Year-on-year changes of EU CO2 emissions",
            y=NULL, x=NULL, fill="Version") -> plt)
 
-  if(!is.null(diagnostic_folder)){
-    quicksave(file.path(diagnostic_folder, "co2_comparison_versions_by_fuel.jpg"), plot=plt,
+  if(!is.null(diagnostics_folder)){
+    quicksave(file.path(diagnostics_folder, "co2_comparison_versions_by_fuel.jpg"), plot=plt,
               width=8, height=7, scale=1, logo=F)
     # height=min(30,max(4, 1.5*length(unique(co2_crea$iso2)))),
 

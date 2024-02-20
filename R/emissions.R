@@ -1,7 +1,7 @@
-get_co2_from_eurostat_cons <- function(eurostat_cons, diagnostic_folder="diagnostics"){
+get_co2_from_eurostat_cons <- function(eurostat_cons, diagnostics_folder="diagnostics"){
   eurostat_cons %>%
     # filter(fuel_type=='coal') %>%
-    add_ncv(diagnostic_folder = diagnostic_folder) %>%
+    add_ncv(diagnostics_folder = diagnostics_folder) %>%
     add_emission_factor() %>%
     mutate(value_co2_tonne=
              case_when(unit=='Thousand tonnes' ~ values * ncv_kjkg / 1000 * co2_factor_t_per_TJ,
@@ -12,7 +12,7 @@ get_co2_from_eurostat_cons <- function(eurostat_cons, diagnostic_folder="diagnos
 }
 
 
-add_ncv <- function(x, diagnostic_folder=NULL){
+add_ncv <- function(x, diagnostics_folder=NULL){
 
   conversion_raw <- iea.get_conversion_factors(iso2=c(get_eu_iso2s(),"EU"))
 
@@ -91,7 +91,7 @@ add_ncv <- function(x, diagnostic_folder=NULL){
     mutate(source=coalesce(source, "IEA (weighted averaged)"))
 
   # Check dispersion (NCVs shouldn't be too far apart, otherwise need to manually check ratios)
-  if(!is.null(diagnostic_folder)){
+  if(!is.null(diagnostics_folder)){
     conversion_filled %>%
       group_by(iso2, siec) %>%
       summarise(
@@ -102,7 +102,7 @@ add_ncv <- function(x, diagnostic_folder=NULL){
       # arrange(iso2, siec, source) %>%
       # select(-c(source)) %>%
       tidyr::spread(siec, ncv_kjkg) %>%
-    write_csv(file.path(diagnostic_folder, "ncv.csv"))
+    write_csv(file.path(diagnostics_folder, "ncv.csv"))
   }
 
   # Add ncv

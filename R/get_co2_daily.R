@@ -1,7 +1,7 @@
 
 #' Get daily CO2 emissions from EUROSTAT, ENTSOG and ENTSOE data.
 #'
-#' @param diagnostic_folder
+#' @param diagnostics_folder
 #' @param use_cache whether to use cache for EUROSTAT, power and gas data.
 #' Save time for development. Should be Falsein production.
 #' @param iso2s
@@ -10,21 +10,21 @@
 #' @export
 #'
 #' @examples
-get_co2_daily <- function(diagnostic_folder='diagnostics',
+get_co2_daily <- function(diagnostics_folder='diagnostics',
                           use_cache=F,
                           iso2s = c("EU")
                           ){
 
-  dir.create(diagnostic_folder, F, T)
+  dir.create(diagnostics_folder, F, T)
 
   # Collect necessary data
   gas_demand <- download_gas_demand(region_id=iso2s, use_cache = use_cache)
   pwr_demand <- download_pwr_demand(use_cache = use_cache)
-  eurostat_cons <- get_eurostat_cons(diagnostic_folder = diagnostic_folder, use_cache = use_cache)
+  eurostat_cons <- get_eurostat_cons(diagnostics_folder = diagnostics_folder, use_cache = use_cache)
 
   # Quick sanity checks
-  diagnostic_pwr(pwr_demand, diagnostic_folder = diagnostic_folder)
-  diagnostic_eurostat_cons(eurostat_cons, iso2s=iso2s, diagnostic_folder = diagnostic_folder)
+  diagnostic_pwr(pwr_demand, diagnostics_folder = diagnostics_folder)
+  diagnostic_eurostat_cons(eurostat_cons, iso2s=iso2s, diagnostics_folder = diagnostics_folder)
 
   # Compute emissions
   co2 <- get_co2_from_eurostat_cons(eurostat_cons)
@@ -48,7 +48,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics',
   co2_daily <- add_total_co2(co2_daily)
 
   # Diagnostics
-  diagnostic_co2(co2_daily, diagnostic_folder=diagnostic_folder)
+  diagnostic_co2(co2_daily, diagnostics_folder=diagnostics_folder)
 
   # Formatting / cleaning for db
   co2_daily_formatted <- format_co2_for_db(co2_daily)

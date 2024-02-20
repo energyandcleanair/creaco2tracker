@@ -19,10 +19,10 @@
 ##
 ## ---------------------------
 
-get_gas_demand <- function(diagnostic_folder='diagnostics'){
+get_gas_demand <- function(diagnostics_folder='diagnostics'){
   years <- seq(2018, lubridate::year(lubridate::today()))
 
-  if(!is.null(diagnostic_folder)) dir.create(diagnostic_folder)
+  if(!is.null(diagnostics_folder)) dir.create(diagnostics_folder)
 
   # Estimate with two different methods
   consdist <- get_gas_demand_consdist(years=years)
@@ -34,7 +34,7 @@ get_gas_demand <- function(diagnostic_folder='diagnostics'){
                                                 apparent,
                                                 apparent_w_agsi),
             min_comparison_points = 12,
-            diagnostic_folder=diagnostic_folder,
+            diagnostics_folder=diagnostics_folder,
             min_r2=0.95,
             max_rrse=0.3)
 
@@ -205,7 +205,7 @@ get_eurostat_gas <- function(years){
 
 
 keep_best<- function(consumption,
-                     diagnostic_folder,
+                     diagnostics_folder,
                      min_comparison_points=24,
                      min_r2=0.95, max_rrse=0.4){
 
@@ -265,7 +265,7 @@ keep_best<- function(consumption,
     # Sometimes apparent strictly equivalent to apparent_asgi
     distinct(iso2, .keep_all = T)
 
-  if(!is.null(diagnostic_folder)){
+  if(!is.null(diagnostics_folder)){
 
     plt_data <- best %>%
       ungroup() %>%
@@ -312,13 +312,13 @@ keep_best<- function(consumption,
       guides(size=guide_legend(nrow=1),
              color=guide_legend(nrow=1))
     plt
-    ggsave(filename=file.path(diagnostic_folder, 'gas_consumption_estimates.png'),
+    ggsave(filename=file.path(diagnostics_folder, 'gas_consumption_estimates.png'),
            plot=plt, width=10, height=10, bg='white')
 
     # Export a version for Flourish
     plt_data %>%
       tidyr::spread(method, value_m3) %>%
-      write_csv(file.path(diagnostic_folder, 'gas_consumption_estimates_wide.csv'))
+      write_csv(file.path(diagnostics_folder, 'gas_consumption_estimates_wide.csv'))
   }
 
   best %>%

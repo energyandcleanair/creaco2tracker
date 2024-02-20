@@ -2,7 +2,7 @@
 
 #' Get monthly fossil fuel consumption per country from EUROSTAT energy balance
 #'
-#' @param diagnostic_folder
+#' @param diagnostics_folder
 #' @param use_cache
 #' @param iso2s
 #'
@@ -10,7 +10,7 @@
 #' @export
 #'
 #' @examples
-get_eurostat_cons <- function(diagnostic_folder='diagnostics', use_cache=F, iso2s=NULL){
+get_eurostat_cons <- function(diagnostics_folder='diagnostics', use_cache=F, iso2s=NULL){
 
   consumption_codes_monthly = c("nrg_cb_sffm", "nrg_cb_oilm", "nrg_cb_gasm")
   cons_monthly_raw <- consumption_codes_monthly %>% lapply(get_eurostat_from_code, use_cache=use_cache)
