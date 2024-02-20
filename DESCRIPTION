@@ -32,7 +32,8 @@ Imports:
     glue,
     digest,
     ggh4x,
-    logger
+    logger,
+    tidytext
 Remotes:
     energyandcleanair/creahelpers,
     energyandcleanair/rcrea
