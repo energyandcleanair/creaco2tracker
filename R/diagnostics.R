@@ -171,7 +171,14 @@ diagnostic_co2_benchmark_yearly <- function(co2_daily, diagnostic_folder="diagno
 
   get_primap <- function(iso2s, with_mineral=F){
 
-    x <- read_csv('data/Guetschow_et_al_2023b-PRIMAP-hist_v2.5_final_15-Oct-2023.csv') %>%
+    filepath <- 'data/Guetschow_et_al_2023b-PRIMAP-hist_v2.5_final_15-Oct-2023.csv'
+    url <- "https://zenodo.org/records/10006301/files/Guetschow_et_al_2023b-PRIMAP-hist_v2.5_final_15-Oct-2023.csv?download=1"
+    if(!file.exists(filepath)){
+        dir.create(dirname(filepath), showWarnings = FALSE)
+        download.file(url, filepath)
+    }
+
+    x <- read_csv(filepath) %>%
       mutate(iso2 = countrycode(`area (ISO3)`, "iso3c", "iso2c", custom_match = c("EU27BX"="EU"))) %>%
       rename(category=`category (IPCC2006_PRIMAP)`,
              scenario=`scenario (PRIMAP-hist)`) %>%
@@ -275,7 +282,10 @@ diagnostic_co2_benchmark_yearly <- function(co2_daily, diagnostic_folder="diagno
   }
 }
 
+
 diagnostic_co2_benchmark_monthly <- function(co2_daily, diagnostic_folder="diagnostics"){
+
+  #TODO add diagnostics data to package
 
   co2_crea <- co2_daily %>%
     filter(fuel_type!='total') %>%
