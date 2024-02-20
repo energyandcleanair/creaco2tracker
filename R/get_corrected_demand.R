@@ -9,7 +9,7 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
   co2 <- if(use_co2_in_db){
     download_co2_daily()
   }else{
-    get_co2_daily()
+    get_co2_daily(diagnostics_folder=diagnostics_folder)
   }
 
 

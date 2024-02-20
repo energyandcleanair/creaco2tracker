@@ -121,9 +121,8 @@ diagnostic_co2 <- function(co2_daily, diagnostics_folder="diagnostics"){
 
 diagnostic_co2_simple <- function(co2_daily, diagnostics_folder="diagnostics"){
 
-  dir.create(diagnostics_folder, showWarnings = FALSE)
-
   if(!is.null(diagnostics_folder)){
+    dir.create(diagnostics_folder, showWarnings = FALSE)
     (plt <- co2_daily %>%
        mutate(across(c(fuel_type, sector), tolower)) %>%
        group_by(sector, fuel_type) %>%
@@ -144,140 +143,141 @@ diagnostic_co2_simple <- function(co2_daily, diagnostics_folder="diagnostics"){
 
 diagnostic_co2_benchmark_yearly <- function(co2_daily, diagnostics_folder="diagnostics"){
 
-  co2_crea <- co2_daily %>%
-    filter(sector=='all',
-           fuel_type=='total') %>%
-    group_by(iso2, year=year(date)) %>%
-    summarise(value=sum(value_co2_tonne)/1e6,
-              unit="mt",
-              source='CREA CO2 tracker') %>%
-    filter(year < 2024) %>%
-    ungroup()
-
-  read_benchmark <- function(path){
-    # Read and convert all columns that are not in c(iso, `Country/Region`, unit) to numeric
-    suppressWarnings(read_csv(path, col_types = cols()) %>%
-      filter(grepl('co2', unit, ignore.case=T)) %>%
-      mutate_at(vars(-c(iso, `Country/Region`, unit)), as.numeric)) %>%
-      mutate(iso2=countrycode::countrycode(iso, "iso3c", "iso2c",
-                                           custom_match=c("EUU"="EU"))) %>%
-      select(-c(iso)) %>%
-      tidyr::gather(key="year", value="value",
-                    -c(iso2, `Country/Region`, unit)) %>%
-      mutate(year=as.numeric(year)) %>%
-      mutate(value=as.numeric(value)) %>%
-      filter(!is.na(value))
-  }
-
-  get_primap <- function(iso2s, with_mineral=F){
-
-    filepath <- 'data/Guetschow_et_al_2023b-PRIMAP-hist_v2.5_final_15-Oct-2023.csv'
-    url <- "https://zenodo.org/records/10006301/files/Guetschow_et_al_2023b-PRIMAP-hist_v2.5_final_15-Oct-2023.csv?download=1"
-    if(!file.exists(filepath)){
-        dir.create(dirname(filepath), showWarnings = FALSE)
-        download.file(url, filepath)
-    }
-
-    x <- read_csv(filepath) %>%
-      mutate(iso2 = countrycode(`area (ISO3)`, "iso3c", "iso2c", custom_match = c("EU27BX"="EU"))) %>%
-      rename(category=`category (IPCC2006_PRIMAP)`,
-             scenario=`scenario (PRIMAP-hist)`) %>%
-      filter(
-        entity=="CO2",
-        iso2 %in% iso2s,
-        scenario=='HISTCR'
-        ) %>%
-      filter(category %in% c(1, 2, "2.A")) %>%
-      # select all columns that are have number names
-      select(matches("iso2|category|\\d+$")) %>%
-      tidyr::gather(key = "year", value = "value", -c(iso2, category)) %>%
-      mutate(year=as.numeric(year),
-             value=value/1e3)
-
-    if(with_mineral){
-      x %>%
-        group_by(iso2, year) %>%
-        filter(category %in% c(1,2)) %>%
-        summarise(value=sum(value), .groups = "drop")
-    }else{
-      x %>%
-        group_by(iso2, year) %>%
-        summarise(value=sum(value * case_when(category=="2.A"~-1, T ~1)), .groups="drop")
-    }
-  }
-
-  co2_validate <-
-    # Regenerate this data here:
-    # https://shorturl.at/anQR1
-    bind_rows(
-      # read_benchmark('data/ghg-emissions-climatewatch-withindustry.csv') %>% mutate(source='Climate Watch (with industry)'),
-      # read_benchmark('data/ghg-emissions-climatewatch.csv') %>% mutate(source='Climate Watch'),
-      # read_benchmark('data/ghg-emissions-unfccc-withindustry.csv') %>% mutate(source='UNFCCC (with industry)'),
-      # read_benchmark('data/ghg-emissions-unfccc.csv') %>% mutate(source='UNFCCC'),
-      # read_benchmark('data/ghg-emissions-gcp.csv') %>% mutate(source='GCP'),
-      # read_benchmark('data/ghg-emissions-pik-withindustry.csv') %>% mutate(source='Old PRIMAP-hist v2.5 (Energy and Industry)'),
-      # read_benchmark('data/ghg-emissions-pik.csv') %>% mutate(source='PRIMAP-hist v2.5 (Energy alone)')
-      get_primap(iso2s=unique(co2_crea$iso2), with_mineral = T) %>% mutate(source='PRIMAP Energy and Industry'),
-      get_primap(iso2s=unique(co2_crea$iso2), with_mineral = F) %>% mutate(source='PRIMAP Energy and Industry\n(excl. Mineral industry)')
-    ) %>%
-    filter(iso2 %in% unique(co2_crea$iso2))
-
-
-  # Order factor by dates for chart readability
-  levels_source <- co2_validate %>%
-    filter(year==2020,
-           iso2=="EU") %>%
-    arrange(-value) %>%
-    pull(source)
-
-  (bind_rows(
-    co2_crea %>% filter(year >= 1990),
-    co2_validate,
-    # co2_projected %>% mutate(type='projected')
-  ) %>%
-      write_csv(file.path(diagnostics_folder, "co2_benchmark.csv")) %>%
-      # filter(type=="estimated") %>%
-      mutate(
-        # source=factor(source, levels=c("CREA", unique(co2_validate$source)))
-        source=factor(source, levels=c("CREA CO2 tracker", levels_source))
-      ) %>%
-      # filter(source=='UNFCCC') %>%
-      # filter(year >= 1990) %>%
-      ggplot() +
-      geom_line(aes(year, value/1e3, col=source,
-                    linewidth=source,
-                    alpha=source,
-                    # linetype=grepl('industry', source)
-                    ),
-                position=position_dodge(width=0.1)
-                ) +
-      scale_x_continuous(limits=c(min(co2_crea$year), NA)) +
-      scale_alpha_manual(values=c(0.9, 1, 1, 1, 1, 1, 1)) +
-      scale_linewidth_manual(values=c(1.6, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5)) +
-      # scale_linetype_manual(values=c('solid', 'dashed')) +
-      scale_color_manual(values=unname(rcrea::pal_crea[c("Blue", "Dark.red", "Orange", "Dark.blue", "Purple", "Green", "Red")])) +
-      rcrea::theme_crea() +
-      # Legend on the top, left align
-      # theme(legend.position = "top",
-      #       legend.title = element_blank(),
-      #       # Left align
-      #
-      #       ) +
-
-      rcrea::scale_y_crea_zero() +
-      ifelse(length(unique(co2_crea$iso2))>1, facet_wrap(~iso2, scales='free_y'), element_blank()) +
-      labs(title="CO2 emissions from fossil fuels",
-           subtitle="Billion tonne CO2 per year",
-           y=NULL,
-           x=NULL,
-           linewidth="Source",
-           linetype="Source",
-           alpha="Source",
-           color="Source",
-           caption="Note: PRIMAP refers to PRIMAP-hist v2.5 and includes non-fossil fuels related emissions.") -> plt)
-
-  plt
   if(!is.null(diagnostics_folder)){
+    co2_crea <- co2_daily %>%
+      filter(sector=='all',
+             fuel_type=='total') %>%
+      group_by(iso2, year=year(date)) %>%
+      summarise(value=sum(value_co2_tonne)/1e6,
+                unit="mt",
+                source='CREA CO2 tracker') %>%
+      filter(year < 2024) %>%
+      ungroup()
+
+    read_benchmark <- function(path){
+      # Read and convert all columns that are not in c(iso, `Country/Region`, unit) to numeric
+      suppressWarnings(read_csv(path, col_types = cols()) %>%
+        filter(grepl('co2', unit, ignore.case=T)) %>%
+        mutate_at(vars(-c(iso, `Country/Region`, unit)), as.numeric)) %>%
+        mutate(iso2=countrycode::countrycode(iso, "iso3c", "iso2c",
+                                             custom_match=c("EUU"="EU"))) %>%
+        select(-c(iso)) %>%
+        tidyr::gather(key="year", value="value",
+                      -c(iso2, `Country/Region`, unit)) %>%
+        mutate(year=as.numeric(year)) %>%
+        mutate(value=as.numeric(value)) %>%
+        filter(!is.na(value))
+    }
+
+    get_primap <- function(iso2s, with_mineral=F){
+
+      filepath <- 'data/Guetschow_et_al_2023b-PRIMAP-hist_v2.5_final_15-Oct-2023.csv'
+      url <- "https://zenodo.org/records/10006301/files/Guetschow_et_al_2023b-PRIMAP-hist_v2.5_final_15-Oct-2023.csv?download=1"
+      if(!file.exists(filepath)){
+          dir.create(dirname(filepath), showWarnings = FALSE)
+          download.file(url, filepath)
+      }
+
+      x <- read_csv(filepath) %>%
+        mutate(iso2 = countrycode(`area (ISO3)`, "iso3c", "iso2c", custom_match = c("EU27BX"="EU"))) %>%
+        rename(category=`category (IPCC2006_PRIMAP)`,
+               scenario=`scenario (PRIMAP-hist)`) %>%
+        filter(
+          entity=="CO2",
+          iso2 %in% iso2s,
+          scenario=='HISTCR'
+          ) %>%
+        filter(category %in% c(1, 2, "2.A")) %>%
+        # select all columns that are have number names
+        select(matches("iso2|category|\\d+$")) %>%
+        tidyr::gather(key = "year", value = "value", -c(iso2, category)) %>%
+        mutate(year=as.numeric(year),
+               value=value/1e3)
+
+      if(with_mineral){
+        x %>%
+          group_by(iso2, year) %>%
+          filter(category %in% c(1,2)) %>%
+          summarise(value=sum(value), .groups = "drop")
+      }else{
+        x %>%
+          group_by(iso2, year) %>%
+          summarise(value=sum(value * case_when(category=="2.A"~-1, T ~1)), .groups="drop")
+      }
+    }
+
+    co2_validate <-
+      # Regenerate this data here:
+      # https://shorturl.at/anQR1
+      bind_rows(
+        # read_benchmark('data/ghg-emissions-climatewatch-withindustry.csv') %>% mutate(source='Climate Watch (with industry)'),
+        # read_benchmark('data/ghg-emissions-climatewatch.csv') %>% mutate(source='Climate Watch'),
+        # read_benchmark('data/ghg-emissions-unfccc-withindustry.csv') %>% mutate(source='UNFCCC (with industry)'),
+        # read_benchmark('data/ghg-emissions-unfccc.csv') %>% mutate(source='UNFCCC'),
+        # read_benchmark('data/ghg-emissions-gcp.csv') %>% mutate(source='GCP'),
+        # read_benchmark('data/ghg-emissions-pik-withindustry.csv') %>% mutate(source='Old PRIMAP-hist v2.5 (Energy and Industry)'),
+        # read_benchmark('data/ghg-emissions-pik.csv') %>% mutate(source='PRIMAP-hist v2.5 (Energy alone)')
+        get_primap(iso2s=unique(co2_crea$iso2), with_mineral = T) %>% mutate(source='PRIMAP Energy and Industry'),
+        get_primap(iso2s=unique(co2_crea$iso2), with_mineral = F) %>% mutate(source='PRIMAP Energy and Industry\n(excl. Mineral industry)')
+      ) %>%
+      filter(iso2 %in% unique(co2_crea$iso2))
+
+
+    # Order factor by dates for chart readability
+    levels_source <- co2_validate %>%
+      filter(year==2020,
+             iso2=="EU") %>%
+      arrange(-value) %>%
+      pull(source)
+
+    (bind_rows(
+      co2_crea %>% filter(year >= 1990),
+      co2_validate,
+      # co2_projected %>% mutate(type='projected')
+    ) %>%
+        write_csv(file.path(diagnostics_folder, "co2_benchmark.csv")) %>%
+        # filter(type=="estimated") %>%
+        mutate(
+          # source=factor(source, levels=c("CREA", unique(co2_validate$source)))
+          source=factor(source, levels=c("CREA CO2 tracker", levels_source))
+        ) %>%
+        # filter(source=='UNFCCC') %>%
+        # filter(year >= 1990) %>%
+        ggplot() +
+        geom_line(aes(year, value/1e3, col=source,
+                      linewidth=source,
+                      alpha=source,
+                      # linetype=grepl('industry', source)
+                      ),
+                  position=position_dodge(width=0.1)
+                  ) +
+        scale_x_continuous(limits=c(min(co2_crea$year), NA)) +
+        scale_alpha_manual(values=c(0.9, 1, 1, 1, 1, 1, 1)) +
+        scale_linewidth_manual(values=c(1.6, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5)) +
+        # scale_linetype_manual(values=c('solid', 'dashed')) +
+        scale_color_manual(values=unname(rcrea::pal_crea[c("Blue", "Dark.red", "Orange", "Dark.blue", "Purple", "Green", "Red")])) +
+        rcrea::theme_crea() +
+        # Legend on the top, left align
+        # theme(legend.position = "top",
+        #       legend.title = element_blank(),
+        #       # Left align
+        #
+        #       ) +
+
+        rcrea::scale_y_crea_zero() +
+        ifelse(length(unique(co2_crea$iso2))>1, facet_wrap(~iso2, scales='free_y'), element_blank()) +
+        labs(title="CO2 emissions from fossil fuels",
+             subtitle="Billion tonne CO2 per year",
+             y=NULL,
+             x=NULL,
+             linewidth="Source",
+             linetype="Source",
+             alpha="Source",
+             color="Source",
+             caption="Note: PRIMAP refers to PRIMAP-hist v2.5 and includes non-fossil fuels related emissions.") -> plt)
+
+    plt
+
     quicksave(file.path(diagnostics_folder, "co2_benchmark.jpg"), plot=plt, width=8, height=4, scale=1, logo=F, dpi=600)
   }
 }
