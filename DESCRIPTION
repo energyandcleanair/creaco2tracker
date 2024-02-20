@@ -31,7 +31,8 @@ Imports:
     rcrea,
     glue,
     digest,
-    ggh4x
+    ggh4x,
+    logger
 Remotes:
     energyandcleanair/creahelpers,
     energyandcleanair/rcrea
