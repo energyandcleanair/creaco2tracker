@@ -39,7 +39,7 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
     mutate(country='EU')
 
   # hdd and cdd
-  read_csv("https://api.energyandcleanair.org/v1/weather?variable=HDD,CDD&format=csv&region_id=EU") %>%
+  creahelpers::api.get("api.energyandcleanair.org/v1/weather", variable="HDD,CDD", region_id="EU") %>%
     mutate(across(variable, tolower)) ->
     dd
 
@@ -144,8 +144,8 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
 
   #additional plots
   dd %>%
-    filter(year(date) %in% 2018:2024, region_id=='EU') %>% 
-    group_by(variable) %>% 
+    filter(year(date) %in% 2018:2024, region_id=='EU') %>%
+    group_by(variable) %>%
     mutate(plotdate = date %>% 'year<-'(2000),
            across(value, zoo::rollapplyr, FUN=mean, width=30, fill=NA, na.rm=T)) ->
     dd_plot
@@ -161,7 +161,7 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
          subtitle='population-weighted average for EU-27',
          y='degree-days', x='') +
     theme_crea(legend.position='top') + scale_color_crea_d('change', col.index = c(7,1), guide='none') +
-    scale_alpha_discrete(range=c(.33,1), 
+    scale_alpha_discrete(range=c(.33,1),
                          # guide=guide_legend(nrow=1, override.aes = list(alpha=1, color=c('gray66', 'gray33', 'black')), title.position = 'left')
                          ) +
     scale_x_date(date_labels = '%b', expand=expansion(mult=.01)) +

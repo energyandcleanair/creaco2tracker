@@ -61,15 +61,11 @@ get_gas_demand <- function(diagnostic_folder='diagnostics'){
 #' @examples
 get_gas_demand_consdist <- function(years){
 
-
-  types <- c('consumption','distribution')
-
-  entsog <- years %>%
-    pbapply::pblapply(function(x){
-      Sys.sleep(2)
-      read_csv(sprintf('https://api.russiafossiltracker.com/v0/entsogflow?format=csv&date_from=%s-01-01&date_to=%s-12-31&type=%s', x, x, paste0(types, collapse=',')),
-               show_col_types = FALSE)}) %>%
-    bind_rows()
+  entsog <- creahelpers::api.get("https://api.russiafossiltracker.com/v0/entsogflow",
+                                 date_from=glue("{min(years)}-01-01}"),
+                                 date_to=glue("{max(years)}-01-01}"),
+                                 type='consumption,distribution',
+                                 split_by='year')
 
   consdist <- entsog %>%
     group_by(iso2=destination_iso2, date) %>%
@@ -96,14 +92,12 @@ get_gas_demand_apparent <- function(years, use_agsi_for_storage=F){
 
 
   eu_iso2 <- setdiff(countrycode::codelist$iso2c[which(countrycode::codelist$eu28=="EU")], "GB")
-  types <- c('storage','crossborder','production')
 
-  entsog <- years %>%
-    pbapply::pblapply(function(x){
-      Sys.sleep(2)
-      read_csv(sprintf('https://api.russiafossiltracker.com/v0/entsogflow?format=csv&date_from=%s-01-01&date_to=%s-12-31&type=%s', x, x, paste0(types, collapse=',')),
-               show_col_types = FALSE)}) %>%
-    bind_rows()
+  entsog <- creahelpers::api.get("https://api.russiafossiltracker.com/v0/entsogflow",
+                                 date_from=glue("{min(years)}-01-01}"),
+                                 date_to=glue("{max(years)}-01-01}"),
+                                 type='storage,crossborder,production',
+                                 split_by='year')
 
 
   if(use_agsi_for_storage){
@@ -333,25 +327,4 @@ keep_best<- function(consumption,
     left_join(consumption) %>%
     ungroup()
 }
-
-
-remove_power_sector <- function(gas_demand){
-
-  region_ids = unique(gas_demand$region_id)
-
-  pwr <- download_electricity(region_id=region_ids,
-                              data_source='entsoe')
-
-  thermal_eff <- download_thermal_efficiency(region_id=region_ids)
-
-  gas_for_power <- pwr %>%
-    left_join(thermal_eff %>% select(region_id, eff=value)) %>%
-    mutate(value_for_power_m3=value_mwh * 1e3 / eff / ncv_kwh_m3) %>%
-    select(region_id, date, value_for_power_m3)
-
-  d <- gas_demand %>%
-    left_join(gas_for_power)
-}
-
-
 
