@@ -1,4 +1,9 @@
-
+get_eu_iso2s <- function(eurostat=F){
+  cl <- countrycode::codelist
+  iso2s <- cl$iso2c[which(cl$eu28=="EU" & cl$iso2c != "GB")]
+  if(eurostat) iso2s[iso2s=="GR"]="EL"
+  iso2s
+}
 
 recode_siec <- function(x){
   x %>%
