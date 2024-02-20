@@ -1,5 +1,5 @@
 download_co2_daily <- function(date_from="2015-01-01", use_cache = F, refresh_cache = F, version=NULL, iso2s=NULL){
-  creahelpers::api.get("http://localhost:8080/co2/emission",
+  creahelpers::api.get("api.energyandcleanair.org/co2/emission",
                        date_from=date_from,
                        use_cache = use_cache,
                        refresh_cache = refresh_cache,
@@ -22,7 +22,7 @@ download_gas_demand <- function(region_id=NULL, use_cache = F, refresh_cache = F
   # Remove null elements
   params <- purrr::compact(params)
 
-  creahelpers::api.get("http://localhost:8080/energy/demand",
+  creahelpers::api.get("api.energyandcleanair.org/energy/demand",
                        params=params,
                        use_cache = use_cache,
                        refresh_cache = refresh_cache,
@@ -78,7 +78,7 @@ download_corrected_demand <- function(region_id=NULL, sector='total', use_cache 
   # Remove null elements
   params <- purrr::compact(params)
 
-  creahelpers::api.get("http://localhost:8080/energy/demand",
+  creahelpers::api.get("api.energyandcleanair.org/energy/demand",
                        params=params,
                        use_cache = use_cache,
                        refresh_cache = refresh_cache,
@@ -113,7 +113,7 @@ download_thermal_efficiency <- function(region_id=NULL){
   # Create URL params
   url_params <- paste(names(params), params, sep = "=", collapse = "&")
 
-  eff <-  creahelpers::api.get('https://http://localhost:8080/energy/iea_balance', params=params) %>%
+  eff <-  creahelpers::api.get('api.energyandcleanair.org/energy/iea_balance', params=params) %>%
     mutate(value=value/100) %>%
     select(region_id=iso2, product_raw, flow_raw, unit, year, value)
 
