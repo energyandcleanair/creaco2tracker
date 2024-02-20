@@ -1,18 +1,15 @@
-get_eurostat_from_code <- function(code, use_cache=T){
-
-  filepath <- file.path('cache', paste0('eurostat_', code, '.RDS'))
-  dir.create("cache", F, T)
-
-  if(use_cache & file.exists(filepath)){
-    return(readRDS(filepath))
-  }
-  eurostat::get_eurostat(code) %>%
-    eurostat::label_eurostat(code="nrg_bal") %>% # Keep nrg_bal code as well
-    dplyr::rename(time=TIME_PERIOD) %T>%# Column changed with new EUROSTAT version
-    saveRDS(filepath)
-}
 
 
+#' Get monthly fossil fuel consumption per country from EUROSTAT energy balance
+#'
+#' @param diagnostic_folder
+#' @param use_cache
+#' @param iso2s
+#'
+#' @return
+#' @export
+#'
+#' @examples
 get_eurostat_cons <- function(diagnostic_folder='diagnostics', use_cache=F, iso2s=NULL){
 
   consumption_codes_monthly = c("nrg_cb_sffm", "nrg_cb_oilm", "nrg_cb_gasm")
@@ -35,16 +32,6 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics', use_cache=F, iso2
   cons_monthly_raw$gas <- fill_ng_elec_eu27(cons_monthly_raw_gas = cons_monthly_raw$gas)
 
   filter_coal_monthly <- function(x){
-
-    # x %>%
-    #   filter(grepl('Transformation input|Final consumption.*(industry sector$|other sectors$)', nrg_bal)) %>%
-    #   filter(grepl('27', geo),
-    #          time=='2020-01-01') %>%
-    #   group_by(nrg_bal, unit, siec) %>%
-    #   summarise(values=sum(values)) %>%
-    #   arrange(desc(values)) %>%
-    #   View
-
     x %>%
       filter(
         (grepl('Transformation input|Final consumption.*(industry sector$|other sectors$)', nrg_bal)) |
@@ -55,15 +42,6 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics', use_cache=F, iso2
   }
 
   filter_coal_yearly <- function(x){
-
-    # x %>%
-    #   filter(grepl('27', geo),
-    #          time=='2000-01-01') %>%
-    #   group_by(nrg_bal, unit, siec) %>%
-    #   summarise(values=sum(values)) %>%
-    #   arrange(desc(values)) %>%
-    #   View
-
     x %>%
       filter(nrg_bal %in% c(
         'Transformation input - energy use',
@@ -102,19 +80,9 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics', use_cache=F, iso2
              grepl('27', geo),
              siec=='Natural gas') %>%
       group_by(year=year(time), nrg_bal) %>%
-      summarise(values=sum(values)) %>%
+      summarise(values=sum(values), .groups="drop") %>%
       ggplot() +
       geom_line(aes(year, values, col=nrg_bal))
-
-    # The values we are after aren't always indicated in mcm
-    # gcv <- x %>%
-    #   filter(values>0,
-    #          nrg_bal_code=='IC_OBS') %>%
-    #   tidyr::spread(unit, values) %>%
-    #   mutate(gcv=`Terajoule (gross calorific value - GCV)`/`Million cubic metres`) %>%
-    #   filter(!is.na(gcv)) %>%
-    #   select(geo, time, gcv)
-
 
     x_all <- x %>%
       filter(nrg_bal %in% c('Inland consumption - observed',
@@ -123,7 +91,8 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics', use_cache=F, iso2
              siec=='Natural gas') %>%
       group_by(across(-c(nrg_bal, nrg_bal_code, values))) %>%
       summarise(values=sum(values * case_when(nrg_bal=='Inland consumption - observed' ~ 1,
-                                              T ~ -1))) %>%
+                                              T ~ -1)),
+                .groups="drop") %>%
       mutate(sector='all')
 
     x_elec <- x %>%
@@ -151,7 +120,7 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics', use_cache=F, iso2
     filter_gas(x)
   }
 
-  de_all <- function(x){
+  split_elec_others <- function(x){
     x %>%
       mutate(values=values*ifelse(sector=='electricity', -1, 1)) %>%
       group_by(geo, time, unit, siec) %>%
@@ -173,40 +142,16 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics', use_cache=F, iso2
   cons_monthly <- list(
     coal = filter_coal_monthly(cons_monthly_raw$coal),
     oil = filter_oil_monthly(cons_monthly_raw$oil),
-    gas = filter_gas_monthly(cons_monthly_raw$gas) %>% de_all()
+    gas = filter_gas_monthly(cons_monthly_raw$gas) %>% split_elec_others()
   ) %>%
     aggregate()
 
   cons_yearly <- list(
-    coal = filter_coal_yearly(cons_yearly_raw$coal) %>% de_all(),
+    coal = filter_coal_yearly(cons_yearly_raw$coal) %>% split_elec_others(),
     oil = filter_oil_yearly(cons_yearly_raw$oil),
-    gas = filter_gas_yearly(cons_yearly_raw$gas) %>% de_all()
+    gas = filter_gas_yearly(cons_yearly_raw$gas) %>% split_elec_others()
   ) %>%
     aggregate()
-
-
-  # Visual check that we kept the right sectors for each fuel
-  if(!is.null(diagnostic_folder)){
-    library(rcrea)
-
-    (plt <- bind_rows(
-      do.call(bind_rows, cons_yearly) %>% mutate(source='yearly'),
-      do.call(bind_rows, cons_monthly) %>% mutate(source='monthly')) %>%
-
-        filter(grepl('27', geo, T)) %>%
-        recode_siec() %>%
-        filter(siec %in% .[.$source=='monthly',]$siec) %>%
-        group_by(year=lubridate::year(time), siec, source, fuel_type, sector) %>%
-        summarise(values=sum(values)) %>%
-        ggplot(aes(year, values, col=siec, linetype=source)) +
-        geom_line() +
-        facet_grid(fuel_type~sector, scales='free_y') +
-        theme(legend.position = 'bottom') +
-        rcrea::scale_y_crea_zero())
-
-    ggsave(file.path(diagnostic_folder,'eurostat_annual_vs_monthly_yearly.png'), plot=plt, width=12, height=6, bg='white')
-  }
-
 
   # Seasonal adjusment
   month_shares <- lapply(cons_monthly, function(cons){
@@ -216,7 +161,7 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics', use_cache=F, iso2
       mutate(count=n()) %>%
       filter(count==12) %>%
       group_by(sector, siec, unit, geo, fuel_type, month=lubridate::month(time)) %>%
-      summarise(values = sum(values, na.rm=T)) %>%
+      summarise(values = sum(values, na.rm=T), .groups="drop") %>%
       group_by(sector, siec, unit, geo, fuel_type) %>%
       mutate(month_share = values / sum(values, na.rm=T)) %>%
       mutate(month_share = replace_na(month_share, 1/12),
@@ -228,7 +173,7 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics', use_cache=F, iso2
     # Check ~1
     if(!all(month_shares %>%
             group_by(sector, siec, unit, geo, fuel_type) %>%
-            summarise(one=round(sum(month_share), 5)) %>%
+            summarise(one=round(sum(month_share), 5), .groups="drop") %>%
             pull(one) %>%
             unique() == 1)){stop('Wrong monthly shares')}
 
@@ -240,8 +185,8 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics', use_cache=F, iso2
   cons_yearly_monthly <- lapply(names(cons_yearly), function(commodity){
     cons_yearly[[commodity]] %>%
       mutate(year=lubridate::year(time)) %>%
-      # filter(time < min(cons$coal$time)) %>%
-      inner_join(month_shares[[commodity]]) %>%
+      inner_join(month_shares[[commodity]],
+                 relationship = "many-to-many") %>%
       arrange(sector, siec, unit, geo, fuel_type, time) %>%
       mutate(time=as.Date(sprintf('%s-%0d-01', year, month)),
              values=values * month_share)   %>%
@@ -257,36 +202,11 @@ get_eurostat_cons <- function(diagnostic_folder='diagnostics', use_cache=F, iso2
     ungroup()
 
   # Visual check
-  if(!is.null(diagnostic_folder)){
-    plt <- cons_combined %>%
-      # group_by(geo, sector, time, unit, siec, fuel_type) %>%
-      # arrange(source) %>%
-      # slice(1) %>%
-      # ungroup() %>%
-      filter(grepl('European union', geo, T)) %>%
-      ggplot(aes(time, values, col=siec, linetype=source)) +
-      geom_line() +
-      facet_grid(fuel_type~sector, scales='free_y') +
-      theme(legend.position='bottom')+
-      rcrea::scale_y_crea_zero()
-
-    ggsave(file.path(diagnostic_folder,'eurostat_annual_vs_monthly_monthly.png'), plot=plt, width=8, height=6, bg='white')
-
-    plt <- cons_combined %>%
-      group_by(geo, sector, time, unit, siec, fuel_type) %>%
-      arrange(source) %>%
-      slice(1) %>%
-      ungroup() %>%
-      filter(grepl('European union', geo, T)) %>%
-      ggplot(aes(time, values, col=siec, linetype=source)) +
-      geom_line() +
-      facet_grid(fuel_type~sector, scales='free_y') +
-      theme(legend.position='bottom')+
-      rcrea::scale_y_crea_zero()
-
-    ggsave(file.path(diagnostic_folder,'eurostat_combined.png'), plot=plt, width=8, height=6, bg='white')
-  }
-
+  diagnostic_eurostat_cons_yearly_monthly(
+    cons_yearly = cons_yearly,
+    cons_monthly = cons_monthly,
+    cons_combined = cons_combined
+  )
 
   # Keep monthly when both are available
   cons <- cons_combined  %>%
@@ -450,7 +370,7 @@ fill_ng_elec_eu27 <- function(cons_monthly_raw_gas){
     filter(nrg_bal==nrg_bal_elec) %>%
     filter(iso2 %in% get_eu_iso2s()) %>%
     group_by(unit, time) %>%
-    summarise(values=sum(values, na.rm=T))
+    summarise(values=sum(values, na.rm=T), .groups="drop")
 
   eu27_ng_elec_old <- cons_monthly_raw_gas %>%
     add_iso2() %>%
@@ -503,3 +423,19 @@ remove_last_incomplete <- function(cons){
     filter(cumsum!=0 | max(cumsum)==0 | row_number() >= max_months) %>%
     ungroup()
 }
+
+
+get_eurostat_from_code <- function(code, use_cache=T){
+
+  filepath <- file.path('cache', paste0('eurostat_', code, '.RDS'))
+  dir.create("cache", F, T)
+
+  if(use_cache & file.exists(filepath)){
+    return(readRDS(filepath))
+  }
+  eurostat::get_eurostat(code) %>%
+    eurostat::label_eurostat(code="nrg_bal") %>% # Keep nrg_bal code as well
+    dplyr::rename(time=TIME_PERIOD) %T>%# Column changed with new EUROSTAT version
+    saveRDS(filepath)
+}
+

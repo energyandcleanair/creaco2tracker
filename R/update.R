@@ -19,6 +19,8 @@ update_all <- function(production=T){
   library(tidytext)
   library(countrycode)
   library(plotly)
+  library(glue)
+  library(logger)
 
   update_gas_demand(production=production)
   update_co2_daily(production=production)

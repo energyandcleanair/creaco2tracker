@@ -328,24 +328,3 @@ keep_best<- function(consumption,
     ungroup()
 }
 
-
-remove_power_sector <- function(gas_demand){
-
-  region_ids = unique(gas_demand$region_id)
-
-  pwr <- download_electricity(region_id=region_ids,
-                              data_source='entsoe')
-
-  thermal_eff <- download_thermal_efficiency(region_id=region_ids)
-
-  gas_for_power <- pwr %>%
-    left_join(thermal_eff %>% select(region_id, eff=value)) %>%
-    mutate(value_for_power_m3=value_mwh * 1e3 / eff / ncv_kwh_m3) %>%
-    select(region_id, date, value_for_power_m3)
-
-  d <- gas_demand %>%
-    left_join(gas_for_power)
-}
-
-
-

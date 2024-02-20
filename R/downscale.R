@@ -1,54 +1,40 @@
 downscale_daily <- function(co2, pwr_demand, gas_demand){
 
   #add Gas all sectors total
-  gas_sectors <- co2 %>% filter(fuel_type=='gas') %>% pull(sector) %>% unique()
-  if(all(sort(gas_sectors) == sort(c(SECTOR_ELEC, SECTOR_OTHERS)))){
-    co2 <- co2 %>%
-      filter(fuel_type=='gas', sector != SECTOR_ALL) %>%
-      group_by(iso2, geo, time, fuel_type) %>%
-      summarise(
-        # coverage=weighted.mean(coverage, CO2_emissions),
-        across(CO2_emissions, sum)) %>%
-      mutate(sector=SECTOR_ALL) %>%
-      bind_rows(co2 %>% filter(fuel_type!='gas' | sector != SECTOR_ALL))
-  }
+  co2 <- co2 %>%
+    split_gas_to_elec_all()
 
   daily_proxy <- get_daily_proxy(pwr_demand = pwr_demand, gas_demand = gas_demand)
 
   #identify variable combos with data
-  co2 %>% ungroup %>% filter(CO2_emissions>0) %>% distinct(fuel_type, sector) -> grps
+  grps <- co2 %>% ungroup %>% filter(value_co2_tonne>0) %>% distinct(fuel_type, sector)
 
   #dates for which to output estimates
-  dts_daily <- seq.Date(min(co2$time), max(daily_proxy$date), by='d')
+  dts_daily <- seq.Date(min(co2$date), max(daily_proxy$date), by='d')
 
   #expand monthly data to daily and add daily data
   co2 %>%
     group_by(iso2, geo, fuel_type, sector) %>%
-    rename(month=time) %>%
-    full_join(tibble(date=dts_daily, month=dts_daily %>% 'day<-'(1))) %>%
-    mutate(CO2_emissions = CO2_emissions/days_in_month(date)) %>%
-    right_join(grps) %>%
-    left_join(daily_proxy) ->
+    rename(month=date) %>%
+    full_join(
+      tibble(date=dts_daily, month=dts_daily %>% 'day<-'(1)),
+      relationship = "many-to-many",
+      by="month"
+      ) %>%
+    mutate(value_co2_tonne = value_co2_tonne/days_in_month(date)) %>%
+    right_join(grps, by=c("fuel_type", "sector")) %>%
+    left_join(daily_proxy, by=c("fuel_type", "sector", "date")) ->
     co2_daily
 
   #use daily data when available
   co2_daily <- co2_daily %>%
     group_by(iso2, geo, fuel_type, sector) %>%
-    mutate(has_both=!is.na(CO2_emissions+proxy_value) & date>='2021-03-01',
-           proxy_eurostat_ratio = mean(proxy_value[has_both]) / mean(CO2_emissions[has_both]),
+    mutate(has_both=!is.na(value_co2_tonne+proxy_value) & date>='2021-03-01',
+           proxy_eurostat_ratio = mean(proxy_value[has_both]) / mean(value_co2_tonne[has_both]),
            proxy_CO2 = proxy_value / proxy_eurostat_ratio,
-           CO2_hybrid = case_when(!is.na(proxy_CO2) & date>='2021-03-01' ~ proxy_CO2,
-                                  #CO2_emissions * coverage + proxy_CO2 * 1-coverage,
-                                  T ~ CO2_emissions))
-
-  # Resplit gas between electricity and others
-  co2_daily <- co2_daily %>%
-    filter(fuel_type=='gas') %>%
-    group_by(iso2, geo, date, fuel_type) %>%
-    summarise(across(c(CO2_hybrid, CO2_emissions), ~.x[sector==SECTOR_ALL]-.x[sector==SECTOR_ELEC])) %>%
-    mutate(sector='others') %>%
-    bind_rows(co2_daily %>% filter(fuel_type!='gas' | (!sector %in% c(SECTOR_OTHERS, SECTOR_ALL)))) %>%
-    ungroup()
+           value_co2_tonne = case_when(!is.na(proxy_CO2) & date>='2021-03-01' ~ proxy_CO2,
+                                  #value_co2_tonne * coverage + proxy_CO2 * 1-coverage,
+                                  T ~ value_co2_tonne))
 
   return(co2_daily)
 }

@@ -3,13 +3,12 @@ get_co2_from_eurostat_cons <- function(eurostat_cons, diagnostic_folder="diagnos
     # filter(fuel_type=='coal') %>%
     add_ncv(diagnostic_folder = diagnostic_folder) %>%
     add_emission_factor() %>%
-    mutate(CO2_emissions=
-             case_when(unit=='Thousand tonnes' ~ values * ncv_kjkg / 1000 * co2_factor,
-                       unit=='Terajoule (gross calorific value - GCV)' & siec == "Natural gas" ~ values * ncv_gcv_gas * co2_factor
+    mutate(value_co2_tonne=
+             case_when(unit=='Thousand tonnes' ~ values * ncv_kjkg / 1000 * co2_factor_t_per_TJ,
+                       unit=='Terajoule (gross calorific value - GCV)' & siec == "Natural gas" ~ values * ncv_gcv_gas * co2_factor_t_per_TJ
              )) %>%
-    group_by(iso2, geo, time, fuel_type, sector) %>%
-    summarise_at('CO2_emissions', sum, na.rm=T) %>%
-    ungroup()
+    group_by(iso2, geo, date=time, fuel_type, sector) %>%
+    summarise_at('value_co2_tonne', sum, na.rm=T)
 }
 
 
@@ -43,16 +42,17 @@ add_ncv <- function(x, diagnostic_folder=NULL){
     summarise(ncv_kjkg=mean(value),
               max=max(value),
               min=min(value),
-              source="IEA"
+              source="IEA",
+              .groups="drop"
               ) %>%
-    filter(!is.na(siec)) %>%
-    ungroup()
+    filter(!is.na(siec))
 
   # There are weird outliers values (e.g. Brown coal for NL and FR)
   # Removing them
   conversion %>%
     group_by(siec, iso2) %>%
-    summarise(ncv_kjkg=mean(ncv_kjkg)) %>%
+    summarise(ncv_kjkg=mean(ncv_kjkg),
+              .groups="drop") %>%
     group_by(siec) %>%
     mutate(zscore=(ncv_kjkg-mean(ncv_kjkg))/sd(ncv_kjkg)) %>%
     arrange(desc(zscore)) %>%
@@ -67,11 +67,13 @@ add_ncv <- function(x, diagnostic_folder=NULL){
     left_join(
       x %>%
         group_by(iso2, year=year(time), siec) %>%
-        summarise(qty=sum(values))
+        summarise(qty=sum(values),
+                  .groups="drop")
     ) %>%
     mutate(qty=tidyr::replace_na(qty, 0)) %>%
     group_by(siec, year) %>%
-    summarise(ncv_kjkg_wmean=weighted.mean(ncv_kjkg, qty)) %>%
+    summarise(ncv_kjkg_wmean=weighted.mean(ncv_kjkg, qty),
+              .groups="drop") %>%
     filter(!is.na(ncv_kjkg_wmean))
 
   conversion_filled <- conversion %>%
@@ -93,7 +95,8 @@ add_ncv <- function(x, diagnostic_folder=NULL){
     conversion_filled %>%
       group_by(iso2, siec) %>%
       summarise(
-        ncv_kjkg=mean(ncv_kjkg)
+        ncv_kjkg=mean(ncv_kjkg),
+        .groups="drop"
       ) %>%
       ungroup() %>%
       # arrange(iso2, siec, source) %>%
@@ -110,25 +113,12 @@ add_ncv <- function(x, diagnostic_folder=NULL){
     group_by(geo, siec) %>%
     arrange(time) %>%
     tidyr::fill(ncv_kjkg, .direction = "downup")
-
-
-  # filter(grepl("lignite|sub-bituminous", product, ignore.case=T))
-  # siec=='Hard coal'~29.3*5000/7000*94.6,
-  # siec=='Brown coal'~10*102,
-  # siec=='Peat'~9.7*106,
-  # grepl('Oil shale', siec)~6.4*108,
-  # grepl('Oil products', siec)~46*72,
-  # grepl('Crude oil', siec)~44*73,
-  # siec=='Natural gas'~.9*42*55),
-
-
 }
 
 add_emission_factor <- function(x){
 
-
   x %>%
-    mutate(co2_factor = case_when(
+    mutate(co2_factor_t_per_TJ = case_when(
       siec=='Hard coal'~92.8, #EFID=110620
       siec=='Brown coal'~113.1, #EFID=123085
       siec=='Peat'~117.766, #EFID=122005
@@ -138,14 +128,4 @@ add_emission_factor <- function(x){
       siec=='Natural gas'~55.74, #Average of EFID123092-123095
       siec=='Coke oven coke' ~ 113) #EFID=110624
     )
-
-  # mutate(co2_factor = case_when(
-  #   siec=='Hard coal'~29.3*5000/7000*94.6,
-  #   siec=='Brown coal'~10*102,
-  #   siec=='Peat'~9.7*106,
-  #   grepl('Oil shale', siec)~6.4*108,
-  #   grepl('Oil products', siec)~46*72,
-  #   grepl('Crude oil', siec)~44*73,
-  #   siec=='Natural gas'~.9*42*55)
-  # )
 }

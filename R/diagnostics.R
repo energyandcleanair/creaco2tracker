@@ -13,7 +13,8 @@ diagnostic_pwr <- function(pwr_demand, diagnostic_folder="diagnostics"){
   #output range of values for several years
   pwr_ranges <- pwr_demand %>% filter(year %in% 2015:2021) %>%
     group_by(region, country, source, plotdate) %>%
-    summarise(min=min(output_mw_rollmean), max=max(output_mw_rollmean))
+    summarise(min=min(output_mw_rollmean), max=max(output_mw_rollmean),
+              .groups="drop")
 
   #plot by source
   if(!is.null(diagnostic_folder)){
@@ -40,6 +41,53 @@ diagnostic_pwr <- function(pwr_demand, diagnostic_folder="diagnostics"){
 }
 
 
+diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, cons_combined, diagnostic_folder="diagnostics"){
+
+  if(!is.null(diagnostic_folder)){
+    (plt <- bind_rows(
+      do.call(bind_rows, cons_yearly) %>% mutate(source='yearly'),
+      do.call(bind_rows, cons_monthly) %>% mutate(source='monthly')) %>%
+
+        filter(grepl('27', geo, T)) %>%
+        recode_siec() %>%
+        filter(siec %in% .[.$source=='monthly',]$siec) %>%
+        group_by(year=lubridate::year(time), siec, source, fuel_type, sector) %>%
+        summarise(values=sum(values)) %>%
+        ggplot(aes(year, values, col=siec, linetype=source)) +
+        geom_line() +
+        facet_grid(fuel_type~sector, scales='free_y') +
+        theme(legend.position = 'bottom') +
+        rcrea::scale_y_crea_zero())
+
+    ggsave(file.path(diagnostic_folder,'eurostat_annual_vs_monthly_yearly.png'), plot=plt, width=12, height=6, bg='white')
+
+    plt <- cons_combined %>%
+      filter(grepl('European union', geo, T)) %>%
+      ggplot(aes(time, values, col=siec, linetype=source)) +
+      geom_line() +
+      facet_grid(fuel_type~sector, scales='free_y') +
+      theme(legend.position='bottom')+
+      rcrea::scale_y_crea_zero()
+
+    ggsave(file.path(diagnostic_folder,'eurostat_annual_vs_monthly_monthly.png'), plot=plt, width=8, height=6, bg='white')
+
+    plt <- cons_combined %>%
+      group_by(geo, sector, time, unit, siec, fuel_type) %>%
+      arrange(source) %>%
+      slice(1) %>%
+      ungroup() %>%
+      filter(grepl('European union', geo, T)) %>%
+      ggplot(aes(time, values, col=siec, linetype=source)) +
+      geom_line() +
+      facet_grid(fuel_type~sector, scales='free_y') +
+      theme(legend.position='bottom')+
+      rcrea::scale_y_crea_zero()
+
+    ggsave(file.path(diagnostic_folder,'eurostat_combined.png'), plot=plt, width=8, height=6, bg='white')
+  }
+
+}
+
 diagnostic_eurostat_cons <- function(eurostat_cons, iso2s, diagnostic_folder="diagnostics"){
 
   dir.create(diagnostic_folder, showWarnings = FALSE)
@@ -65,27 +113,34 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s, diagnostic_folder="di
 
 diagnostic_co2 <- function(co2_daily, diagnostic_folder="diagnostics"){
 
+
+  diagnostic_co2_simple(co2_daily, diagnostic_folder)
+  diagnostic_co2_benchmark_yearly(co2_daily, diagnostic_folder)
+  diagnostic_co2_benchmark_monthly(co2_daily, diagnostic_folder)
+}
+
+
+diagnostic_co2_simple <- function(co2_daily, diagnostic_folder="diagnostics"){
+
   dir.create(diagnostic_folder, showWarnings = FALSE)
 
   if(!is.null(diagnostic_folder)){
-    plt <- co2_daily %>%
-      filter(year(date)>=2010) %>%
-      mutate(across(c(fuel_type, sector), tolower)) %>%
-      group_by(sector, fuel_type) %>%
-      mutate(CO2_30d = zoo::rollapplyr(CO2_hybrid, 30, mean, fill=NA),
-             year=as.factor(year(date)), plotdate=date %>% 'year<-'(2022)) %>%
-      ggplot(aes(plotdate, CO2_30d/1e6, col=year)) +
-      geom_line(size=0.2) +
-      facet_wrap(~paste(fuel_type, sector), scales='free_y') +
-      expand_limits(y=0)  + scale_x_date(expand=c(0,0)) +
-      theme_crea() +
-      labs(title="EU CO2 emissions", y='Mt/day, 30-day mean', x='')
+    (plt <- co2_daily %>%
+       mutate(across(c(fuel_type, sector), tolower)) %>%
+       group_by(sector, fuel_type) %>%
+       mutate(CO2_30d = zoo::rollapplyr(value_co2_tonne, 30, mean, fill=NA),
+              year=as.factor(year(date)), plotdate=date %>% 'year<-'(2022)) %>%
+       filter(year(date)>=2010) %>%
+       ggplot(aes(plotdate, CO2_30d/1e6, col=year)) +
+       geom_line(size=0.2) +
+       facet_wrap(iso2 ~paste(fuel_type, sector), scales='free_y') +
+       expand_limits(y=0)  + scale_x_date(expand=c(0,0)) +
+       theme_crea() +
+       rcrea::scale_y_crea_zero() +
+       labs(title="EU CO2 emissions", y='Mt/day, 30-day mean', x=''))
 
-    ggsave(file.path(diagnostic_folder,'EU CO2 emissions.png'), plot=plt, width=8, height=6, bg='white')
+    ggsave(file.path(diagnostic_folder,'EU CO2 emissions.png'), plot=plt, width=8, height=6, bg='white', scale=1)
   }
-
-  diagnostic_co2_benchmark_yearly(co2_daily, diagnostic_folder)
-  diagnostic_co2_benchmark_monthly(co2_daily, diagnostic_folder)
 }
 
 diagnostic_co2_benchmark_yearly <- function(co2_daily, diagnostic_folder="diagnostics"){
@@ -94,54 +149,91 @@ diagnostic_co2_benchmark_yearly <- function(co2_daily, diagnostic_folder="diagno
     filter(sector=='all',
            fuel_type=='total') %>%
     group_by(iso2, year=year(date)) %>%
-    summarise(value=sum(CO2_emissions)/1e6,
+    summarise(value=sum(value_co2_tonne)/1e6,
               unit="mt",
-              source='CREA') %>%
+              source='CREA CO2 tracker') %>%
     filter(year < 2024) %>%
     ungroup()
 
   read_benchmark <- function(path){
     # Read and convert all columns that are not in c(iso, `Country/Region`, unit) to numeric
-    read_csv(path) %>%
-      mutate_at(vars(-c(iso, `Country/Region`, unit)), as.numeric)
+    suppressWarnings(read_csv(path, col_types = cols()) %>%
+      filter(grepl('co2', unit, ignore.case=T)) %>%
+      mutate_at(vars(-c(iso, `Country/Region`, unit)), as.numeric)) %>%
+      mutate(iso2=countrycode::countrycode(iso, "iso3c", "iso2c",
+                                           custom_match=c("EUU"="EU"))) %>%
+      select(-c(iso)) %>%
+      tidyr::gather(key="year", value="value",
+                    -c(iso2, `Country/Region`, unit)) %>%
+      mutate(year=as.numeric(year)) %>%
+      mutate(value=as.numeric(value)) %>%
+      filter(!is.na(value))
+  }
+
+  get_primap <- function(iso2s, with_mineral=F){
+
+    x <- read_csv('data/Guetschow_et_al_2023b-PRIMAP-hist_v2.5_final_15-Oct-2023.csv') %>%
+      mutate(iso2 = countrycode(`area (ISO3)`, "iso3c", "iso2c", custom_match = c("EU27BX"="EU"))) %>%
+      rename(category=`category (IPCC2006_PRIMAP)`,
+             scenario=`scenario (PRIMAP-hist)`) %>%
+      filter(
+        entity=="CO2",
+        iso2 %in% iso2s,
+        scenario=='HISTCR'
+        ) %>%
+      filter(category %in% c(1, 2, "2.A")) %>%
+      # select all columns that are have number names
+      select(matches("iso2|category|\\d+$")) %>%
+      tidyr::gather(key = "year", value = "value", -c(iso2, category)) %>%
+      mutate(year=as.numeric(year),
+             value=value/1e3)
+
+    if(with_mineral){
+      x %>%
+        group_by(iso2, year) %>%
+        filter(category %in% c(1,2)) %>%
+        summarise(value=sum(value), .groups = "drop")
+    }else{
+      x %>%
+        group_by(iso2, year) %>%
+        summarise(value=sum(value * case_when(category=="2.A"~-1, T ~1)), .groups="drop")
+    }
   }
 
   co2_validate <-
+    # Regenerate this data here:
+    # https://shorturl.at/anQR1
     bind_rows(
-      read_benchmark('data/ghg-emissions-climatewatch-withindustry.csv') %>% mutate(source='Climate Watch'),
-      read_benchmark('data/ghg-emissions-unfccc-withindustry.csv') %>% mutate(source='UNFCCC'),
-      read_benchmark('data/ghg-emissions-gcp.csv') %>% mutate(source='GCP'),
-      read_benchmark('data/ghg-emissions-pik.csv') %>% mutate(source='PIK')
+      # read_benchmark('data/ghg-emissions-climatewatch-withindustry.csv') %>% mutate(source='Climate Watch (with industry)'),
+      # read_benchmark('data/ghg-emissions-climatewatch.csv') %>% mutate(source='Climate Watch'),
+      # read_benchmark('data/ghg-emissions-unfccc-withindustry.csv') %>% mutate(source='UNFCCC (with industry)'),
+      # read_benchmark('data/ghg-emissions-unfccc.csv') %>% mutate(source='UNFCCC'),
+      # read_benchmark('data/ghg-emissions-gcp.csv') %>% mutate(source='GCP'),
+      # read_benchmark('data/ghg-emissions-pik-withindustry.csv') %>% mutate(source='Old PRIMAP-hist v2.5 (Energy and Industry)'),
+      # read_benchmark('data/ghg-emissions-pik.csv') %>% mutate(source='PRIMAP-hist v2.5 (Energy alone)')
+      get_primap(iso2s=unique(co2_crea$iso2), with_mineral = T) %>% mutate(source='PRIMAP Energy and Industry'),
+      get_primap(iso2s=unique(co2_crea$iso2), with_mineral = F) %>% mutate(source='PRIMAP Energy and Industry\n(excl. Mineral industry)')
     ) %>%
-    mutate(iso2=countrycode::countrycode(iso, "iso3c", "iso2c",
-                                         custom_match=c("EUU"="EU"))) %>%
-    filter(iso2 %in% unique(co2_crea$iso2)) %>%
-    tidyr::gather(key="year", value="value",
-                  -c(iso2, iso, `Country/Region`, unit, source)) %>%
-    mutate(year=as.numeric(year)) %>%
-    mutate(value=as.numeric(value)) %>%
-    filter(!is.na(value))
+    filter(iso2 %in% unique(co2_crea$iso2))
 
-  # co2_projected <- co2_crea %>%
-  #   filter(year %in% seq(2021, 2023)) %>%
-  #   arrange(year) %>%
-  #   mutate(ratio = value/value[year==2021]) %>%
-  #   select(iso2, year, ratio) %>%
-  #   cross_join(
-  #     co2_validate %>%
-  #       filter(year==2021) %>%
-  #       select(-c(year))) %>%
-  #   mutate(value=value * ratio)
+
+  # Order factor by dates for chart readability
+  levels_source <- co2_validate %>%
+    filter(year==2020,
+           iso2=="EU") %>%
+    arrange(-value) %>%
+    pull(source)
 
   (bind_rows(
-    co2_crea %>% filter(year >= 1990) %>% mutate(type='estimated'),
-    co2_validate %>% mutate(type='estimated'),
+    co2_crea %>% filter(year >= 1990),
+    co2_validate,
     # co2_projected %>% mutate(type='projected')
   ) %>%
       write_csv(file.path(diagnostic_folder, "co2_benchmark.csv")) %>%
       # filter(type=="estimated") %>%
       mutate(
-        source=factor(source, levels=c("CREA", unique(co2_validate$source)))
+        # source=factor(source, levels=c("CREA", unique(co2_validate$source)))
+        source=factor(source, levels=c("CREA CO2 tracker", levels_source))
       ) %>%
       # filter(source=='UNFCCC') %>%
       # filter(year >= 1990) %>%
@@ -149,28 +241,38 @@ diagnostic_co2_benchmark_yearly <- function(co2_daily, diagnostic_folder="diagno
       geom_line(aes(year, value/1e3, col=source,
                     linewidth=source,
                     alpha=source,
-                    # linetype=type
-                    )) +
+                    # linetype=grepl('industry', source)
+                    ),
+                position=position_dodge(width=0.1)
+                ) +
       scale_x_continuous(limits=c(min(co2_crea$year), NA)) +
-      scale_alpha_manual(values=c(0.9, 1, 1, 1, 1)) +
-      scale_linewidth_manual(values=c(1.6, 0.5, 0.5, 0.5, 0.5)) +
-      scale_color_manual(values=unname(rcrea::pal_crea[c("Blue", "Dark.red", "Dark.blue", "Orange", "Red")])) +
+      scale_alpha_manual(values=c(0.9, 1, 1, 1, 1, 1, 1)) +
+      scale_linewidth_manual(values=c(1.6, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5)) +
+      # scale_linetype_manual(values=c('solid', 'dashed')) +
+      scale_color_manual(values=unname(rcrea::pal_crea[c("Blue", "Dark.red", "Orange", "Dark.blue", "Purple", "Green", "Red")])) +
       rcrea::theme_crea() +
+      # Legend on the top, left align
+      # theme(legend.position = "top",
+      #       legend.title = element_blank(),
+      #       # Left align
+      #
+      #       ) +
+
       rcrea::scale_y_crea_zero() +
-      facet_wrap(~iso2, scales='free_y') +
+      ifelse(length(unique(co2_crea$iso2))>1, facet_wrap(~iso2, scales='free_y'), element_blank()) +
       labs(title="CO2 emissions from fossil fuels",
-           subtitle="Projection of historical sources using CREA CO2 tracker, in billion tonne CO2 per year",
+           subtitle="Billion tonne CO2 per year",
            y=NULL,
            x=NULL,
            linewidth="Source",
-           linetype=NULL,
+           linetype="Source",
            alpha="Source",
            color="Source",
-           caption="Source: CREA analysis based on Climate Watch data. Cement, agriculture and LULUCF are not included in this comparison.") -> plt)
+           caption="Note: PRIMAP refers to PRIMAP-hist v2.5 and includes non-fossil fuels related emissions.") -> plt)
 
   plt
   if(!is.null(diagnostic_folder)){
-    quicksave(file.path(diagnostic_folder, "co2_benchmark.jpg"), plot=plt)
+    quicksave(file.path(diagnostic_folder, "co2_benchmark.jpg"), plot=plt, width=8, height=4, scale=1, logo=F)
   }
 }
 
@@ -179,9 +281,10 @@ diagnostic_co2_benchmark_monthly <- function(co2_daily, diagnostic_folder="diagn
   co2_crea <- co2_daily %>%
     filter(fuel_type!='total') %>%
     group_by(iso2, geo, month=floor_date(date, 'month')) %>%
-    summarise(value=sum(CO2_emissions)/1e6/(as.integer(difftime(max(date),min(date)))+1),
+    summarise(value=sum(value_co2_tonne)/1e6/(as.integer(difftime(max(date),min(date)))+1),
               unit="mt/day",
-              source='CREA') %>%
+              source='CREA CO2 Tracker',
+              .groups="drop") %>%
     ungroup() %>%
     rename(date=month)
 
@@ -212,44 +315,100 @@ diagnostic_co2_benchmark_monthly <- function(co2_daily, diagnostic_folder="diagn
     # rename(value=`MtCO2 per day`) %>%
     group_by(iso2, date=floor_date(date, 'month'), source, sector) %>%
     summarise(value=sum(value/lubridate::days_in_month(date)),
-              unit='mt/day')%>%
+              unit='mt/day',
+              .groups="drop") %>%
     ungroup()
 
 
-    ggplot(data=NULL, aes(date, value)) +
-    geom_area(data=co2_validate %>%
-                filter(date %in% co2_crea$date,
-                       iso2 %in% co2_crea$iso2,
-                      !grepl('Aviation', sector)
-                      ),
-              aes(fill=sector),
-              alpha=0.5) +
-      geom_line(data=co2_validate %>%
-                  filter(date %in% co2_crea$date,
-                         iso2 %in% co2_crea$iso2,
-                         !grepl('Aviation', sector)
-                  ) %>%
-                  group_by(date, iso2, source) %>%
-                  summarise(value=sum(value)),
-                aes(col=source)) +
-    geom_line(data=co2_crea  %>%
-                filter(date >= min(co2_validate$date)),
-              aes(col=source)) +
-    facet_grid(iso2~., scales='free_y') +
+    ggplot(data=bind_rows(
+      co2_validate %>%
+             filter(date %in% co2_crea$date,
+                    iso2 %in% co2_crea$iso2,
+                    !grepl('Aviation', sector)
+             ) %>%
+             group_by(date, iso2, source) %>%
+             summarise(value=sum(value),
+                       .groups="drop"),
+      co2_crea  %>%
+        filter(date >= min(co2_validate$date))) %>%
+        mutate(source=factor(source, levels=c("CREA CO2 Tracker", "Carbon Monitor"))),
+               aes(date, value)) +
+    # geom_area(data=co2_validate %>%
+    #             filter(date %in% co2_crea$date,
+    #                    iso2 %in% co2_crea$iso2,
+    #                   !grepl('Aviation', sector)
+    #                   ),
+    #           aes(fill=sector),
+    #           alpha=0.5) +
+      geom_line(aes(col=source,
+                    alpha=source,
+                    linewidth=source)) +
+      scale_alpha_manual(values=c(0.9, 1, 1, 1, 1, 1, 1)) +
+      scale_linewidth_manual(values=c(1.6, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5)) +
+      # scale_linetype_manual(values=c('solid', 'dashed')) +
+      scale_color_manual(values=unname(rcrea::pal_crea[c("Blue", "Dark.red", "Orange", "Dark.blue", "Purple", "Green", "Red")])) +
+    # geom_line(aes(col=source)) +
+    #   theme(legend.position = "top",
+    #         legend.title = element_blank(),
+    #         # Left align
+    #
+    #   ) +
+
+    # facet_grid(iso2~., scales='free_y') +
       rcrea::theme_crea() +
+      # theme(legend.position = "top",
+      #       legend.title = element_blank(),
+      #       # Left align
+      #
+      # ) +
       rcrea::scale_y_crea_zero() +
       labs(title="EU CO2 emissions from fossil fuels",
-           subtitle="Comparison with Carbon Monitor",
-           y="mt/day",
+           subtitle="Million tonne CO2 per day",
+           y=NULL,
            x=NULL,
-           alpha="Source",
-           color="Source",
+           alpha="",
+           color="",
+           linewidth="",
            fill="Sector",
            caption="Source: CREA analysis.") -> plt
 
 plt
+
 if(!is.null(diagnostic_folder)){
   quicksave(file.path(diagnostic_folder, "co2_benchmark_carbonmonitor.jpg"), plot=plt,
-            height=max(4, 1.5*length(unique(co2_crea$iso2))))
+            width=8, height=4, scale=1, logo=F)
+            # height=min(30,max(4, 1.5*length(unique(co2_crea$iso2)))),
+
 }
+}
+
+
+#' Compare different versions of our tracker
+#'
+#' @param iso2s
+#' @param versions
+#'
+#' @return
+#' @export
+#'
+#' @examples
+diagnostic_versions <- function(iso2s="EU", versions=c("0.2", "0.3")){
+
+  # Read the data
+  co2 <- lapply(versions, function(version) download_co2_daily(iso2s=iso2s, version=versions)) %>%
+    bind_rows()
+
+  versions <- versions %>%
+    map(~readRDS(file.path('data', paste0('co2_', .x, '.rds')))) %>%
+    map(~filter(., iso2 %in% iso2s)) %>%
+    map(~mutate(., version=.y)) %>%
+    bind_rows()
+
+  # Plot the data
+  ggplot(versions, aes(date, value_co2_tonne, col=version)) +
+    geom_line() +
+    facet_wrap(~iso2, scales='free_y') +
+    theme(legend.position = "bottom") +
+    rcrea::scale_y_crea_zero()
+
 }

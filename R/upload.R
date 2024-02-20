@@ -11,7 +11,7 @@ upload_co2_daily <- function(co2_daily, production=T, clear_all_first=F){
 
   print(sprintf("=== Uploading co2_daily (%s) ===", ifelse(production,"production","development")))
 
-  unique_cols <-  c('region', 'date', 'fuel', 'sector', 'unit', 'frequency')
+  unique_cols <-  c('region', 'date', 'fuel', 'sector', 'unit', 'frequency', 'version')
 
   p <- co2_daily %>%
     select(region, date, fuel, sector, unit, frequency, version, value)

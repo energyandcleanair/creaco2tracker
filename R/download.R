@@ -1,9 +1,11 @@
-download_co2_daily <- function(date_from="2015-01-01", use_cache = F, refresh_cache = F){
+download_co2_daily <- function(date_from="2015-01-01", use_cache = F, refresh_cache = F, version=NULL, iso2s=NULL){
   creahelpers::api.get("http://localhost:8080/co2/emission",
                        date_from=date_from,
                        use_cache = use_cache,
                        refresh_cache = refresh_cache,
-                       cache_folder = "cache") %>%
+                       cache_folder = "cache",
+                       region = iso2s,
+                       version = version) %>%
     select(region, date, fuel, sector, unit, frequency, value, version)
 }
 
@@ -28,29 +30,39 @@ download_gas_demand <- function(region_id=NULL, use_cache = F, refresh_cache = F
     select(region_id, date, fuel, sector, unit, frequency, value)
 }
 
+download_pwr_demand <- function(date_from="2015-01-01", region=NULL, use_cache=T, refresh_cache=F) {
 
-download_electricity <- function(region_id=NULL, data_source=NULL, use_cache = F, refresh_cache = F){
+  pwr <- creahelpers::api.get('api.energyandcleanair.org/power/generation',
+                              date_from=date_from,
+                              aggregate_by='country,source,date',
+                              region='EU',
+                              split_by = 'year',
+                              use_cache = use_cache,
+                              refresh_cache = refresh_cache,
+                              cache_folder = "cache")
 
-  params <- list(
-    aggregate_by='country,source,date',
-    data_source=data_source,
-    date_from='2015-01-01',
-    format='csv',
-    country=paste(region_id, collapse=',')
-  )
+  #add total generation
+  pwr <- pwr %>%
+    filter(source!='Total') %>%
+    group_by(iso2, region, country, date) %>%
+    dplyr::summarise_at(c("value_mw", "value_mwh"), sum, na.rm=T) %>%
+    mutate(source='Total') %>%
+    bind_rows(pwr %>% filter(source!='Total'))
 
-  # Remove null elements
-  params <- purrr::compact(params)
+  #add EU total
+  pwr <- pwr %>%
+    filter(country!='EU total') %>%
+    group_by(date, source) %>%
+    filter(region=='EU') %>%
+    dplyr::summarise_at(c("value_mw", "value_mwh"), sum, na.rm=T) %>%
+    mutate(country='EU total',
+           iso2='EU') %>%
+    bind_rows(pwr %>% filter(country!='EU total')) %>%
+    ungroup()
 
-  # Create URL params
-  creahelpers::api.get("http://localhost:8080/power/generation",
-                       params=params,
-                       split_by = 'year',
-                       use_cache = use_cache,
-                       refresh_cache = refresh_cache,
-                       cache_folder = "cache") %>%
-    rename(region_id=iso2)
+  return(pwr)
 }
+
 
 download_corrected_demand <- function(region_id=NULL, sector='total', use_cache = F, refresh_cache = F){
 
