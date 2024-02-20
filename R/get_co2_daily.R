@@ -51,7 +51,7 @@ get_co2_daily <- function(diagnostic_folder='diagnostics',
   diagnostic_co2(co2_daily, diagnostic_folder=diagnostic_folder)
 
   # Formatting / cleaning for db
-  co2_daily <- format_co2_for_db(co2_daily)
+  co2_daily_formatted <- format_co2_for_db(co2_daily)
 
-  return(co2_daily)
+  return(co2_daily_formatted)
 }

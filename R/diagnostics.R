@@ -112,11 +112,10 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s, diagnostic_folder="di
 }
 
 diagnostic_co2 <- function(co2_daily, diagnostic_folder="diagnostics"){
-
-
   diagnostic_co2_simple(co2_daily, diagnostic_folder)
   diagnostic_co2_benchmark_yearly(co2_daily, diagnostic_folder)
   diagnostic_co2_benchmark_monthly(co2_daily, diagnostic_folder)
+  diagnostic_co2_versions()
 }
 
 
@@ -272,7 +271,7 @@ diagnostic_co2_benchmark_yearly <- function(co2_daily, diagnostic_folder="diagno
 
   plt
   if(!is.null(diagnostic_folder)){
-    quicksave(file.path(diagnostic_folder, "co2_benchmark.jpg"), plot=plt, width=8, height=4, scale=1, logo=F)
+    quicksave(file.path(diagnostic_folder, "co2_benchmark.jpg"), plot=plt, width=8, height=4, scale=1, logo=F, dpi=600)
   }
 }
 
@@ -376,7 +375,7 @@ plt
 
 if(!is.null(diagnostic_folder)){
   quicksave(file.path(diagnostic_folder, "co2_benchmark_carbonmonitor.jpg"), plot=plt,
-            width=8, height=4, scale=1, logo=F)
+            width=8, height=4, scale=1, logo=F, dpi=600)
             # height=min(30,max(4, 1.5*length(unique(co2_crea$iso2)))),
 
 }
@@ -392,23 +391,87 @@ if(!is.null(diagnostic_folder)){
 #' @export
 #'
 #' @examples
-diagnostic_versions <- function(iso2s="EU", versions=c("0.2", "0.3")){
+diagnostic_co2_versions <- function(iso2s="EU", versions=c("0.2", "0.3")){
 
   # Read the data
-  co2 <- lapply(versions, function(version) download_co2_daily(iso2s=iso2s, version=versions)) %>%
+  co2 <- lapply(versions, function(version) download_co2_daily(iso2s=iso2s, version=version)) %>%
     bind_rows()
 
-  versions <- versions %>%
-    map(~readRDS(file.path('data', paste0('co2_', .x, '.rds')))) %>%
-    map(~filter(., iso2 %in% iso2s)) %>%
-    map(~mutate(., version=.y)) %>%
-    bind_rows()
+  co2 %>%
+    distinct(version, region, fuel)
 
-  # Plot the data
-  ggplot(versions, aes(date, value_co2_tonne, col=version)) +
-    geom_line() +
-    facet_wrap(~iso2, scales='free_y') +
-    theme(legend.position = "bottom") +
-    rcrea::scale_y_crea_zero()
+  # Plot yoy trends
+  (co2 %>%
+    filter(fuel=="Total") %>%
+    group_by(region, year=year(date), version) %>%
+    summarise(value=sum(value, na.rm=T), .groups="drop") %>%
+    group_by(region, version) %>%
+    arrange(year) %>%
+    filter(year < 2024) %>%
+    mutate(yoy = value / lag(value) - 1) %>%
+      filter(!is.na(yoy)) %>%
+    ungroup() %>%
+    ggplot(aes(year, yoy, fill=factor(version))) +
+    geom_col(position="dodge") +
+    geom_hline(yintercept=0) +
+    geom_text(aes(
+      label=paste0(ifelse(yoy>0,"+",""),scales::percent(yoy, accuracy=0.1)),
+      vjust=ifelse(yoy>0, -0.9, 1.9)
+      ),
+              position=position_dodge(width=0.9),
+      size=2.5
+      ) +
+    ifelse(length(unique(co2$region))>1, facet_wrap(~region, scales='free_y'), element_blank()) +
+    rcrea::theme_crea() +
+    scale_fill_crea_d() +
+    scale_y_continuous(labels=scales::percent_format(accuracy=0.1),
+                       expand = expansion(mult=0.1)) +
+    labs(title="Comparison with previous version",
+    subtitle="Year-on-year changes of EU CO2 emissions",
+    y=NULL, x=NULL, fill="Version") -> plt)
+
+  if(!is.null(diagnostic_folder)){
+    quicksave(file.path(diagnostic_folder, "co2_comparison_versions.jpg"), plot=plt,
+              width=8, height=4, scale=1, logo=F, dpi=600)
+    # height=min(30,max(4, 1.5*length(unique(co2_crea$iso2)))),
+
+  }
+
+  (co2 %>%
+      # filter(fuel!="Total") %>%
+      group_by(region, year=year(date), version, fuel) %>%
+      summarise(value=sum(value, na.rm=T), .groups="drop") %>%
+      group_by(region, fuel, version) %>%
+      arrange(year) %>%
+      filter(year < 2024) %>%
+      mutate(yoy = value / lag(value) - 1) %>%
+      filter(!is.na(yoy)) %>%
+      ungroup() %>%
+      ggplot(aes(year, yoy, fill=factor(version))) +
+      geom_col(position="dodge") +
+      geom_hline(yintercept=0) +
+      geom_text(aes(
+        label=paste0(ifelse(yoy>0,"+",""),scales::percent(yoy, accuracy=0.1)),
+        vjust=ifelse(yoy>0, -0.9, 1.9)
+      ),
+      position=position_dodge(width=0.9),
+      size=2.5
+      ) +
+      ifelse(length(unique(co2$region))>1, facet_wrap(~region, scales='free_y'), element_blank()) +
+      rcrea::theme_crea() +
+      scale_fill_crea_d() +
+      scale_y_continuous(labels=scales::percent_format(accuracy=0.1),
+                         expand = expansion(mult=0.1)) +
+      facet_grid(factor(fuel, levels=c("Total", "Coal", "Oil", "Gas")) ~.) +
+      labs(title="Comparison with previous version",
+           subtitle="Year-on-year changes of EU CO2 emissions",
+           y=NULL, x=NULL, fill="Version") -> plt)
+
+  if(!is.null(diagnostic_folder)){
+    quicksave(file.path(diagnostic_folder, "co2_comparison_versions_by_fuel.jpg"), plot=plt,
+              width=8, height=7, scale=1, logo=F)
+    # height=min(30,max(4, 1.5*length(unique(co2_crea$iso2)))),
+
+  }
 
 }
