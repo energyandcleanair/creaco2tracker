@@ -196,7 +196,7 @@ validate_co2 <- function(co2_daily=NULL, folder="diagnostics"){
 
 
 
-validate_power <- function(pwr_demand=get_pwr_demand(), folder="validation"){
+validate_power <- function(pwr_demand=download_pwr_demand(), folder="validation"){
 
   ember_explorer <- ember.get_eu_generation()
   ember_1 <- ember_explorer %>%
