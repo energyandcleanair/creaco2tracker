@@ -68,7 +68,7 @@ add_total_co2 <- function(co2){
     ungroup()
 }
 
-format_co2_for_db <- function(co2_daily, cut_tail_days=3){
+format_co2_for_db <- function(co2_daily, pwr_demand, gas_demand, cut_tail_days=3){
   co2_daily %>%
     filter(date < min(max(pwr_demand$date), max(gas_demand$date)) - lubridate::days(cut_tail_days)) %>%
     mutate(across(c(fuel_type, sector), stringr::str_to_title),
