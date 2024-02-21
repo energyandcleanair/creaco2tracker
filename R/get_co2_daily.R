@@ -15,8 +15,6 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
                           iso2s = c("EU")
                           ){
 
-  dir.create(diagnostics_folder, F, T)
-
   # Collect necessary data
   gas_demand <- download_gas_demand(region_id=iso2s, use_cache = use_cache)
   pwr_demand <- download_pwr_demand(use_cache = use_cache)
