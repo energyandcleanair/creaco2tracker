@@ -1,23 +1,22 @@
 diagnostic_pwr <- function(pwr_demand, diagnostics_folder="diagnostics"){
 
-  dir.create(diagnostics_folder, showWarnings = FALSE)
-
-  #add rolling mean
-  pwr_demand <- pwr_demand %>%
-    group_by(region, country, source) %>%
-    arrange(date) %>%
-    mutate(plotdate = date %>% 'year<-'(2022),
-           year=year(date),
-           output_mw_rollmean=zoo::rollapplyr(value_mw, 7, mean, fill=NA))
-
-  #output range of values for several years
-  pwr_ranges <- pwr_demand %>% filter(year %in% 2015:2021) %>%
-    group_by(region, country, source, plotdate) %>%
-    summarise(min=min(output_mw_rollmean), max=max(output_mw_rollmean),
-              .groups="drop")
-
   #plot by source
   if(!is.null(diagnostics_folder)){
+    dir.create(diagnostics_folder, showWarnings = FALSE)
+
+    #add rolling mean
+    pwr_demand <- pwr_demand %>%
+      group_by(region, country, source) %>%
+      arrange(date) %>%
+      mutate(plotdate = date %>% 'year<-'(2022),
+             year=year(date),
+             output_mw_rollmean=zoo::rollapplyr(value_mw, 7, mean, fill=NA))
+
+    #output range of values for several years
+    pwr_ranges <- pwr_demand %>% filter(year %in% 2015:2021) %>%
+      group_by(region, country, source, plotdate) %>%
+      summarise(min=min(output_mw_rollmean), max=max(output_mw_rollmean),
+                .groups="drop")
 
     plt <- pwr_demand %>%
       filter(date<max(date)-3, year %in% 2021:2022, country=='EU total') %>%
@@ -90,11 +89,11 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, c
 
 diagnostic_eurostat_cons <- function(eurostat_cons, iso2s, diagnostics_folder="diagnostics"){
 
-  dir.create(diagnostics_folder, showWarnings = FALSE)
-
   # Plot heatmap of consumption by sector
-
   if(!is.null(diagnostics_folder)){
+
+    dir.create(diagnostics_folder, showWarnings = FALSE)
+
     (plt <- eurostat_cons %>%
        filter(iso2 %in% iso2s) %>%
        group_by(geo, fuel_type, sector, unit, time) %>%
