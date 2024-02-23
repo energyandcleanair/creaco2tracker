@@ -1,4 +1,4 @@
-read_csv("https://api.energyandcleanair.org/co2/emission?format=csv&date_from=2016-01-01") -> co2_tracker
+read_csv("https://api.energyandcleanair.org/emission/co2?format=csv&date_from=2016-01-01") -> co2_tracker
 output_dir='reports'
 
 

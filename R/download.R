@@ -1,5 +1,5 @@
 download_co2_daily <- function(date_from="2015-01-01", use_cache = F, refresh_cache = F, version=NULL, iso2s=NULL){
-  creahelpers::api.get("api.energyandcleanair.org/co2/emission",
+  creahelpers::api.get("api.energyandcleanair.org/emission/co2",
                        date_from=date_from,
                        use_cache = use_cache,
                        refresh_cache = refresh_cache,

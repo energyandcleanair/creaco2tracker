@@ -166,8 +166,7 @@
 #   co2 %>% group_by(fuel_type, sector) %>%
 #     rename(month=time) %>%
 #     full_join(tibble(date=dts, month=dts %>% 'day<-'(1))) %>%
-#     mutate(CO2_emissions = CO2_emissions/days_in_month(date)) %>%
-#     right_join(grps) %>%
+#     mutate(CO2_emissions = CO2_emissions/days_in_month(date)) %>% right_join(grps) %>%
 #     left_join(crea_yoy) ->
 #     co2_daily
 #
