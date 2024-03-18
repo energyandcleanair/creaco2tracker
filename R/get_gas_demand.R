@@ -19,10 +19,10 @@
 ##
 ## ---------------------------
 
-get_gas_demand <- function(diagnostic_folder='diagnostics'){
+get_gas_demand <- function(diagnostics_folder='diagnostics'){
   years <- seq(2018, lubridate::year(lubridate::today()))
 
-  if(!is.null(diagnostic_folder)) dir.create(diagnostic_folder)
+  if(!is.null(diagnostics_folder)) dir.create(diagnostics_folder)
 
   # Estimate with two different methods
   consdist <- get_gas_demand_consdist(years=years)
@@ -34,7 +34,7 @@ get_gas_demand <- function(diagnostic_folder='diagnostics'){
                                                 apparent,
                                                 apparent_w_agsi),
             min_comparison_points = 12,
-            diagnostic_folder=diagnostic_folder,
+            diagnostics_folder=diagnostics_folder,
             min_r2=0.95,
             max_rrse=0.3)
 
@@ -61,15 +61,11 @@ get_gas_demand <- function(diagnostic_folder='diagnostics'){
 #' @examples
 get_gas_demand_consdist <- function(years){
 
-
-  types <- c('consumption','distribution')
-
-  entsog <- years %>%
-    pbapply::pblapply(function(x){
-      Sys.sleep(2)
-      read_csv(sprintf('https://api.russiafossiltracker.com/v0/entsogflow?format=csv&date_from=%s-01-01&date_to=%s-12-31&type=%s', x, x, paste0(types, collapse=',')),
-               show_col_types = FALSE)}) %>%
-    bind_rows()
+  entsog <- creahelpers::api.get("https://api.russiafossiltracker.com/v0/entsogflow",
+                                 date_from=glue("{min(years)}-01-01}"),
+                                 date_to=glue("{max(years)}-01-01}"),
+                                 type='consumption,distribution',
+                                 split_by='year')
 
   consdist <- entsog %>%
     group_by(iso2=destination_iso2, date) %>%
@@ -96,14 +92,12 @@ get_gas_demand_apparent <- function(years, use_agsi_for_storage=F){
 
 
   eu_iso2 <- setdiff(countrycode::codelist$iso2c[which(countrycode::codelist$eu28=="EU")], "GB")
-  types <- c('storage','crossborder','production')
 
-  entsog <- years %>%
-    pbapply::pblapply(function(x){
-      Sys.sleep(2)
-      read_csv(sprintf('https://api.russiafossiltracker.com/v0/entsogflow?format=csv&date_from=%s-01-01&date_to=%s-12-31&type=%s', x, x, paste0(types, collapse=',')),
-               show_col_types = FALSE)}) %>%
-    bind_rows()
+  entsog <- creahelpers::api.get("https://api.russiafossiltracker.com/v0/entsogflow",
+                                 date_from=glue("{min(years)}-01-01}"),
+                                 date_to=glue("{max(years)}-01-01}"),
+                                 type='storage,crossborder,production',
+                                 split_by='year')
 
 
   if(use_agsi_for_storage){
@@ -211,7 +205,7 @@ get_eurostat_gas <- function(years){
 
 
 keep_best<- function(consumption,
-                     diagnostic_folder,
+                     diagnostics_folder,
                      min_comparison_points=24,
                      min_r2=0.95, max_rrse=0.4){
 
@@ -271,7 +265,7 @@ keep_best<- function(consumption,
     # Sometimes apparent strictly equivalent to apparent_asgi
     distinct(iso2, .keep_all = T)
 
-  if(!is.null(diagnostic_folder)){
+  if(!is.null(diagnostics_folder)){
 
     plt_data <- best %>%
       ungroup() %>%
@@ -318,13 +312,13 @@ keep_best<- function(consumption,
       guides(size=guide_legend(nrow=1),
              color=guide_legend(nrow=1))
     plt
-    ggsave(filename=file.path(diagnostic_folder, 'gas_consumption_estimates.png'),
+    ggsave(filename=file.path(diagnostics_folder, 'gas_consumption_estimates.png'),
            plot=plt, width=10, height=10, bg='white')
 
     # Export a version for Flourish
     plt_data %>%
       tidyr::spread(method, value_m3) %>%
-      write_csv(file.path(diagnostic_folder, 'gas_consumption_estimates_wide.csv'))
+      write_csv(file.path(diagnostics_folder, 'gas_consumption_estimates_wide.csv'))
   }
 
   best %>%
@@ -333,25 +327,4 @@ keep_best<- function(consumption,
     left_join(consumption) %>%
     ungroup()
 }
-
-
-remove_power_sector <- function(gas_demand){
-
-  region_ids = unique(gas_demand$region_id)
-
-  pwr <- download_electricity(region_id=region_ids,
-                              data_source='entsoe')
-
-  thermal_eff <- download_thermal_efficiency(region_id=region_ids)
-
-  gas_for_power <- pwr %>%
-    left_join(thermal_eff %>% select(region_id, eff=value)) %>%
-    mutate(value_for_power_m3=value_mwh * 1e3 / eff / ncv_kwh_m3) %>%
-    select(region_id, date, value_for_power_m3)
-
-  d <- gas_demand %>%
-    left_join(gas_for_power)
-}
-
-
 

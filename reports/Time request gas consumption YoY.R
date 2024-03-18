@@ -1,6 +1,6 @@
 require(tidyverse); require(magrittr); require(lubridate)
 
-read_csv("https://api.energyandcleanair.org/co2/emission?format=csv&date_from=2016-01-01") -> co2_tracker
+read_csv("https://api.energyandcleanair.org/emission/co2?format=csv&date_from=2016-01-01") -> co2_tracker
 
 co2_tracker %>% filter(fuel=='Gas', sector=='Others') %>% 
   group_by(year=year(date)) %>% filter(year<2023) %>%  

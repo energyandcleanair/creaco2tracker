@@ -1,5 +1,6 @@
-validate_co2 <- function(co2_daily=NULL, folder="validation"){
+validate_co2 <- function(co2_daily=NULL, folder="diagnostics"){
 
+  library(ggrepel)
   dir.create(folder, F, T)
 
   co2_crea <- creahelpers::default_if_null(co2_daily, download_co2_daily(date_from="1990-01-01")) %>%
@@ -11,7 +12,6 @@ validate_co2 <- function(co2_daily=NULL, folder="validation"){
               unit="mt",
               source='CREA') %>%
     filter(year < 2024)
-
 
 
   co2_validate <-
@@ -38,33 +38,36 @@ validate_co2 <- function(co2_daily=NULL, folder="validation"){
     mutate(value=value * ratio)
 
 
-
   (bind_rows(
-    co2_crea %>% filter(year >= 2000) %>% mutate(type='estimated'),
+    co2_crea %>% filter(year >= 1990) %>% mutate(type='estimated'),
     co2_validate %>% mutate(type='estimated'),
     co2_projected %>% mutate(type='projected')
   ) %>%
       write_csv(file.path(folder, "validation.csv")) %>%
-    mutate(
-      source=factor(source, levels=c("CREA", unique(co2_validate$source)))
-    ) %>%
-    # filter(year >= min(co2_crea$year)) %>%
-    ggplot() +
-    geom_line(aes(year, value/1e3, col=source, linewidth=source, linetype=type)) +
-    scale_x_continuous(limits=c(min(co2_crea$year), NA)) +
-    scale_linewidth_manual(values=c(1.2, 0.5, 0.5, 0.5, 0.5)) +
-    rcrea::scale_color_crea_d(palette='dramatic') +
-    rcrea::theme_crea() +
-    rcrea::scale_y_crea_zero() +
-    labs(title="EU CO2 emissions from fossil fuels",
-         subtitle="Projection of historical sources using CREA CO2 tracker, in billion tonne CO2 per year",
-         y=NULL,
-         x=NULL,
-         linewidth="Source",
-         linetype=NULL,
-         color="Source",
-         caption="Source: CREA analysis based on Climate Watch data. Agriculture and LULUCF are not included in this comparison.") -> plt)
+      # filter(type=="estimated") %>%
+      mutate(
+        source=factor(source, levels=c("CREA", unique(co2_validate$source)))
+      ) %>%
+      # filter(year >= 1990) %>%
+      ggplot() +
+      geom_line(aes(year, value/1e3, col=source, linewidth=source, alpha=source, linetype=type)) +
+      scale_x_continuous(limits=c(min(co2_crea$year), NA)) +
+      scale_alpha_manual(values=c(0.9, 1, 1, 1, 1)) +
+      scale_linewidth_manual(values=c(1.6, 0.5, 0.5, 0.5, 0.5)) +
+      scale_color_manual(values=unname(rcrea::pal_crea[c("Blue", "Dark.red", "Dark.blue", "Orange", "Red")])) +
+      rcrea::theme_crea() +
+      rcrea::scale_y_crea_zero() +
+      labs(title="EU CO2 emissions from fossil fuels",
+           subtitle="Projection of historical sources using CREA CO2 tracker, in billion tonne CO2 per year",
+           y=NULL,
+           x=NULL,
+           linewidth="Source",
+           linetype=NULL,
+           alpha="Source",
+           color="Source",
+           caption="Source: CREA analysis based on Climate Watch data. Agriculture and LULUCF are not included in this comparison.") -> plt)
 
+  plt
   quicksave(file.path(folder, "validation.jpg"), plot=plt)
 
 
@@ -94,7 +97,7 @@ validate_co2 <- function(co2_daily=NULL, folder="validation"){
       })
 
 
-  plt +
+  (plt +
     scale_x_continuous(limits=c(1940, NA)) +
     geom_hline(
       data = co2_projected %>% filter(year==max(year), source %in% c('PIK', 'GCP')),
@@ -107,10 +110,12 @@ validate_co2 <- function(co2_daily=NULL, folder="validation"){
     # Indicate the interpolated value
     geom_text_repel(
       data = interpolated,
-      aes(x = interpolated_year, y = 4, label = round(interpolated_year), col=source, alpha=0.5),
+      # inherit.aes = F,
+      aes(x = interpolated_year, y = 4, label = round(interpolated_year), col=source, alpha="CREA"),
       size = 4,
       show.legend = F,
-      segment.size = 0.2, segment.alpha = 0,
+      segment.size = 0.2,
+      segment.alpha = 0,
       segment.color = 'grey50',
       direction = 'x',
       nudge_y = 0.5,
@@ -120,7 +125,7 @@ validate_co2 <- function(co2_daily=NULL, folder="validation"){
       ) +
     labs(
       caption=paste(c("Source: Climate Watch and CREA's own estimates based on ENTSOE, ENTSOG, EUROSTAT and IPCC.",
-    "Agriculture and LULUCF are not included. GCP and PIK times series are extended to 2024 using CREA’s estimates."), collapse="\n")) -> plt_full
+    "Agriculture and LULUCF are not included. GCP and PIK times series are extended to 2024 using CREA’s estimates."), collapse="\n")) -> plt_full)
 
 
   quicksave(file.path(folder, "validation_full.jpg"),
@@ -131,11 +136,67 @@ validate_co2 <- function(co2_daily=NULL, folder="validation"){
             logo_scale=1.4)
 
 
+  # Check fuel --------------------------------------------------------------
+  co2_yearly <- co2_daily %>%
+    filter(fuel!='Total',
+           region=='EU') %>%
+    group_by(year=year(date), fuel) %>%
+    summarise(value=sum(value)/1e6,
+              unit="mt",
+              source='CREA') %>%
+    filter(year < 2022)
+
+  co2_validate
+  ggplot(co2_yearly) +
+    geom_area(aes(year, value, fill=fuel)) +
+    geom_line(data=co2_validate %>% filter(year >= 1990), aes(year, value, col=source)) +
+    geom_line(data=co2_yearly %>% filter(year >= 1990), aes(year, value, col=fuel))
+
+  co2_monthly <- co2_daily %>%
+    filter(fuel!='Total',
+           region=='EU') %>%
+    group_by(date=floor_date(date, 'month'), fuel) %>%
+    summarise(value=sum(value)/1e6,
+              unit="mt",
+              source='CREA')
+
+
+  ggplot(co2_monthly) +
+    geom_area(aes(date, value, fill=fuel)) +
+    geom_line(data=co2_validate %>% filter(year >= 1990), aes(year, value, col=source)) +
+    geom_line(data=co2_yearly %>% filter(year >= 1990), aes(year, value, col=fuel))
+
+
+# Are we understimating any? ----------------------------------------------
+  summary(co2_validate %>% filter(source=='PIK') %>%
+    left_join(co2_yearly %>% select(year, fuel, value) %>%
+                tidyr::spread(fuel, value)) %>%
+    filter(!is.na(Oil)) %>%
+    lm(value - Oil - Gas ~ Coal + 0, data=.))
+
+  summary(co2_validate %>% filter(source=='GCP') %>%
+            left_join(co2_yearly %>% select(year, fuel, value) %>%
+                        tidyr::spread(fuel, value)) %>%
+            filter(!is.na(Oil)) %>%
+            lm(value - Oil - Coal ~ Gas + 0, data=.))
+
+  summary(co2_validate %>% filter(source=='GCP') %>%
+            left_join(co2_yearly %>% select(year, fuel, value) %>%
+                        tidyr::spread(fuel, value)) %>%
+            filter(!is.na(Oil)) %>%
+            lm(value - Gas - Coal ~ Oil + 0, data=.))
+
+  summary(co2_validate %>% filter(source=='GCP') %>%
+            left_join(co2_yearly %>% select(year, fuel, value) %>%
+                        tidyr::spread(fuel, value)) %>%
+            filter(!is.na(Oil)) %>%
+            lm(value ~ Gas + Coal + Oil + 0, data=.))
 
 }
 
 
-validate_power <- function(pwr_demand=get_pwr_demand(), folder="validation"){
+
+validate_power <- function(pwr_demand=download_pwr_demand(), folder="validation"){
 
   ember_explorer <- ember.get_eu_generation()
   ember_1 <- ember_explorer %>%

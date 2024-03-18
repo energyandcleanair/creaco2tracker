@@ -5,6 +5,12 @@ importFrom(creahelpers,expand_dates)
 
 importFrom(countrycode,countrycode)
 
+importFrom(logger,log_info)
+importFrom(logger,log_error)
+importFrom(logger,log_warn)
+importFrom(logger,log_fatal)
+importFrom(logger,log_debug)
+
 importFrom(dplyr,all_vars)
 importFrom(dplyr,across)
 importFrom(dplyr,any_vars)
@@ -71,6 +77,7 @@ importFrom(lubridate,ymd)
 importFrom(lubridate,ymd_h)
 
 importFrom(magrittr,"%<>%")
+importFrom(magrittr,"%T>%")
 importFrom(magrittr,add)
 importFrom(magrittr,use_series)
 importFrom(magrittr,subtract)

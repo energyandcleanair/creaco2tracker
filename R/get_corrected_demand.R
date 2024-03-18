@@ -1,7 +1,7 @@
-get_corrected_demand <- function(diagnostic_folder='diagnostics',
+get_corrected_demand <- function(diagnostics_folder='diagnostics',
                                  use_co2_in_db=T){
 
-  dir.create(diagnostic_folder, F, T)
+  dir.create(diagnostics_folder, F, T)
   eu_members <- setdiff(countrycode::codelist$iso2c[which(countrycode::codelist$eu28=="EU")], "GB")
 
   # load data
@@ -9,7 +9,7 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
   co2 <- if(use_co2_in_db){
     download_co2_daily()
   }else{
-    get_co2_daily()
+    get_co2_daily(diagnostics_folder=diagnostics_folder)
   }
 
 
@@ -30,7 +30,7 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
   #   mutate(value_TWh = value / 55 / 3.6 / 1000) %>%
   #   select(date, value_TWh)
 
-  pwr <- get_pwr_demand()
+  pwr <- download_pwr_demand()
 
   pwr_demand <- pwr %>%
     filter(region=='EU', source=='Total') %>%
@@ -39,7 +39,7 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
     mutate(country='EU')
 
   # hdd and cdd
-  read_csv("https://api.energyandcleanair.org/v1/weather?variable=HDD,CDD&format=csv&region_id=EU") %>%
+  creahelpers::api.get("api.energyandcleanair.org/v1/weather", variable="HDD,CDD", region_id="EU") %>%
     mutate(across(variable, tolower)) ->
     dd
 
@@ -111,14 +111,14 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
       scale_x_date(date_labels = '%b') ->
       p
 
-    quicksave(file.path(diagnostic_folder,
+    quicksave(file.path(diagnostics_folder,
                            paste0('EU temperature corrected ', unique(data$name), '.png')),
               plot=p)
 
     data %>% group_by(measure) %>%
       mutate(yoy=creahelpers::get_yoy(value, date)) %>% select(date, yoy) %>%
       slice_tail(n=1) %>%
-      write_csv(file.path(diagnostic_folder,
+      write_csv(file.path(diagnostics_folder,
                           paste0(unique(data$name), ', YoY changes, past ',
                                  plot_moving_average_days,' days.csv'))) ->
       changes
@@ -144,8 +144,8 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
 
   #additional plots
   dd %>%
-    filter(year(date) %in% 2018:2024, region_id=='EU') %>% 
-    group_by(variable) %>% 
+    filter(year(date) %in% 2018:2024, region_id=='EU') %>%
+    group_by(variable) %>%
     mutate(plotdate = date %>% 'year<-'(2000),
            across(value, zoo::rollapplyr, FUN=mean, width=30, fill=NA, na.rm=T)) ->
     dd_plot
@@ -161,13 +161,13 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
          subtitle='population-weighted average for EU-27',
          y='degree-days', x='') +
     theme_crea(legend.position='top') + scale_color_crea_d('change', col.index = c(7,1), guide='none') +
-    scale_alpha_discrete(range=c(.33,1), 
+    scale_alpha_discrete(range=c(.33,1),
                          # guide=guide_legend(nrow=1, override.aes = list(alpha=1, color=c('gray66', 'gray33', 'black')), title.position = 'left')
                          ) +
     scale_x_date(date_labels = '%b', expand=expansion(mult=.01)) +
     rcrea::scale_y_crea_zero()
 
-  ggsave(file.path(diagnostic_folder, 'EU average cooling and heating needs.png'),
+  ggsave(file.path(diagnostics_folder, 'EU average cooling and heating needs.png'),
          plot=plt,
          width=10,
          height=8)
@@ -191,7 +191,7 @@ get_corrected_demand <- function(diagnostic_folder='diagnostics',
     scale_x_date(labels = function(x) paste0(month(x), '月'), expand=expansion(mult=.01)) +
     rcrea::scale_y_crea_zero()
 
-  ggsave(file.path(diagnostic_folder, 'EU average cooling and heating needs ZH.png'),
+  ggsave(file.path(diagnostics_folder, 'EU average cooling and heating needs ZH.png'),
          plot=plt_zh,
          width=10,
          height=8)

@@ -1,8 +1,8 @@
 #
-# get_co2_daily_lauri <- function(diagnostic_folder='diagnostics',
+# get_co2_daily_lauri <- function(diagnostics_folder='diagnostics',
 #                           rollmean_days=28){
 #
-#   dir.create(diagnostic_folder, F, T)
+#   dir.create(diagnostics_folder, F, T)
 #
 #   implied_cons_all <- get_entsog()
 #
@@ -11,8 +11,8 @@
 #     implied_cons
 #
 #   # Plot
-#   if(!is.null(diagnostic_folder)){
-#     saveRDS(implied_cons_all, file.path(diagnostic_folder, 'implied_cons.RDS'))
+#   if(!is.null(diagnostics_folder)){
+#     saveRDS(implied_cons_all, file.path(diagnostics_folder, 'implied_cons.RDS'))
 #
 #     plt <- implied_cons %>%
 #       mutate(value_m3=zoo::rollapplyr(value_m3, rollmean_days, mean, fill=NA),
@@ -27,7 +27,7 @@
 #       theme_crea() + #scale_color_crea_d('dramatic') +
 #       scale_alpha_manual(values=c(.4, .7,1),
 #                          guide = guide_legend(override.aes = list(col = c('gray60', 'gray30', 'black'), alpha=c(1,1,1))))
-#     ggsave(filename=file.path(diagnostic_folder, 'gas imports and consumption trends.png'),
+#     ggsave(filename=file.path(diagnostics_folder, 'gas imports and consumption trends.png'),
 #            plot=plt, width=8, height=6, bg='white')
 #   }
 #
@@ -47,10 +47,10 @@
 #
 #
 #   #plot by source
-#   if(!is.null(diagnostic_folder)){
+#   if(!is.null(diagnostics_folder)){
 #     library(rcrea)
 #
-#     pwr %>% saveRDS(file.path(diagnostic_folder, 'pwr.RDS'))
+#     pwr %>% saveRDS(file.path(diagnostics_folder, 'pwr.RDS'))
 #
 #     plt <- pwr %>% filter(date<max(date)-3, year %in% 2021:2023, country=='EU total') %>%
 #       group_by(country) %>% filter(mean(value_mw, na.rm=T)>1e3) %>%
@@ -66,12 +66,12 @@
 #       scale_color_crea_d('dramatic', guide=guide_legend(nrow = 1)) +
 #       scale_fill_crea_d(col.index = 2)
 #
-#     ggsave(file.path(diagnostic_folder, 'EU power generation by source.png'),
+#     ggsave(file.path(diagnostics_folder, 'EU power generation by source.png'),
 #            width=8, height=6, bg='white', plot=plt)
 #   }
 #
 #   # EUROSTAT
-#   cons <- get_eurostat_cons(diagnostic_folder = diagnostic_folder)
+#   cons <- get_eurostat_cons(diagnostics_folder = diagnostics_folder)
 #
 #   #calculate CO2 emissions
 #   bind_rows(cons$coal, cons$oil, cons$gas) %>%
@@ -166,8 +166,7 @@
 #   co2 %>% group_by(fuel_type, sector) %>%
 #     rename(month=time) %>%
 #     full_join(tibble(date=dts, month=dts %>% 'day<-'(1))) %>%
-#     mutate(CO2_emissions = CO2_emissions/days_in_month(date)) %>%
-#     right_join(grps) %>%
+#     mutate(CO2_emissions = CO2_emissions/days_in_month(date)) %>% right_join(grps) %>%
 #     left_join(crea_yoy) ->
 #     co2_daily
 #
@@ -198,7 +197,7 @@
 #     bind_rows(co2_daily %>% filter(fuel_type!='total'))
 #
 #   #plot
-#   if(!is.null(diagnostic_folder)){
+#   if(!is.null(diagnostics_folder)){
 #     plt <- co2_daily %>% filter(year(date)>=2017) %>%
 #       mutate(across(c(fuel_type, sector), tolower)) %>%
 #       group_by(sector, fuel_type) %>%
@@ -212,7 +211,7 @@
 #       labs(title="EU CO2 emissions", y='Mt/day, 30-day mean', x='')
 #       # scale_color_crea_d()
 #
-#     ggsave(file.path(diagnostic_folder,'EU CO2 emissions.png'), plot=plt, width=8, height=6, bg='white')
+#     ggsave(file.path(diagnostics_folder,'EU CO2 emissions.png'), plot=plt, width=8, height=6, bg='white')
 #   }
 #
 #   # Formatting for db
@@ -227,7 +226,7 @@
 # }
 #
 #
-# get_eurostat_cons <- function(diagnostic_folder='diagnostics'){
+# get_eurostat_cons <- function(diagnostics_folder='diagnostics'){
 #
 #   consumption_codes = c("nrg_cb_sffm","nrg_cb_oilm","nrg_cb_gasm")
 #   cons_monthly_raw <- consumption_codes %>% lapply(eurostat::get_eurostat) %>% lapply(eurostat::label_eurostat)
@@ -330,7 +329,7 @@
 #
 #   # Visual check that we kept the right sectors for each fuel
 #
-#   if(!is.null(diagnostic_folder)){
+#   if(!is.null(diagnostics_folder)){
 #     library(rcrea)
 #
 #     plt <- bind_rows(
@@ -347,7 +346,7 @@
 #       theme(legend.position = 'bottom') +
 #       rcrea::scale_y_crea_zero()
 #
-#     ggsave(file.path(diagnostic_folder,'eurostat_annual_vs_monthly_yearly.png'), plot=plt, width=8, height=6, bg='white')
+#     ggsave(file.path(diagnostics_folder,'eurostat_annual_vs_monthly_yearly.png'), plot=plt, width=8, height=6, bg='white')
 #   }
 #
 #
@@ -400,7 +399,7 @@
 #     ungroup()
 #
 #   # Visual check
-#   if(!is.null(diagnostic_folder)){
+#   if(!is.null(diagnostics_folder)){
 #     plt <- cons_combined %>%
 #       # group_by(geo, sector, time, unit, siec, fuel_type) %>%
 #       # arrange(source) %>%
@@ -413,7 +412,7 @@
 #       theme(legend.position='bottom')+
 #       rcrea::scale_y_crea_zero()
 #
-#     ggsave(file.path(diagnostic_folder,'eurostat_annual_vs_monthly_monthly.png'), plot=plt, width=8, height=6, bg='white')
+#     ggsave(file.path(diagnostics_folder,'eurostat_annual_vs_monthly_monthly.png'), plot=plt, width=8, height=6, bg='white')
 #
 #     plt <- cons_combined %>%
 #       group_by(geo, sector, time, unit, siec, fuel_type) %>%
@@ -427,7 +426,7 @@
 #       theme(legend.position='bottom')+
 #       rcrea::scale_y_crea_zero()
 #
-#     ggsave(file.path(diagnostic_folder,'eurostat_combined.png'), plot=plt, width=8, height=6, bg='white')
+#     ggsave(file.path(diagnostics_folder,'eurostat_combined.png'), plot=plt, width=8, height=6, bg='white')
 #   }
 #
 #
