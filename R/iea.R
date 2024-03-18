@@ -16,7 +16,8 @@ iea.get_balance <- function(year_from = 2000, year_to = 2022, iso2, use_cache = 
       creahelpers::api.get("api.energyandcleanair.org/energy/iea_balance",
                            year_from = year,
                            year_to = year,
-                           country = iso2)
+                           country = iso2,
+                           api_key = Sys.get_env("API_KEY"))
     }) %>%
       bind_rows()
 
@@ -46,7 +47,8 @@ iea.get_conversion_factors <- function(year_from = 2000, year_to = 2022, iso2, u
     result <- creahelpers::api.get("api.energyandcleanair.org/energy/iea_conversion",
                                    year_from = year_from,
                                    year_to = year_to,
-                                   country = iso2)
+                                   country = iso2,
+                                   api_key = Sys.getenv("API_KEY"))
 
     # Save the fetched data to cache
     if (!dir.exists(cache_dir)) {
