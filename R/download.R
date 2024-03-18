@@ -77,22 +77,27 @@ download_corrected_demand <- function(region_id=NULL, sector='total'){
 #' @examples
 download_thermal_efficiency <- function(region_id=NULL){
 
+  if(!is.null(region_id)){
+    region_id <- paste(region_id, collapse=',')
+  }
+  
   params <- list(
     source='NATGAS',
     year=2020,
     format='csv',
-    country=paste(region_id, collapse=','),
+    country=region_id,
     flow_raw='EFFELE',
     product_raw='NATGAS',
-    unit='TJ'
+    unit='TJ',
+    api_key=Sys.getenv("API_KEY")
   )
 
   # Remove null elements
   params <- purrr::compact(params)
 
   # Create URL params
-  url_params <- paste(names(params), params, sep = "=", collapse = "&")
-
+  url_params <- URLencode(paste(names(params), params, sep = "=", collapse = "&"))
+  
   eff <- readr::read_csv(sprintf('https://api.energyandcleanair.org/energy/iea_balance?%s', url_params)) %>%
     mutate(value=value/100) %>%
     select(region_id=iso2, product_raw, flow_raw, unit, year, value)

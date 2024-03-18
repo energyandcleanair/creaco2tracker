@@ -10,7 +10,7 @@ update_co2_daily <- function(production=T){
 
 update_corrected_demand <- function(production=T){
   corrected_demand <- get_corrected_demand()
-  upload_corrected_demand(corrected_demand, production=production)
+  upload_corrected_demand(corrected_demand, production=production, clear_all_first=T)
 }
 
 update_all <- function(production=T){
