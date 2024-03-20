@@ -63,7 +63,7 @@ get_gas_demand_consdist <- function(years){
 
   entsog <- creahelpers::api.get("https://api.russiafossiltracker.com/v0/entsogflow",
                                  date_from=glue("{min(years)}-01-01}"),
-                                 date_to=glue("{max(years)}-01-01}"),
+                                 date_to=glue("{max(years)}-12-31}"),
                                  type='consumption,distribution',
                                  split_by='year')
 
