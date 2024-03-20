@@ -95,7 +95,7 @@ get_gas_demand_apparent <- function(years, use_agsi_for_storage=F){
 
   entsog <- creahelpers::api.get("https://api.russiafossiltracker.com/v0/entsogflow",
                                  date_from=glue("{min(years)}-01-01}"),
-                                 date_to=glue("{max(years)}-01-01}"),
+                                 date_to=glue("{max(years)}-12-31}"),
                                  type='storage,crossborder,production',
                                  split_by='year')
 
