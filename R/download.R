@@ -1,4 +1,15 @@
+select_if_exists <- function(data, ...) {
+  if (is.null(data) || nrow(data)==0) {
+    return(NULL)
+  }
+  
+  dplyr::select(data, ...)
+}
+
+
+
 download_co2_daily <- function(date_from="2015-01-01", use_cache = F, refresh_cache = F, version=NULL, iso2s=NULL){
+  
   creahelpers::api.get("api.energyandcleanair.org/emission/co2",
                        date_from=date_from,
                        use_cache = use_cache,
@@ -6,15 +17,18 @@ download_co2_daily <- function(date_from="2015-01-01", use_cache = F, refresh_ca
                        cache_folder = "cache",
                        region = iso2s,
                        version = version) %>%
-    select(region, date, fuel, sector, unit, frequency, value, version)
+    select_if_exists(region, date, fuel, sector, unit, frequency, value, version)
 }
 
-download_gas_demand <- function(region_id=NULL, use_cache = F, refresh_cache = F){
+download_gas_demand <- function(region_id=NULL,
+                                use_cache=F,
+                                refresh_cache=F,
+                                date_from="2015-01-01"){
 
   params <- list(
     fuel='fossil_gas',
     data_source='crea',
-    date_from='2015-01-01',
+    date_from=date_from,
     format='csv',
     region_id=region_id
   )
@@ -27,7 +41,8 @@ download_gas_demand <- function(region_id=NULL, use_cache = F, refresh_cache = F
                        use_cache = use_cache,
                        refresh_cache = refresh_cache,
                        cache_folder = "cache") %>%
-    select(region_id, date, fuel, sector, unit, frequency, value)
+    select_if_exists(region_id, date, fuel, sector, unit, frequency, value)
+  
 }
 
 download_pwr_demand <- function(date_from="2015-01-01", region=NULL, use_cache=T, refresh_cache=F) {
@@ -64,13 +79,16 @@ download_pwr_demand <- function(date_from="2015-01-01", region=NULL, use_cache=T
 }
 
 
-download_corrected_demand <- function(region_id=NULL, sector='total', use_cache = F, refresh_cache = F){
+download_corrected_demand <- function(region_id=NULL,
+                                      sector='total',
+                                      date_from="2015-01-01",
+                                      use_cache = F,
+                                      refresh_cache = F){
 
-  # https://http://localhost:8080/energy/demand?fuel=electricity_temperature_corrected&region_id=EU&format=csv&aggregate_by=year,date_without_year,fuel,sector,region_id&date_from=2019-01-01&pivot_by=year&rolling_days=7&pivot_fill_value=nan&rolling_fill_with_zero=False&sector=total&columns_order=date_without_year
   params <- list(
     fuel='electricity_temperature_corrected,fossil_gas_temperature_corrected',
     sector=sector,
-    date_from='2015-01-01',
+    date_from=date_from,
     format='csv',
     region_id=region_id
   )
@@ -83,7 +101,7 @@ download_corrected_demand <- function(region_id=NULL, sector='total', use_cache 
                        use_cache = use_cache,
                        refresh_cache = refresh_cache,
                        cache_folder = "cache") %>%
-    select(region_id, date, fuel, sector, unit, frequency, value)
+    select_if_exists(region_id, date, fuel, sector, unit, frequency, value)
 }
 
 
