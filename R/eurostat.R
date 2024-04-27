@@ -1,6 +1,8 @@
 
 
 #' Get monthly fossil fuel consumption per country from EUROSTAT energy balance
+#' Update on 27 April 2024: Eurostat stopped working with nrg_cb_oil for all countries
+#' -> we add a geo=EU27_2020 filter, which will prevent us from updating national numbers for now
 #'
 #' @param diagnostics_folder
 #' @param use_cache
@@ -10,15 +12,27 @@
 #' @export
 #'
 #' @examples
-get_eurostat_cons <- function(diagnostics_folder='diagnostics', use_cache=F, iso2s=NULL){
+get_eurostat_cons <- function(diagnostics_folder='diagnostics',
+                              use_cache=F,
+                              iso2s=NULL){
 
   consumption_codes_monthly = c("nrg_cb_sffm", "nrg_cb_oilm", "nrg_cb_gasm")
-  cons_monthly_raw <- consumption_codes_monthly %>% lapply(get_eurostat_from_code, use_cache=use_cache)
+  cons_monthly_raw <- consumption_codes_monthly %>%
+    lapply(get_eurostat_from_code, use_cache=use_cache)
   names(cons_monthly_raw) <- c('coal', 'oil', 'gas')
 
-  consumption_codes_yearly = c("nrg_cb_sff", "nrg_cb_oil", "nrg_cb_gas")
-  cons_yearly_raw <- consumption_codes_yearly %>% lapply(get_eurostat_from_code, use_cache=use_cache)
-  names(cons_yearly_raw) <- c('coal', 'oil', 'gas')
+  consumption_codes_yearly = c("nrg_cb_sff", "nrg_cb_gas")
+  cons_yearly_raw <- consumption_codes_yearly %>%
+    lapply(get_eurostat_from_code, use_cache=use_cache)
+  names(cons_yearly_raw) <- c('coal', 'gas')
+  
+  cons_yearly_raw$oil <- lapply(c('O4600', 'O4100_TOT_4200-4500'),
+                                function(x){
+                                  get_eurostat_from_code(code="nrg_cb_oil",
+                                                         use_cache=use_cache,
+                                                         filters=list(siec=x))
+                                }) %>%
+    bind_rows()
 
   # Add Gross Inland - energy use to oil monthly data
   cons_monthly_raw$oil <- add_oil_gross_inland_energy(cons_monthly_raw_oil = cons_monthly_raw$oil,
@@ -425,7 +439,7 @@ remove_last_incomplete <- function(cons){
 }
 
 
-get_eurostat_from_code <- function(code, use_cache=T){
+get_eurostat_from_code <- function(code, use_cache=T, filters=NULL){
 
   filepath <- file.path('cache', paste0('eurostat_', code, '.RDS'))
   dir.create("cache", F, T)
@@ -433,9 +447,10 @@ get_eurostat_from_code <- function(code, use_cache=T){
   if(use_cache & file.exists(filepath)){
     return(readRDS(filepath))
   }
-  eurostat::get_eurostat(code) %>%
+  
+  eurostat::get_eurostat(code, filters=filters) %>%
     eurostat::label_eurostat(code="nrg_bal") %>% # Keep nrg_bal code as well
-    dplyr::rename(time=TIME_PERIOD) %T>%# Column changed with new EUROSTAT version
+    dplyr::rename(dplyr::any_of(c(time='TIME_PERIOD'))) %T>%# Column changed with new EUROSTAT version
     saveRDS(filepath)
 }
 
