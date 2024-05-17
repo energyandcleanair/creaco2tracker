@@ -30,7 +30,7 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
   #   mutate(value_TWh = value / 55 / 3.6 / 1000) %>%
   #   select(date, value_TWh)
 
-  pwr <- download_pwr_demand()
+  pwr <- download_pwr_demand(use_cache = F)
 
   pwr_demand <- pwr %>%
     filter(region=='EU', source=='Total') %>%
