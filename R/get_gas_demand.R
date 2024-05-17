@@ -75,7 +75,7 @@ get_gas_demand_consdist <- function(years){
     summarise(value_m3=-sum(value_m3, na.rm=T)) %>%
     arrange(date) %>%
     
-    # Major: Interpolate missing data
+    # Interpolate missing data
     tidyr::complete(date=seq.Date(min(as.Date(date)),
                                   max(as.Date(date)), by='day'),
                     fill=list(value_m3=NA)) %>%
@@ -112,6 +112,20 @@ get_gas_demand_apparent <- function(years, use_agsi_for_storage=F){
                                  date_to=glue("{max(years)}-12-31}"),
                                  type='storage,crossborder,production',
                                  split_by='year')
+  
+  
+  # Fill missing data
+  entsog <- entsog %>%
+    select(destination_iso2, departure_iso2, date, type, value_m3) %>%
+    arrange(date) %>%
+    group_by(destination_iso2, departure_iso2, type) %>%
+    # Interpolate missing data
+    tidyr::complete(date=seq.Date(min(as.Date(date)),
+                                  max(as.Date(date)), by='day'),
+                    fill=list(value_m3=NA)) %>%
+    mutate(value_m3=zoo::na.approx(value_m3)) %>%
+    ungroup()
+    
 
 
   if(use_agsi_for_storage){
