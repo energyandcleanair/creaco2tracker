@@ -67,12 +67,26 @@ get_gas_demand_consdist <- function(years){
                                  type='consumption,distribution',
                                  split_by='year')
 
+  
+  
+  
   consdist <- entsog %>%
     group_by(iso2=destination_iso2, date) %>%
     summarise(value_m3=-sum(value_m3, na.rm=T)) %>%
+    arrange(date) %>%
+    
+    # Major: Interpolate missing data
+    tidyr::complete(date=seq.Date(min(as.Date(date)),
+                                  max(as.Date(date)), by='day'),
+                    fill=list(value_m3=NA)) %>%
+    mutate(value_m3=zoo::na.approx(value_m3)) %>%
     ungroup() %>%
-    tidyr::complete(date=seq.Date(min(as.Date(entsog$date)), max(as.Date(entsog$date)), by='day'),
+
+    # Fill with 0 before and after each country's reporting period
+    tidyr::complete(date=seq.Date(min(as.Date(entsog$date)),
+                                  max(as.Date(entsog$date)), by='day'),
                     fill=list(value_m3=0)) %>%
+    
     mutate(method='consdist')
 
   return(consdist)
