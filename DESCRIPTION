@@ -33,7 +33,8 @@ Imports:
     digest,
     ggh4x,
     logger,
-    tidytext
+    tidytext,
+    httr
 Remotes:
     energyandcleanair/creahelpers,
     energyandcleanair/rcrea

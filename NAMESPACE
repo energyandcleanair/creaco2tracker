@@ -61,6 +61,12 @@ importFrom(dplyr,"%>%")
 
 importFrom(glue,glue)
 
+importFrom(httr, GET)
+importFrom(httr, accept_json)
+importFrom(httr, add_headers)
+importFrom(httr, content)
+
+
 importFrom(lubridate,"hour<-")
 importFrom(lubridate,"day<-")
 importFrom(lubridate,"year<-")
