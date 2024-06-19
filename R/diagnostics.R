@@ -103,7 +103,11 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s, diagnostics_folder="d
        rcrea::scale_y_crea_zero() +
        ggh4x::facet_grid2(geo ~ glue("{fuel_type}\n({unit})"), scales = "free_y", independent = "y") +
       # facet_wrap(geo ~ glue("{fuel_type} ({unit})"), scales='free_y')) +
-      rcrea::theme_crea())
+        scale_x_date(date_minor_breaks = "1 year") +
+      rcrea::theme_crea() +
+        theme(panel.grid.minor.x = element_line(color="grey95"),
+              panel.grid.major.x = element_line(color="grey90"),
+              ))
 
     ggsave(file.path(diagnostics_folder, 'eurostat_cons.png'),
            width=10, height=min(30,max(4, 1.5*length(iso2s))), bg='white', plot=plt, scale=1.5)

@@ -34,10 +34,6 @@ get_eurostat_cons <- function(diagnostics_folder='diagnostics',
                                 }) %>%
     bind_rows()
 
-  # Add Gross Inland - energy use to oil monthly data
-  cons_monthly_raw$oil <- add_oil_gross_inland_energy(cons_monthly_raw_oil = cons_monthly_raw$oil,
-                                                      cons_yearly_raw_oil = cons_yearly_raw$oil)
-
   # Add Final consumption - non energy use to gas monthly data
   cons_monthly_raw$gas <- add_gas_non_energy(cons_monthly_raw_gas = cons_monthly_raw$gas,
                                              cons_yearly_raw_gas = cons_yearly_raw$gas)
@@ -64,21 +60,39 @@ get_eurostat_cons <- function(diagnostics_folder='diagnostics',
         'Final consumption - energy use')) %>%
       mutate(sector=ifelse(grepl('electricity', nrg_bal), 'electricity', 'all'))
   }
-
-  filter_oil_monthly <- function(x){
-    x %>%
+  
+  
+  filter_oil <- function(x){
+    # Gross inland deliveries - energy use' is not available anymore starting from 2023
+    # This is the one we need though...
+    # we estimate GID_ENERGY = GID - Gross delivery to refinery, it worked pretty well
+    mult <-  x %>%
+      ungroup() %>%
       filter(
-        (nrg_bal == 'Gross inland deliveries - energy use' & siec=='Oil products') |
+        (nrg_bal %in% c('Gross inland deliveries - observed',
+                        'Gross deliveries to petrochemical industry') & siec=='Oil products') |
           (grepl('Direct use', nrg_bal) & grepl('Crude oil, NGL', siec))) %>%
-      mutate(sector='all')
+      distinct(siec_code, nrg_bal_code) %>%
+      mutate(factor = case_when(nrg_bal_code == "GD_PI" ~ -1,
+                                T ~ 1))
+    
+    if(nrow(mult) != 3) stop("Please fix filter_oil")
+    
+    x %>%
+      inner_join(mult) %>%
+      mutate(values = values * factor) %>%
+      select(-c(factor)) %>%
+      mutate(sector='all') %>%
+      arrange(desc(time)) %>%
+      filter(!is.na(values))
   }
 
+  filter_oil_monthly <- function(x){
+    filter_oil(x)
+  }
+  
   filter_oil_yearly <- function(x){
-    x %>%
-      filter(
-        (nrg_bal == 'Gross inland deliveries - energy use' & siec=='Oil products') |
-          (grepl('Direct use', nrg_bal) & grepl('Crude oil, NGL.*hydrocarbons$', siec))) %>%
-      mutate(sector='all')
+   filter_oil(x)
   }
 
   filter_gas <- function(x){
@@ -249,63 +263,6 @@ get_eurostat_cons <- function(diagnostics_folder='diagnostics',
 }
 
 
-#' Monthly data is not as detailed as yearly one.
-#' Most importantly, Gross inland deliveries - energy use which is what we're after
-#' is available in yearly but not in monthly data.
-#'
-#' We use yearly ratio 'Gross inland deliveries - energy use' / 'Gross inland deliveries - observed'
-#' to update monthly data
-#'
-#' A more accurate way would be to predict this ratio using industrial production index (e.g. fertiliser, petrochemicals)
-#' For a later version.
-#'
-#' @param cons_yearly_raw
-#' @param cons_monthly_raw
-#'
-#' @return
-#' @export
-#'
-#' @examples
-add_oil_gross_inland_energy <- function(cons_monthly_raw_oil, cons_yearly_raw_oil){
-
-  shares <- cons_yearly_raw_oil %>%
-    filter(time >= '2000-01-01') %>%
-    filter(siec=='Oil products') %>%
-    filter(nrg_bal %in% c('Gross inland deliveries - observed',
-                          'Gross inland deliveries - energy use')) %>%
-    mutate(year=year(time)) %>%
-    select(nrg_bal_code, siec, unit, geo, year, values) %>%
-    tidyr::spread(nrg_bal_code, values) %>%
-    mutate(share_energy=tidyr::replace_na(GID_E/GID_OBS,0)) %>%
-    select(-c(GID_E, GID_OBS))
-
-  # Project til now
-  years <- unique(year(cons_monthly_raw_oil$time))
-  shares_filled <- shares %>%
-    tidyr::complete(year=years, geo, unit, siec) %>%
-    group_by(geo, unit, siec) %>%
-    arrange(year) %>%
-    fill(share_energy) %>%
-    ungroup()
-
-
-  cons_monthly_raw_oil_energy <- cons_monthly_raw_oil %>%
-    filter(nrg_bal %in% c('Gross inland deliveries - observed')) %>%
-    filter(siec=='Oil products') %>%
-    mutate(year=year(time)) %>%
-    inner_join(shares_filled) %>%
-    mutate(
-      nrg_bal='Gross inland deliveries - energy use',
-      nrg_bal_code="GID_E",
-      values = values * share_energy
-    ) %>%
-    select(-c(share_energy, year))
-
-  return(bind_rows(
-    cons_monthly_raw_oil,
-    cons_monthly_raw_oil_energy
-  ))
-}
 
 #' Monthly data is not as detailed as yearly one.
 #' Most importantly, non-energy use
@@ -449,7 +406,7 @@ get_eurostat_from_code <- function(code, use_cache=T, filters=NULL){
   }
   
   eurostat::get_eurostat(code, filters=filters) %>%
-    eurostat::label_eurostat(code="nrg_bal") %>% # Keep nrg_bal code as well
+    eurostat::label_eurostat(code=c("nrg_bal", "siec")) %>% # Keep nrg_bal code as well
     dplyr::rename(dplyr::any_of(c(time='TIME_PERIOD'))) %T>%# Column changed with new EUROSTAT version
     saveRDS(filepath)
 }
