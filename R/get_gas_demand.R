@@ -22,7 +22,7 @@
 get_gas_demand <- function(diagnostics_folder='diagnostics'){
   years <- seq(2018, lubridate::year(lubridate::today()))
 
-  if(!is.null(diagnostics_folder)) dir.create(diagnostics_folder)
+  if(!is.null(diagnostics_folder)) dir.create(diagnostics_folder, showWarnings = F)
 
   # Estimate with two different methods
   consdist <- get_gas_demand_consdist(years=years)
@@ -67,14 +67,14 @@ get_gas_demand_consdist <- function(years){
                                  type='consumption,distribution',
                                  split_by='year')
 
-  
-  
-  
+
+
+
   consdist <- entsog %>%
     group_by(iso2=destination_iso2, date) %>%
     summarise(value_m3=-sum(value_m3, na.rm=T)) %>%
     arrange(date) %>%
-    
+
     # Interpolate missing data
     tidyr::complete(date=seq.Date(min(as.Date(date)),
                                   max(as.Date(date)), by='day'),
@@ -86,7 +86,7 @@ get_gas_demand_consdist <- function(years){
     tidyr::complete(date=seq.Date(min(as.Date(entsog$date)),
                                   max(as.Date(entsog$date)), by='day'),
                     fill=list(value_m3=0)) %>%
-    
+
     mutate(method='consdist')
 
   return(consdist)
@@ -112,8 +112,8 @@ get_gas_demand_apparent <- function(years, use_agsi_for_storage=F){
                                  date_to=glue("{max(years)}-12-31}"),
                                  type='storage,crossborder,production',
                                  split_by='year')
-  
-  
+
+
   # Fill missing data
   entsog <- entsog %>%
     select(destination_iso2, departure_iso2, date, type, value_m3) %>%
@@ -125,7 +125,7 @@ get_gas_demand_apparent <- function(years, use_agsi_for_storage=F){
                     fill=list(value_m3=NA)) %>%
     mutate(value_m3=zoo::na.approx(value_m3)) %>%
     ungroup()
-    
+
 
 
   if(use_agsi_for_storage){
