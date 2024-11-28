@@ -14,7 +14,7 @@ update_corrected_demand <- function(production, diagnostics_folder){
 }
 
 update_all <- function(production=T, diagnostics_folder="diagnostics"){
-  
+
   library(tidyverse)
   library(lubridate)
   library(tidytext)
@@ -27,6 +27,6 @@ update_all <- function(production=T, diagnostics_folder="diagnostics"){
   update_gas_demand(production=production, diagnostics_folder=diagnostics_folder)
   update_co2_daily(production=production, diagnostics_folder=diagnostics_folder)
   update_corrected_demand(production=production, diagnostics_folder=diagnostics_folder)
-  
-  check_recent_enough(days=10)
+
+  check_recent_enough(days=14)
 }
