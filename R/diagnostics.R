@@ -174,10 +174,10 @@ diagnostic_co2_benchmark_yearly <- function(co2_daily, diagnostics_folder="diagn
 
     get_primap <- function(iso2s, with_mineral=F){
 
-      filepath <- 'data/Guetschow_et_al_2023b-PRIMAP-hist_v2.5_final_15-Oct-2023.csv'
+      filepath <- "data/Guetschow_et_al_2023b-PRIMAP-hist_v2.5_final_15-Oct-2023.csv"
       url <- "https://zenodo.org/records/10006301/files/Guetschow_et_al_2023b-PRIMAP-hist_v2.5_final_15-Oct-2023.csv?download=1"
       if(!file.exists(filepath)){
-          dir.create(dirname(filepath), showWarnings = FALSE)
+          dir.create(dirname(filepath), showWarnings = FALSE, recursive = T)
           download.file(url, filepath)
       }
 
@@ -213,13 +213,13 @@ diagnostic_co2_benchmark_yearly <- function(co2_daily, diagnostics_folder="diagn
       # Regenerate this data here:
       # https://shorturl.at/anQR1
       bind_rows(
-        # read_benchmark('data/ghg-emissions-climatewatch-withindustry.csv') %>% mutate(source='Climate Watch (with industry)'),
-        # read_benchmark('data/ghg-emissions-climatewatch.csv') %>% mutate(source='Climate Watch'),
-        # read_benchmark('data/ghg-emissions-unfccc-withindustry.csv') %>% mutate(source='UNFCCC (with industry)'),
-        # read_benchmark('data/ghg-emissions-unfccc.csv') %>% mutate(source='UNFCCC'),
-        # read_benchmark('data/ghg-emissions-gcp.csv') %>% mutate(source='GCP'),
-        # read_benchmark('data/ghg-emissions-pik-withindustry.csv') %>% mutate(source='Old PRIMAP-hist v2.5 (Energy and Industry)'),
-        # read_benchmark('data/ghg-emissions-pik.csv') %>% mutate(source='PRIMAP-hist v2.5 (Energy alone)')
+        # read_benchmark(get_data_filepath('ghg-emissions-climatewatch-withindustry.csv')) %>% mutate(source='Climate Watch (with industry)'),
+        # read_benchmark(get_data_filepath('ghg-emissions-climatewatch.csv')) %>% mutate(source='Climate Watch'),
+        # read_benchmark(get_data_filepath('ghg-emissions-unfccc-withindustry.csv')) %>% mutate(source='UNFCCC (with industry)'),
+        # read_benchmark(get_data_filepath('ghg-emissions-unfccc.csv')) %>% mutate(source='UNFCCC'),
+        # read_benchmark(get_data_filepath('ghg-emissions-gcp.csv')) %>% mutate(source='GCP'),
+        # read_benchmark(get_data_filepath('ghg-emissions-pik-withindustry.csv')) %>% mutate(source='Old PRIMAP-hist v2.5 (Energy and Industry)'),
+        # read_benchmark(get_data_filepath('ghg-emissions-pik.csv')) %>% mutate(source='PRIMAP-hist v2.5 (Energy alone)')
         get_primap(iso2s=unique(co2_crea$iso2), with_mineral = T) %>% mutate(source='PRIMAP Energy and Industry'),
         get_primap(iso2s=unique(co2_crea$iso2), with_mineral = F) %>% mutate(source='PRIMAP Energy and Industry\n(excl. Mineral industry)')
       ) %>%
@@ -301,13 +301,16 @@ diagnostic_co2_benchmark_monthly <- function(co2_daily, diagnostics_folder="diag
     ungroup() %>%
     rename(date=month)
 
-  #https://s3-eu-west-1.amazonaws.com/pfigshare-u-files/40572224/CM_EU.csv?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIYCQYOYV5JSSROOA/20240216/eu-west-1/s3/aws4_request&X-Amz-Date=20240216T035423Z&X-Amz-Expires=10&X-Amz-SignedHeaders=host&X-Amz-Signature=a3cdf29e62dc68f5d346797df01cd31613f927eff526d969bf94fbb5997d4738
-  # co2_carbonmonitor <-
-  co2_carbonmonitor <-
-    bind_rows(
-      readxl::read_xlsx('data/carbon-monitor-EU.xlsx') %>%
-        rename(value=`MtCO2 per day`),
-      read_csv('data/CM_EU.csv')) %>%
+
+
+  url <- "https://datas.carbonmonitor.org/API/downloadFullDataset.php?source=carbon_eu"
+  filepath <- "data/CM_EU.csv"
+  if(!file.exists(filepath)){
+    dir.create(dirname(filepath), showWarnings = FALSE, recursive = T)
+    download.file(url, filepath)
+  }
+
+  co2_carbonmonitor <- read_csv(filepath) %>%
     distinct(country, date, sector, .keep_all = T)
 
   co2_validate <- bind_rows(
@@ -385,7 +388,7 @@ diagnostic_co2_benchmark_monthly <- function(co2_daily, diagnostics_folder="diag
            fill="Sector",
            caption="Source: CREA analysis.") -> plt
 
-plt
+  plt
 
   quicksave(file.path(diagnostics_folder, "co2_benchmark_carbonmonitor.jpg"), plot=plt,
             width=8, height=4, scale=1, logo=F, dpi=600)

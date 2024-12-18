@@ -210,8 +210,14 @@ validate_power <- function(pwr_demand=download_pwr_demand(), folder="validation"
               data_source='EMBER (Data Explorer)')
 
 
+  filepath <- "data/ember_yearly_full_release_long_format.csv"
+  url <- "https://storage.googleapis.com/emb-prod-bkt-publicdata/public-downloads/yearly_full_release_long_format.csv"
+  if(!file.exists(filepath)){
+    dir.create(dirname(filepath), showWarnings = FALSE, recursive = T)
+    download.file(url, filepath)
+  }
 
-  ember_catalogue <- read_csv('data/yearly_full_release_long_format.csv')
+  ember_catalogue <- read_csv(filepath)
   ember_2 <- ember_catalogue %>%
     filter(`Area type`=='Country',
            EU==1, Unit=='TWh', Category=='Electricity generation') %>%

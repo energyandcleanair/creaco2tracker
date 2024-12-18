@@ -10,6 +10,7 @@ importFrom(logger,log_error)
 importFrom(logger,log_warn)
 importFrom(logger,log_fatal)
 importFrom(logger,log_debug)
+importFrom(logger,log_success)
 
 importFrom(dplyr,all_vars)
 importFrom(dplyr,across)
