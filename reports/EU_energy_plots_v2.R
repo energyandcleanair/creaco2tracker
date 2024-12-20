@@ -129,13 +129,13 @@ names(cons) <- c('coal', 'oil', 'gas')
 cons$coal %>% filter(grepl('Transformation input|Final consumption.*(industry sector$|other sectors$)', nrg_bal)) %>% 
   mutate(sector=ifelse(grepl('electricity', nrg_bal), 'electricity', 'others')) %>% 
   group_by(geo, sector, time, unit, siec) %>% summarise(across(values, sum, na.rm=T)) %>% 
-  mutate(fuel_type='Coal') ->
+  mutate(fuel='Coal') ->
   coal_cons
 
 cons$oil %>% filter((grepl('Gross inland deliveries.*observed', nrg_bal) & siec=='Oil products') |
                       (grepl('Direct use', nrg_bal) & grepl('Crude oil, NGL', siec))) %>% 
   group_by(geo, time, unit, siec) %>% summarise(across(values, sum, na.rm=T)) %>% 
-  mutate(fuel_type='Oil', sector='all') ->
+  mutate(fuel='Oil', sector='all') ->
   oil_cons
 
 cons$gas %>% filter(grepl('Inland consumption.*observed|Transformation input', nrg_bal),
@@ -147,7 +147,7 @@ cons$gas %>% filter(grepl('Inland consumption.*observed|Transformation input', n
 gas_cons %>% mutate(values=values*ifelse(sector=='electricity', -1, 1)) %>% 
   group_by(geo, time, unit, siec) %>% summarise(across(values, sum, na.rm=T)) %>% 
   mutate(sector='others') %>% bind_rows(gas_cons %>% filter(sector=='electricity')) %>% 
-  mutate(fuel_type='gas') ->
+  mutate(fuel='gas') ->
   gas_cons
 
 bind_rows(coal_cons, oil_cons, gas_cons) %>% 
@@ -169,9 +169,9 @@ dts <- cons %>% bind_rows() %>% use_series(time) %>% min() %>%
   seq.Date(today() %>% 'day<-'(1), by='month')
 
 cons_agg %>% 
-  group_by(geo, time, fuel_type, sector) %>% 
+  group_by(geo, time, fuel, sector) %>% 
   summarise(across(CO2_emissions, sum, na.rm=T)) %>% 
-  group_by(geo, fuel_type, sector) %>% 
+  group_by(geo, fuel, sector) %>% 
   expand.dates('time', dts) %>% arrange(time) %>% 
   group_modify(function(df, ...) {
     df %<>% group_by(month=month(time)) %>% 
@@ -194,14 +194,14 @@ cons_filled %<>% ungroup %>%
 
 cons_filled %>% 
   filter(EU) %>% 
-  group_by(time, fuel_type, sector) %>% 
+  group_by(time, fuel, sector) %>% 
   summarise(coverage = sum(CO2_emissions[!is.na(yoy)], na.rm=T)/sum(CO2_emissions, na.rm=T),
             across(CO2_emissions, sum, na.rm=T)) ->
   co2
 
 co2 %>% filter(CO2_emissions>0, year(time)>=2018, time<='2022-09-01') %>% 
   mutate(year=as.factor(year(time)), plotdate=time %>% 'year<-'(2022)) %>% 
-  ggplot(aes(plotdate, CO2_emissions, col=year)) + geom_line() + facet_wrap(~paste(fuel_type, sector))
+  ggplot(aes(plotdate, CO2_emissions, col=year)) + geom_line() + facet_wrap(~paste(fuel, sector))
 
 get_yoy <- function(x, date) {
   lastyr <- date
@@ -213,7 +213,7 @@ get_yoy <- function(x, date) {
 pwr %>% filter(source %in% c('Coal', 'Fossil Gas'), country=='EU total') %>% 
   group_by(source) %>% 
   mutate(crea_yoy = get_yoy(value_mw, date),
-         fuel_type = recode(source, 'Fossil Gas'='gas'),
+         fuel = recode(source, 'Fossil Gas'='gas'),
          sector='electricity') %>% 
   rename(value=value_mw) ->
   pwr_yoy
@@ -221,26 +221,26 @@ pwr %>% filter(source %in% c('Coal', 'Fossil Gas'), country=='EU total') %>%
 implied_cons %>% filter(destination_region=='EU') %>% 
   group_by(date) %>% 
   summarise(across(value_m3, sum)) %>% 
-  mutate(crea_yoy = get_yoy(value_m3, date), fuel_type='gas', sector='all') %>% 
+  mutate(crea_yoy = get_yoy(value_m3, date), fuel='gas', sector='all') %>% 
   rename(value=value_m3) ->
   gas_yoy
 
 bind_rows(pwr_yoy, gas_yoy) %>% ungroup %>% 
   mutate(date=date(date)) %>% filter(date<=today()-5) %>% 
-  select(date, fuel_type, sector, crea_value=value, crea_yoy) ->
+  select(date, fuel, sector, crea_value=value, crea_yoy) ->
   crea_yoy
 
-co2 %<>% filter(fuel_type=='gas', sector != 'all') %>% 
-  group_by(time, fuel_type) %>% 
+co2 %<>% filter(fuel=='gas', sector != 'all') %>% 
+  group_by(time, fuel) %>% 
   summarise(coverage=weighted.mean(coverage, CO2_emissions),
             across(CO2_emissions, sum)) %>% 
   mutate(sector='all') %>% 
-  bind_rows(co2 %>% filter(fuel_type!='gas' | sector != 'all'))
+  bind_rows(co2 %>% filter(fuel!='gas' | sector != 'all'))
 
-co2 %>% ungroup %>% filter(CO2_emissions>0) %>% distinct(fuel_type, sector) -> grps
+co2 %>% ungroup %>% filter(CO2_emissions>0) %>% distinct(fuel, sector) -> grps
 
 dts <- seq.Date(min(co2$time), max(crea_yoy$date), by='d')
-co2 %>% group_by(fuel_type, sector) %>% 
+co2 %>% group_by(fuel, sector) %>% 
   rename(month=time) %>% 
   full_join(tibble(date=dts, month=dts %>% 'day<-'(1))) %>% 
   mutate(CO2_emissions = CO2_emissions/days_in_month(date)) %>% 
@@ -249,7 +249,7 @@ co2 %>% group_by(fuel_type, sector) %>%
   co2_daily
 
 co2_daily %<>% 
-  group_by(fuel_type, sector) %>% 
+  group_by(fuel, sector) %>% 
   mutate(has_both=!is.na(CO2_emissions+crea_value) & date>='2021-03-01',
          crea_eurostat_ratio = mean(crea_value[has_both]) / mean(CO2_emissions[has_both]),
          #crea_CO2 = CO2_emissions / (1+eurostat_yoy) * (1+crea_yoy),
@@ -259,26 +259,26 @@ co2_daily %<>%
                                   #CO2_emissions * coverage + crea_CO2 * 1-coverage,
                                 T~CO2_emissions))
 
-co2_daily %<>% filter(fuel_type=='gas') %>% 
-  group_by(date, fuel_type) %>% 
+co2_daily %<>% filter(fuel=='gas') %>% 
+  group_by(date, fuel) %>% 
   summarise(across(c(CO2_hybrid, CO2_emissions), ~.x[sector=='all']-.x[sector=='electricity'])) %>% 
   mutate(sector='others') %>% 
-  bind_rows(co2_daily %>% filter(fuel_type!='gas' | sector %notin% c('others', 'all')))
+  bind_rows(co2_daily %>% filter(fuel!='gas' | sector %notin% c('others', 'all')))
 
-co2_daily %<>% filter(fuel_type!='total') %>% 
+co2_daily %<>% filter(fuel!='total') %>% 
   group_by(date) %>% 
   summarise(across(c(CO2_hybrid, CO2_emissions), sum)) %>% 
-  mutate(fuel_type='total', sector='all') %>% 
-  bind_rows(co2_daily %>% filter(fuel_type!='total'))
+  mutate(fuel='total', sector='all') %>% 
+  bind_rows(co2_daily %>% filter(fuel!='total'))
 
 
 co2_daily %>% filter(year(date)>=2018) %>% 
-  group_by(sector, fuel_type) %>% 
+  group_by(sector, fuel) %>% 
   mutate(CO2_30d = zoo::rollapplyr(CO2_hybrid, 30, mean, fill=NA)) %>% 
   mutate(year=as.factor(year(date)), plotdate=date %>% 'year<-'(2022)) %>% 
   ggplot(aes(plotdate, CO2_30d/1e6, col=year)) + 
   geom_line() + 
-  facet_wrap(~paste(fuel_type, sector), scales='free_y') +
+  facet_wrap(~paste(fuel, sector), scales='free_y') +
   expand_limits(y=0) + x_at_zero() + scale_x_date(expand=c(0,0)) +
   theme_crea() +
   labs(title="EU CO2 emissions", y='Mt/day, 30-day mean', x='') +

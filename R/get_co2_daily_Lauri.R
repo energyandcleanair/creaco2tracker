@@ -94,9 +94,9 @@
 #
 #   #fill data to present assuming deviation from 3-year average stays same as in last 3 months of data
 #   cons_agg %>%
-#     group_by(geo, time, fuel_type, sector) %>%
+#     group_by(geo, time, fuel, sector) %>%
 #     summarise_at('CO2_emissions', sum, na.rm=T) %>%
-#     group_by(geo, fuel_type, sector) %>%
+#     group_by(geo, fuel, sector) %>%
 #     creahelpers::expand_dates('time', dts) %>% arrange(time) %>%
 #     group_modify(function(df, ...) {
 #       df %<>% group_by(month=month(time)) %>%
@@ -121,7 +121,7 @@
 #   #aggregate by fuel type and sector
 #   cons_filled %>%
 #     filter(EU) %>%
-#     group_by(time, fuel_type, sector) %>%
+#     group_by(time, fuel, sector) %>%
 #     summarise(coverage = sum(CO2_emissions[!is.na(yoy)], na.rm=T)/sum(CO2_emissions, na.rm=T),
 #               across(CO2_emissions, sum, na.rm=T)) ->
 #     co2
@@ -130,7 +130,7 @@
 #   pwr %>% filter(source %in% c('Coal', 'Fossil Gas'), country=='EU total') %>%
 #     group_by(source) %>%
 #     mutate(crea_yoy = get_yoy(value_mw, date),
-#            fuel_type = recode(source, 'Fossil Gas'='gas', 'Coal'='coal'),
+#            fuel = recode(source, 'Fossil Gas'='gas', 'Coal'='coal'),
 #            sector='electricity') %>%
 #     rename(value=value_mw) ->
 #     pwr_yoy
@@ -138,32 +138,32 @@
 #   implied_cons %>%
 #     group_by(date) %>%
 #     summarise(across(value_m3, sum)) %>%
-#     mutate(crea_yoy = get_yoy(value_m3, date), fuel_type='gas', sector='all') %>%
+#     mutate(crea_yoy = get_yoy(value_m3, date), fuel='gas', sector='all') %>%
 #     rename(value=value_m3) ->
 #     gas_yoy
 #
 #   bind_rows(pwr_yoy, gas_yoy) %>% ungroup %>%
 #     mutate(date=as.Date(date)) %>%
 #     filter(date<=today()-5) %>%
-#     select(date, fuel_type, sector, crea_value=value, crea_yoy) ->
+#     select(date, fuel, sector, crea_value=value, crea_yoy) ->
 #     crea_yoy
 #
 #   #add gas all sectors total
-#   co2 <- co2 %>% filter(fuel_type=='gas', sector != 'all') %>%
-#     group_by(time, fuel_type) %>%
+#   co2 <- co2 %>% filter(fuel=='gas', sector != 'all') %>%
+#     group_by(time, fuel) %>%
 #     summarise(coverage=weighted.mean(coverage, CO2_emissions),
 #               across(CO2_emissions, sum)) %>%
 #     mutate(sector='all') %>%
-#     bind_rows(co2 %>% filter(fuel_type!='gas' | sector != 'all'))
+#     bind_rows(co2 %>% filter(fuel!='gas' | sector != 'all'))
 #
 #   #identify variable combos with data
-#   co2 %>% ungroup %>% filter(CO2_emissions>0) %>% distinct(fuel_type, sector) -> grps
+#   co2 %>% ungroup %>% filter(CO2_emissions>0) %>% distinct(fuel, sector) -> grps
 #
 #   #dates for which to output estimates
 #   dts <- seq.Date(min(co2$time), max(crea_yoy$date), by='d')
 #
 #   #expand monthly data to daily and add daily data
-#   co2 %>% group_by(fuel_type, sector) %>%
+#   co2 %>% group_by(fuel, sector) %>%
 #     rename(month=time) %>%
 #     full_join(tibble(date=dts, month=dts %>% 'day<-'(1))) %>%
 #     mutate(CO2_emissions = CO2_emissions/days_in_month(date)) %>% right_join(grps) %>%
@@ -172,7 +172,7 @@
 #
 #   #use daily data when available
 #   co2_daily <- co2_daily %>%
-#     group_by(fuel_type, sector) %>%
+#     group_by(fuel, sector) %>%
 #     mutate(has_both=!is.na(CO2_emissions+crea_value) & date>='2021-03-01',
 #            crea_eurostat_ratio = mean(crea_value[has_both]) / mean(CO2_emissions[has_both]),
 #            crea_CO2 = crea_value / crea_eurostat_ratio,
@@ -182,30 +182,30 @@
 #
 #   #calculate gas use outside power sector
 #   co2_daily <- co2_daily %>%
-#     filter(fuel_type=='gas') %>%
-#     group_by(date, fuel_type) %>%
+#     filter(fuel=='gas') %>%
+#     group_by(date, fuel) %>%
 #     summarise(across(c(CO2_hybrid, CO2_emissions, crea_CO2), ~.x[sector=='all']-.x[sector=='electricity'])) %>%
 #     mutate(sector='others') %>%
-#     bind_rows(co2_daily %>% filter(fuel_type!='gas' | (! sector %in% c('others', 'all'))))
+#     bind_rows(co2_daily %>% filter(fuel!='gas' | (! sector %in% c('others', 'all'))))
 #
 #   #calculate total CO2
 #   co2_daily <- co2_daily %>%
-#     filter(fuel_type!='total') %>%
+#     filter(fuel!='total') %>%
 #     group_by(date) %>%
 #     summarise(across(c(CO2_hybrid, CO2_emissions, crea_CO2), sum)) %>%
-#     mutate(fuel_type='total', sector='all') %>%
-#     bind_rows(co2_daily %>% filter(fuel_type!='total'))
+#     mutate(fuel='total', sector='all') %>%
+#     bind_rows(co2_daily %>% filter(fuel!='total'))
 #
 #   #plot
 #   if(!is.null(diagnostics_folder)){
 #     plt <- co2_daily %>% filter(year(date)>=2017) %>%
-#       mutate(across(c(fuel_type, sector), tolower)) %>%
-#       group_by(sector, fuel_type) %>%
+#       mutate(across(c(fuel, sector), tolower)) %>%
+#       group_by(sector, fuel) %>%
 #       mutate(CO2_30d = zoo::rollapplyr(CO2_hybrid, 30, mean, fill=NA),
 #              year=as.factor(year(date)), plotdate=date %>% 'year<-'(2022)) %>%
 #       ggplot(aes(plotdate, CO2_30d/1e6, col=year)) +
 #       geom_line(size=0.2) +
-#       facet_wrap(~paste(fuel_type, sector), scales='free_y') +
+#       facet_wrap(~paste(fuel, sector), scales='free_y') +
 #       expand_limits(y=0)  + scale_x_date(expand=c(0,0)) +
 #       theme_crea() +
 #       labs(title="EU CO2 emissions", y='Mt/day, 30-day mean', x='')
@@ -219,10 +219,10 @@
 #     filter(date < max(implied_cons$date) - lubridate::days(3)) %>%
 #     mutate(region='EU',
 #            unit='t/day') %>%
-#     mutate(across(c(fuel_type, sector), stringr::str_to_title),
+#     mutate(across(c(fuel, sector), stringr::str_to_title),
 #            frequency='daily',
 #            version=as.character(packageVersion("creaco2tracker"))) %>%
-#     select(region, date, fuel=fuel_type, sector, unit, frequency, version, value=CO2_hybrid)
+#     select(region, date, fuel, sector, unit, frequency, version, value=CO2_hybrid)
 # }
 #
 #
@@ -299,7 +299,7 @@
 #       summarise_at('values', sum, na.rm=T) %>%
 #       mutate(sector='others') %>%
 #       bind_rows(x %>% filter(sector=='electricity')) %>%
-#       mutate(fuel_type='gas')
+#       mutate(fuel='gas')
 #   }
 #
 #   aggregate <- function(x){
@@ -307,7 +307,7 @@
 #       x[[commodity]] %>%
 #         group_by(geo, sector, time, unit, siec) %>%
 #         summarise_at('values', sum, na.rm=T) %>%
-#         mutate(fuel_type=commodity)
+#         mutate(fuel=commodity)
 #     }) %>%
 #       `names<-`(names(x))
 #   }
@@ -338,11 +338,11 @@
 #
 #       filter(grepl('European union', geo, T)) %>%
 #       filter(siec %in% .[.$source=='monthly',]$siec) %>%
-#       group_by(year=lubridate::year(time), siec, source, fuel_type, sector) %>%
+#       group_by(year=lubridate::year(time), siec, source, fuel, sector) %>%
 #       summarise(values=sum(values)) %>%
 #       ggplot(aes(year, values, col=siec, linetype=source)) +
 #       geom_line() +
-#       facet_grid(fuel_type~sector, scales='free_y') +
+#       facet_grid(fuel~sector, scales='free_y') +
 #       theme(legend.position = 'bottom') +
 #       rcrea::scale_y_crea_zero()
 #
@@ -354,12 +354,12 @@
 #   month_shares <- lapply(cons_monthly, function(cons){
 #
 #     month_shares <- cons %>%
-#       group_by(sector, siec, unit, geo, fuel_type, year=lubridate::year(time)) %>%
+#       group_by(sector, siec, unit, geo, fuel, year=lubridate::year(time)) %>%
 #       mutate(count=n()) %>%
 #       filter(count==12) %>%
-#       group_by(sector, siec, unit, geo, fuel_type, month=lubridate::month(time)) %>%
+#       group_by(sector, siec, unit, geo, fuel, month=lubridate::month(time)) %>%
 #       summarise(values = sum(values, na.rm=T)) %>%
-#       group_by(sector, siec, unit, geo, fuel_type) %>%
+#       group_by(sector, siec, unit, geo, fuel) %>%
 #       mutate(month_share = values / sum(values, na.rm=T)) %>%
 #       mutate(month_share = replace_na(month_share, 1/12),
 #              month_share = case_when(is.infinite(month_share) ~ 1/12,
@@ -369,7 +369,7 @@
 #
 #     # Check ~1
 #     if(!all(month_shares %>%
-#             group_by(sector, siec, unit, geo, fuel_type) %>%
+#             group_by(sector, siec, unit, geo, fuel) %>%
 #             summarise(one=round(sum(month_share), 5)) %>%
 #             pull(one) %>%
 #             unique() == 1)){stop('Wrong monthly shares')}
@@ -384,7 +384,7 @@
 #       mutate(year=lubridate::year(time)) %>%
 #       # filter(time < min(cons$coal$time)) %>%
 #       inner_join(month_shares[[commodity]]) %>%
-#       arrange(sector, siec, unit, geo, fuel_type, time) %>%
+#       arrange(sector, siec, unit, geo, fuel, time) %>%
 #       mutate(time=as.Date(sprintf('%s-%0d-01', year, month)),
 #              values=values * month_share)   %>%
 #       select(-c(year, month, month_share))
@@ -401,28 +401,28 @@
 #   # Visual check
 #   if(!is.null(diagnostics_folder)){
 #     plt <- cons_combined %>%
-#       # group_by(geo, sector, time, unit, siec, fuel_type) %>%
+#       # group_by(geo, sector, time, unit, siec, fuel) %>%
 #       # arrange(source) %>%
 #       # slice(1) %>%
 #       # ungroup() %>%
 #       filter(grepl('European union', geo, T)) %>%
 #       ggplot(aes(time, values, col=siec, linetype=source)) +
 #       geom_line() +
-#       facet_grid(fuel_type~sector, scales='free_y') +
+#       facet_grid(fuel~sector, scales='free_y') +
 #       theme(legend.position='bottom')+
 #       rcrea::scale_y_crea_zero()
 #
 #     ggsave(file.path(diagnostics_folder,'eurostat_annual_vs_monthly_monthly.png'), plot=plt, width=8, height=6, bg='white')
 #
 #     plt <- cons_combined %>%
-#       group_by(geo, sector, time, unit, siec, fuel_type) %>%
+#       group_by(geo, sector, time, unit, siec, fuel) %>%
 #       arrange(source) %>%
 #       slice(1) %>%
 #       ungroup() %>%
 #       filter(grepl('European union', geo, T)) %>%
 #       ggplot(aes(time, values, col=siec, linetype=source)) +
 #       geom_line() +
-#       facet_grid(fuel_type~sector, scales='free_y') +
+#       facet_grid(fuel~sector, scales='free_y') +
 #       theme(legend.position='bottom')+
 #       rcrea::scale_y_crea_zero()
 #
@@ -432,13 +432,13 @@
 #
 #   # Remove overlaps
 #   cons <- cons_combined  %>%
-#     group_by(geo, sector, time, unit, siec, fuel_type) %>%
+#     group_by(geo, sector, time, unit, siec, fuel) %>%
 #     arrange(source) %>%
 #     # Keep monthly when both are available
 #     slice(1) %>%
 #     ungroup() %>%
 #     select(-c(source)) %>%
-#     split(.$fuel_type)
+#     split(.$fuel)
 #
 #   return(cons)
 # }

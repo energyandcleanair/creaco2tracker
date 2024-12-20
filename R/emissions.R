@@ -1,13 +1,12 @@
 get_co2_from_eurostat_cons <- function(eurostat_cons, diagnostics_folder="diagnostics"){
   eurostat_cons %>%
-    # filter(fuel_type=='coal') %>%
     add_ncv(diagnostics_folder = diagnostics_folder) %>%
     add_emission_factor() %>%
     mutate(value_co2_tonne=
              case_when(unit=='Thousand tonnes' ~ values * ncv_kjkg / 1000 * co2_factor_t_per_TJ,
                        unit=='Terajoule (gross calorific value - GCV)' & siec == "Natural gas" ~ values * ncv_gcv_gas * co2_factor_t_per_TJ
              )) %>%
-    group_by(iso2, geo, date=time, fuel_type, sector) %>%
+    group_by(iso2, geo, date=time, fuel, sector) %>%
     summarise_at('value_co2_tonne', sum, na.rm=T)
 }
 

@@ -12,19 +12,21 @@
 #' @examples
 get_co2_daily <- function(diagnostics_folder='diagnostics',
                           use_cache=F,
-                          iso2s = c("EU")
+                          iso2s = c("EU"),
+                          cut_tail_days = 3
                           ){
 
   # Collect necessary data
   gas_demand <- download_gas_demand(region_id=iso2s, use_cache = use_cache)
   pwr_demand <- download_pwr_demand(use_cache = use_cache)
   eurostat_cons <- get_eurostat_cons(diagnostics_folder = diagnostics_folder, use_cache = use_cache)
+  eurostat_indprod <- get_eurostat_indprod(use_cache = use_cache)
 
   # Quick sanity checks
   diagnostic_pwr(pwr_demand, diagnostics_folder = diagnostics_folder)
   diagnostic_eurostat_cons(eurostat_cons, iso2s=iso2s, diagnostics_folder = diagnostics_folder)
 
-  # Compute emissions
+  # Compute emissions from EUROSTAT first
   co2 <- get_co2_from_eurostat_cons(eurostat_cons)
 
   # Filter regions
@@ -34,7 +36,7 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
     filter(iso2 %in% iso2s)
 
   # Project data til now
-  co2_filled <- project_until_now(co2, pwr = pwr_demand, gas_demand=gas_demand)
+  co2_filled <- project_until_now(co2, pwr_demand = pwr_demand, gas_demand=gas_demand, eurostat_indprod=eurostat_indprod)
 
   # Downscale to daily data
   co2_daily <- downscale_daily(co2 = co2_filled, pwr_demand = pwr_demand, gas_demand = gas_demand)
@@ -48,8 +50,13 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
   # Diagnostics
   diagnostic_co2(co2_daily, diagnostics_folder=diagnostics_folder)
 
-  # Formatting / cleaning for db
-  co2_daily_formatted <- format_co2_for_db(co2_daily, pwr_demand = pwr_demand, gas_demand = gas_demand)
+  # Cut tails, add unit
+  co2_daily <- co2_daily %>%
+    filter(date < min(max(pwr_demand$date), max(gas_demand$date)) - lubridate::days(cut_tail_days))%>%
+    rename(value=value_co2_tonne,
+           region=geo
+           ) %>%
+    mutate(unit='t/day')
 
-  return(co2_daily_formatted)
+  return(co2_daily)
 }

@@ -7,14 +7,14 @@ downscale_daily <- function(co2, pwr_demand, gas_demand){
   daily_proxy <- get_daily_proxy(pwr_demand = pwr_demand, gas_demand = gas_demand)
 
   #identify variable combos with data
-  grps <- co2 %>% ungroup %>% filter(value_co2_tonne>0) %>% distinct(fuel_type, sector)
+  grps <- co2 %>% ungroup %>% filter(value_co2_tonne>0) %>% distinct(fuel, sector)
 
   #dates for which to output estimates
   dts_daily <- seq.Date(min(co2$date), max(daily_proxy$date), by='d')
 
   #expand monthly data to daily and add daily data
   co2 %>%
-    group_by(iso2, geo, fuel_type, sector) %>%
+    group_by(iso2, geo, fuel, sector) %>%
     rename(month=date) %>%
     full_join(
       tibble(date=dts_daily, month=dts_daily %>% 'day<-'(1)),
@@ -22,13 +22,13 @@ downscale_daily <- function(co2, pwr_demand, gas_demand){
       by="month"
       ) %>%
     mutate(value_co2_tonne = value_co2_tonne/days_in_month(date)) %>%
-    right_join(grps, by=c("fuel_type", "sector")) %>%
-    left_join(daily_proxy, by=c("fuel_type", "sector", "date")) ->
+    right_join(grps, by=c("fuel", "sector")) %>%
+    left_join(daily_proxy, by=c("fuel", "sector", "date")) ->
     co2_daily
 
   #use daily data when available
   co2_daily <- co2_daily %>%
-    group_by(iso2, geo, fuel_type, sector) %>%
+    group_by(iso2, geo, fuel, sector) %>%
     mutate(has_both=!is.na(value_co2_tonne+proxy_value) & date>='2021-03-01',
            proxy_eurostat_ratio = mean(proxy_value[has_both]) / mean(value_co2_tonne[has_both]),
            proxy_CO2 = proxy_value / proxy_eurostat_ratio,
@@ -48,7 +48,7 @@ get_daily_proxy <- function(pwr_demand, gas_demand){
            country=='EU total') %>%
     group_by(source) %>%
     mutate(proxy_yoy = get_yoy(value_mw, date),
-           fuel_type = recode(source, 'Fossil Gas'='gas', 'Coal'='coal'),
+           fuel = recode(source, 'Fossil Gas'='gas', 'Coal'='coal'),
            sector=SECTOR_ELEC) %>%
     rename(value=value_mw) ->
     pwr_yoy
@@ -59,7 +59,7 @@ get_daily_proxy <- function(pwr_demand, gas_demand){
     group_by(date) %>%
     summarise(across(value, sum)) %>%
     mutate(proxy_yoy = get_yoy(value, date),
-           fuel_type='gas',
+           fuel='gas',
            sector=SECTOR_ALL) ->
     gas_yoy
 
@@ -67,7 +67,7 @@ get_daily_proxy <- function(pwr_demand, gas_demand){
     ungroup %>%
     mutate(date=as.Date(date)) %>%
     filter(date<=max(gas_yoy$date) - lubridate::days(3)) %>%
-    select(date, fuel_type, sector, proxy_value=value, proxy_yoy) ->
+    select(date, fuel, sector, proxy_value=value, proxy_yoy) ->
     proxy_yoy
 
   return(proxy_yoy)

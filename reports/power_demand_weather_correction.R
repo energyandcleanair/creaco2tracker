@@ -1,7 +1,7 @@
 require(tidyverse); require(lubridate); require(magrittr); require(wbstats)
 
 pwr %>% filter(country=='EU total', source=='Total') %>% mutate(across(date, as.Date)) -> pwr_demand
-co2_daily %>% filter(sector=='others', fuel_type=='gas') %>% mutate(value_TWh = CO2_hybrid / 55 / 3.6 / 1000) %>% 
+co2_daily %>% filter(sector=='others', fuel=='gas') %>% mutate(value_TWh = CO2_hybrid / 55 / 3.6 / 1000) %>% 
   select(date, value_TWh) -> gas_demand
 
 c('result_2020-01-01_2022-10-30_weighted_cdd.csv',

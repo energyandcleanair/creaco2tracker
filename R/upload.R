@@ -9,11 +9,14 @@ get_pg_url <- function(production){
 
 upload_co2_daily <- function(co2_daily, production=T, clear_all_first=F){
 
+  # Formatting / cleaning for db
+  co2_daily_formatted <- format_co2_for_db(co2_daily)
+
   print(sprintf("=== Uploading co2_daily (%s) ===", ifelse(production,"production","development")))
 
   unique_cols <-  c('region', 'date', 'fuel', 'sector', 'unit', 'frequency', 'version')
 
-  p <- co2_daily %>%
+  p <- co2_daily_formatted %>%
     select(region, date, fuel, sector, unit, frequency, version, value)
 
   db <- dbx::dbxConnect(adapter="postgres",
