@@ -25,7 +25,7 @@ get_eurostat_cons <- function(diagnostics_folder='diagnostics',
   cons_yearly_raw <- consumption_codes_yearly %>%
     lapply(get_eurostat_from_code, use_cache=use_cache)
   names(cons_yearly_raw) <- c('coal', 'gas')
-  
+
   cons_yearly_raw$oil <- lapply(c('O4600', 'O4100_TOT_4200-4500'),
                                 function(x){
                                   get_eurostat_from_code(code="nrg_cb_oil",
@@ -60,8 +60,8 @@ get_eurostat_cons <- function(diagnostics_folder='diagnostics',
         'Final consumption - energy use')) %>%
       mutate(sector=ifelse(grepl('electricity', nrg_bal), 'electricity', 'all'))
   }
-  
-  
+
+
   filter_oil <- function(x){
     # Gross inland deliveries - energy use' is not available anymore starting from 2023
     # This is the one we need though...
@@ -75,9 +75,9 @@ get_eurostat_cons <- function(diagnostics_folder='diagnostics',
       distinct(siec_code, nrg_bal_code) %>%
       mutate(factor = case_when(nrg_bal_code == "GD_PI" ~ -1,
                                 T ~ 1))
-    
+
     if(nrow(mult) != 3) stop("Please fix filter_oil")
-    
+
     x %>%
       inner_join(mult) %>%
       mutate(values = values * factor) %>%
@@ -90,7 +90,7 @@ get_eurostat_cons <- function(diagnostics_folder='diagnostics',
   filter_oil_monthly <- function(x){
     filter_oil(x)
   }
-  
+
   filter_oil_yearly <- function(x){
    filter_oil(x)
   }
@@ -162,7 +162,7 @@ get_eurostat_cons <- function(diagnostics_folder='diagnostics',
       x[[commodity]] %>%
         group_by(geo, sector, time, unit, siec) %>%
         summarise_at('values', sum, na.rm=T) %>%
-        mutate(fuel_type=commodity)
+        mutate(fuel=commodity)
     }) %>%
       `names<-`(names(x))
   }
@@ -185,12 +185,12 @@ get_eurostat_cons <- function(diagnostics_folder='diagnostics',
   month_shares <- lapply(cons_monthly, function(cons){
 
     month_shares <- cons %>%
-      group_by(sector, siec, unit, geo, fuel_type, year=lubridate::year(time)) %>%
+      group_by(sector, siec, unit, geo, fuel, year=lubridate::year(time)) %>%
       mutate(count=n()) %>%
       filter(count==12) %>%
-      group_by(sector, siec, unit, geo, fuel_type, month=lubridate::month(time)) %>%
+      group_by(sector, siec, unit, geo, fuel, month=lubridate::month(time)) %>%
       summarise(values = sum(values, na.rm=T), .groups="drop") %>%
-      group_by(sector, siec, unit, geo, fuel_type) %>%
+      group_by(sector, siec, unit, geo, fuel) %>%
       mutate(month_share = values / sum(values, na.rm=T)) %>%
       mutate(month_share = replace_na(month_share, 1/12),
              month_share = case_when(is.infinite(month_share) ~ 1/12,
@@ -200,7 +200,7 @@ get_eurostat_cons <- function(diagnostics_folder='diagnostics',
 
     # Check ~1
     if(!all(month_shares %>%
-            group_by(sector, siec, unit, geo, fuel_type) %>%
+            group_by(sector, siec, unit, geo, fuel) %>%
             summarise(one=round(sum(month_share), 5), .groups="drop") %>%
             pull(one) %>%
             unique() == 1)){stop('Wrong monthly shares')}
@@ -215,7 +215,7 @@ get_eurostat_cons <- function(diagnostics_folder='diagnostics',
       mutate(year=lubridate::year(time)) %>%
       inner_join(month_shares[[commodity]],
                  relationship = "many-to-many") %>%
-      arrange(sector, siec, unit, geo, fuel_type, time) %>%
+      arrange(sector, siec, unit, geo, fuel, time) %>%
       mutate(time=as.Date(sprintf('%s-%0d-01', year, month)),
              values=values * month_share)   %>%
       select(-c(year, month, month_share))
@@ -238,7 +238,7 @@ get_eurostat_cons <- function(diagnostics_folder='diagnostics',
 
   # Keep monthly when both are available
   cons <- cons_combined  %>%
-    group_by(geo, sector, time, unit, siec, fuel_type) %>%
+    group_by(geo, sector, time, unit, siec, fuel) %>%
     arrange(source) %>%
     slice(1) %>%
     ungroup() %>%
@@ -388,11 +388,32 @@ remove_last_incomplete <- function(cons){
 
   max_months <- 6
   cons %>%
-    group_by(geo, sector, unit, siec, fuel_type) %>%
+    group_by(geo, sector, unit, siec, fuel) %>%
     arrange(desc(time)) %>%
     mutate(cumsum=cumsum(values)) %>%
     filter(cumsum!=0 | max(cumsum)==0 | row_number() >= max_months) %>%
     ungroup()
+}
+
+
+#' Get industrial production: useful to predict coal use in non-electricity sectors
+#' for when data is missing (industrial output data seems to be a couple months ahead)
+#'
+#' @param diagnostics_folder
+#' @param use_cache
+#' @param iso2s
+#'
+#' @return
+#' @export
+#'
+#' @examples
+get_eurostat_indprod <- function(diagnostics_folder='diagnostics',
+                                               use_cache=F,
+                                               iso2s=NULL){
+
+  indprod_raw <- get_eurostat_from_code(code="sts_inpr_m", use_cache=use_cache) %>%
+    add_iso2()
+  return(indprod_raw)
 }
 
 
@@ -404,10 +425,14 @@ get_eurostat_from_code <- function(code, use_cache=T, filters=NULL){
   if(use_cache & file.exists(filepath)){
     return(readRDS(filepath))
   }
-  
-  eurostat::get_eurostat(code, filters=filters) %>%
-    eurostat::label_eurostat(code=c("nrg_bal", "siec")) %>% # Keep nrg_bal code as well
-    dplyr::rename(dplyr::any_of(c(time='TIME_PERIOD'))) %T>%# Column changed with new EUROSTAT version
+
+
+  raw <- eurostat::get_eurostat(code, filters=filters)
+  keep_code <- intersect(names(raw), c("nrg_bal", "siec", "nace_r2"))
+  if(length(keep_code) == 0) keep_code <- NULL
+  raw %>%
+    eurostat::label_eurostat(code=keep_code, fix_duplicated=T) %>% # Keep nrg_bal code as well
+    dplyr::rename(dplyr::any_of(c(time='TIME_PERIOD'))) %T>% # Column changed with new EUROSTAT version
     saveRDS(filepath)
 }
 
