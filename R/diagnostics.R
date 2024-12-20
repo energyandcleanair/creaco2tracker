@@ -44,8 +44,8 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, c
 
   if(!is.null(diagnostics_folder)){
     (plt <- bind_rows(
-      do.call(bind_rows, cons_yearly) %>% mutate(source='yearly'),
-      do.call(bind_rows, cons_monthly) %>% mutate(source='monthly')) %>%
+      cons_yearly %>% mutate(source='yearly'),
+      cons_monthly %>% mutate(source='monthly')) %>%
 
         filter(grepl('27', geo, T)) %>%
         recode_siec() %>%
@@ -60,17 +60,17 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, c
 
     ggsave(file.path(diagnostics_folder,'eurostat_annual_vs_monthly_yearly.png'), plot=plt, width=12, height=6, bg='white')
 
-    plt <- cons_combined %>%
+    (plt <- cons_combined %>%
       filter(grepl('European union', geo, T)) %>%
       ggplot(aes(time, values, col=siec, linetype=source)) +
       geom_line() +
       facet_grid(fuel~sector, scales='free_y') +
       theme(legend.position='bottom')+
-      rcrea::scale_y_crea_zero()
+      rcrea::scale_y_crea_zero())
 
     ggsave(file.path(diagnostics_folder,'eurostat_annual_vs_monthly_monthly.png'), plot=plt, width=8, height=6, bg='white')
 
-    plt <- cons_combined %>%
+    (plt <- cons_combined %>%
       group_by(geo, sector, time, unit, siec, fuel) %>%
       arrange(source) %>%
       slice(1) %>%
@@ -80,7 +80,7 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, c
       geom_line() +
       facet_grid(fuel~sector, scales='free_y') +
       theme(legend.position='bottom')+
-      rcrea::scale_y_crea_zero()
+      rcrea::scale_y_crea_zero())
 
     ggsave(file.path(diagnostics_folder,'eurostat_combined.png'), plot=plt, width=8, height=6, bg='white')
   }
@@ -129,8 +129,8 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s, diagnostics_folder="d
         facet_wrap(fuel~sector)) -> plt
 
     plt
-    ggsave(file.path(diagnostics_folder, 'eurostat_data_availability.png'),
-           width=10, height=min(30,max(4, 1.5*length(iso2s))), bg='white', plot=plt, scale=1.5)
+    quicksave(file.path(diagnostics_folder, 'eurostat_data_availability.png'),
+           width=10, height=8, bg='white', plot=plt, scale=1.5)
 
   }
 }
@@ -323,7 +323,7 @@ diagnostic_co2_benchmark_yearly <- function(co2_daily, diagnostics_folder="diagn
 
         rcrea::scale_y_crea_zero() +
         {
-          if(length(unique(co2_crea$iso2))>1) facet_wrap(~iso2, scales='free_y') else element_blank()
+          if(length(unique(co2_crea$iso2))>1) facet_wrap(~iso2, scales='free_y')
         } +
 
         labs(title="CO2 emissions from fossil fuels",
@@ -428,7 +428,7 @@ diagnostic_co2_benchmark_monthly <- function(co2_daily, diagnostics_folder="diag
     #   ) +
 
       {
-        if(length(unique(co2_crea$iso2))>1) facet_wrap(~iso2, scales='free_y') else element_blank()
+        if(length(unique(co2_crea$iso2))>1) facet_wrap(~iso2, scales='free_y')
       } +
 
       rcrea::theme_crea() +

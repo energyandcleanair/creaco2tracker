@@ -2,22 +2,22 @@
 #' Project CO2 emissions until today using various proxies
 #'
 #' @param co2
-#' @param pwr
+#' @param pwr_demand
 #' @param gas_demand
 #'
 #' @return
 #' @export
 #'
 #' @examples
-project_until_now <- function(co2, pwr, gas_demand){
+project_until_now <- function(co2, pwr_demand, gas_demand, eurostat_indprod){
 
   dts_month <- seq.Date(min(co2$date), today() %>% 'day<-'(1), by='month')
 
   co2 %>%
     split_gas_to_elec_all() %>%
-    project_until_now_elec(pwr_demand=pwr, dts_month=dts_month) %>%
+    project_until_now_elec(pwr_demand=pwr_demand, dts_month=dts_month) %>%
     project_until_now_gas(gas_demand=gas_demand, dts_month=dts_month) %>%
-    # project_until_now_coal_others(eurostat_indprod=eurostat_indprod, dts_month=dts_month) %>%
+    project_until_now_coal_others(eurostat_indprod=eurostat_indprod, dts_month=dts_month) %>%
     project_until_now_yoy(dts_month=dts_month)
 }
 
@@ -35,7 +35,7 @@ project_until_now <- function(co2, pwr, gas_demand){
 #' @export
 #'
 #' @examples
-project_until_now_lm <- function(co2, proxy, dts_month, last_years=5, min_r2=0.9, force_overwrite=F){
+project_until_now_lm <- function(co2, proxy, dts_month, last_years=5, min_r2=0.9, force_overwrite=F, verbose=F){
 
   co2 %>%
     group_by(iso2, geo, fuel, sector) %>%
@@ -66,7 +66,7 @@ project_until_now_lm <- function(co2, proxy, dts_month, last_years=5, min_r2=0.9
 
       # If all value_proxy_cols are NA, stop
       if(data_training %>% select_at(value_proxy_cols) %>% filter_all(any_vars(!is.na(.))) %>% nrow == 0){
-        message(glue("{iso2} - {fuel}: Missing proxy data. Leaving as such"))
+        # message(glue("{iso2} - {fuel}: Missing proxy data. Leaving as such"))
         return(df)
       }
 
@@ -76,6 +76,9 @@ project_until_now_lm <- function(co2, proxy, dts_month, last_years=5, min_r2=0.9
 
       formula_str <- paste0(value_proxy_cols, collapse=' + ')
       model <- lm(data=data_training, formula= paste0('value_co2_tonne ~ 0+', formula_str))
+      if(verbose){
+        print(summary(model))
+      }
 
       r2 <- summary(model)$adj.r.squared
       if(r2 < min_r2){
@@ -164,7 +167,7 @@ project_until_now_elec <- function(co2, pwr_demand, dts_month, last_years=5, min
 project_until_now_gas <- function(co2, gas_demand, dts_month, last_years=5, min_r2=0.85){
 
   proxy <- gas_demand %>%
-    rename(iso2) %>%
+    rename(iso2=region_id) %>%
     filter(iso2 %in% co2$iso2) %>%
     ungroup() %>%
     filter(unit=='m3') %>%
@@ -181,33 +184,13 @@ project_until_now_coal_others <- function(co2, eurostat_indprod, dts_month, last
   # Cement, Steel, Glass, Coke
   products_ind <-
     list(
-      # "C19"="x",
       "C191"="coke",
       "C192"="refined",
-      # "C201"="chemicals",
-      # "C2011"="x",
-      "C2012"="x",
       "C2013"="x",
-      # "C2014"="x",
-      "C2015"="x",
-      "C2016"="x",
-      "C2017"="x",
-
-
-
-      "C2015"="chemicals_fertilisers",
-      "C202"="agrochemicals",
-      # "C204"="cosmetics",
-      # "C211"="pharmaceutical",
       "C221"="rubber",
-      # "C222"="plastics",
-      # "C23"="nonmetallic",
       "C235"="cement",
       "C241"="iron",
       "C231"="glass"
-      # "C23",
-      # "C24",
-      # "C25"
     )
 
 
@@ -229,15 +212,24 @@ project_until_now_coal_others <- function(co2, eurostat_indprod, dts_month, last
       sector=SECTOR_OTHERS
     )
 
-  co2_filled <- project_until_now_lm(co2, proxy, dts_month=dts_month, last_years=20, min_r2=min_r2,
-                                     force_overwrite=T)
 
-  bind_rows(co2 %>% mutate(type="original"),
-            co2_filled %>% mutate(type="filled")) %>%
-    filter(sector==SECTOR_OTHERS, fuel=='coal') %>%
-    filter(date >= "2023-01-01") %>%
-    ggplot(aes(date, value_co2_tonne, col=type)) +
-    geom_line()
+
+
+  #TODO
+  # Discuss internally the discrepancy within hard coal
+  # co2_filled_overwritten <- project_until_now_lm(co2, proxy, dts_month=dts_month, last_years=20, min_r2=min_r2,
+  #                                                force_overwrite=T)
+  # bind_rows(co2 %>% mutate(type="original"),
+  #           co2_filled %>% mutate(type="filled")) %>%
+  #   filter(sector==SECTOR_OTHERS, fuel=='coal') %>%
+  #   filter(date >= "2000-01-01") %>%
+  #   ggplot(aes(date, value_co2_tonne, col=type)) +
+  #   geom_line() +
+  #   scale_x_date(date_minor_breaks = "1 year", date_labels = "%Y") +
+  #   rcrea::scale_y_crea_zero()
+
+
+  project_until_now_lm(co2, proxy, dts_month=dts_month, last_years=20, min_r2=min_r2)
 
 }
 

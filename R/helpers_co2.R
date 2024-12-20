@@ -69,7 +69,15 @@ add_total_co2 <- function(co2){
 }
 
 format_co2_for_db <- function(co2_daily, cut_tail_days=3){
+
   co2_daily %>%
+    # Combine coal and coke
+    mutate(fuel=case_when(
+      fuel %in% c(FUEL_COAL, FUEL_COKE) ~ FUEL_COAL,
+      T ~ fuel
+    )) %>%
+    group_by(iso2, date, fuel, sector, unit) %>%
+    summarise(value = sum(value), .groups = "drop") %>%
     mutate(across(c(fuel, sector), stringr::str_to_title),
            frequency='daily',
            region=iso2,

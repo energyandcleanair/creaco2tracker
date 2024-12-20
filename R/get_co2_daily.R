@@ -36,7 +36,7 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
     filter(iso2 %in% iso2s)
 
   # Project data til now
-  co2_filled <- project_until_now(co2, pwr = pwr_demand, gas_demand=gas_demand)
+  co2_filled <- project_until_now(co2, pwr_demand = pwr_demand, gas_demand=gas_demand, eurostat_indprod=eurostat_indprod)
 
   # Downscale to daily data
   co2_daily <- downscale_daily(co2 = co2_filled, pwr_demand = pwr_demand, gas_demand = gas_demand)

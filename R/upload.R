@@ -16,7 +16,7 @@ upload_co2_daily <- function(co2_daily, production=T, clear_all_first=F){
 
   unique_cols <-  c('region', 'date', 'fuel', 'sector', 'unit', 'frequency', 'version')
 
-  p <- co2_daily %>%
+  p <- co2_daily_formatted %>%
     select(region, date, fuel, sector, unit, frequency, version, value)
 
   db <- dbx::dbxConnect(adapter="postgres",
