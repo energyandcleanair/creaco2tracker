@@ -374,7 +374,7 @@ validate_co2_monthly <- function(co2_daily, diagnostics_folder="diagnostics"){
 
   plt
 
-  quicksave(file.path(diagnostics_folder, "co2_benchmark_carbonmonitor.jpg"), plot=plt,
+  quicksave(file.path(diagnostics_folder, "co2_benchmark_carbonmonitor_monthly.jpg"), plot=plt,
             width=8, height=4, scale=1, logo=F, dpi=600)
             # height=min(30,max(4, 1.5*length(unique(co2_crea$iso2)))),
 
@@ -391,7 +391,7 @@ validate_co2_monthly <- function(co2_daily, diagnostics_folder="diagnostics"){
 #' @export
 #'
 #' @examples
-diagnostic_co2_versions <- function(iso2s="EU", versions=c("0.2", "0.3"), diagnostics_folder="diagnostics"){
+compare_co2_versions <- function(iso2s="EU", versions=c("0.2", "0.3"), diagnostics_folder="diagnostics"){
 
   # Read the data
   co2 <- lapply(versions, function(version) download_co2_daily(iso2s=iso2s, version=version)) %>%
