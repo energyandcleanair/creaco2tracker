@@ -59,7 +59,7 @@ project_until_now_lm <- function(co2, proxy, dts_month, last_years=5, min_r2=0.9
                   by=c('date'))
 
       data_training <- data %>%
-        filter(value_co2_tonne>0,
+        filter(value>0,
                date >= max(date) - lubridate::years(last_years)) %>%
         # only positive values in value_proxy_cols
         filter_at(value_proxy_cols, all_vars(.>0))
@@ -70,12 +70,12 @@ project_until_now_lm <- function(co2, proxy, dts_month, last_years=5, min_r2=0.9
         return(df)
       }
 
-      if(sum(data_training$value_co2_tonne)==0){
+      if(sum(data_training$value)==0){
         return(df)
       }
 
       formula_str <- paste0(value_proxy_cols, collapse=' + ')
-      model <- lm(data=data_training, formula= paste0('value_co2_tonne ~ 0+', formula_str))
+      model <- lm(data=data_training, formula= paste0('value ~ 0+', formula_str))
       if(verbose){
         print(summary(model))
       }
@@ -89,9 +89,9 @@ project_until_now_lm <- function(co2, proxy, dts_month, last_years=5, min_r2=0.9
       }
 
       if(force_overwrite){
-        df$value_co2_tonne <- predict(model, data)
+        df$value <- predict(model, data)
       }else{
-        df$value_co2_tonne <- coalesce(df$value_co2_tonne, predict(model, data))
+        df$value <- coalesce(df$value, predict(model, data))
       }
       df
     }) %>%
@@ -120,10 +120,10 @@ project_until_now_yoy <- function(co2, dts_month, last_years=3, last_months=3){
 
       df %<>%
         group_by(month=month(date)) %>%
-        mutate(mean3y = value_co2_tonne %>%
+        mutate(mean3y = value %>%
                  lag %>%
                  zoo::rollapplyr(last_years, mean, na.rm=F, fill=NA),
-               yoy = value_co2_tonne / mean3y - 1) %>%
+               yoy = value / mean3y - 1) %>%
         ungroup %>%
         select(-month)
 
@@ -132,11 +132,11 @@ project_until_now_yoy <- function(co2, dts_month, last_years=3, last_months=3){
         na.omit %>%
         tail(1)
 
-      latest_data <- max(df$date[!is.na(df$value_co2_tonne)])
+      latest_data <- max(df$date[!is.na(df$value)])
 
-      df %>% mutate(value_co2_tonne = ifelse(date > latest_data,
+      df %>% mutate(value = ifelse(date > latest_data,
                                            mean3y * (1+latest_yoy),
-                                           value_co2_tonne)) %>%
+                                           value)) %>%
         select(-c(mean3y, yoy))
     }) %>%
     ungroup()
@@ -223,7 +223,7 @@ project_until_now_coal_others <- function(co2, eurostat_indprod, dts_month, last
   #           co2_filled %>% mutate(type="filled")) %>%
   #   filter(sector==SECTOR_OTHERS, fuel=='coal') %>%
   #   filter(date >= "2000-01-01") %>%
-  #   ggplot(aes(date, value_co2_tonne, col=type)) +
+  #   ggplot(aes(date, value, col=type)) +
   #   geom_line() +
   #   scale_x_date(date_minor_breaks = "1 year", date_labels = "%Y") +
   #   rcrea::scale_y_crea_zero()

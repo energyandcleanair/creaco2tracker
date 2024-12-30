@@ -13,15 +13,32 @@
 get_eurostat_cons <- function(diagnostics_folder = "diagnostics",
                               use_cache = F,
                               iso2s = NULL) {
+
+  # Get monthly data
   consumption_codes_monthly <- c("nrg_cb_sffm", "nrg_cb_oilm", "nrg_cb_gasm")
   cons_monthly_raw <- consumption_codes_monthly %>%
     lapply(get_eurostat_from_code, use_cache = use_cache)
   names(cons_monthly_raw) <- c(FUEL_COAL, FUEL_OIL, FUEL_GAS)
 
-  consumption_codes_yearly <- c("nrg_cb_sff", "nrg_cb_gas")
+  # Get yearly data
+  consumption_codes_yearly <- c("nrg_cb_sff")
   cons_yearly_raw <- consumption_codes_yearly %>%
     lapply(get_eurostat_from_code, use_cache = use_cache)
-  names(cons_yearly_raw) <- c("coal", "gas")
+  names(cons_yearly_raw) <- c("coal")
+
+  # For gas and oil, we need to proceed with filters
+  # Some filters work with more than one category, others don't
+  gas_nrg_bal_yearly <- c(
+    "IC_OBS", # Inland consumption - observed
+    "FC_NE", # Final consumption - non-energy use
+    "TI_EHG_MAPE_E", # Transformation input - electricity and heat generation - main activity producers
+    "TI_EHG_MAPCHP_E" # Transformation input - electricity and heat generation - main activity producer combined heat and power - energy use
+  )
+  cons_yearly_raw$gas <- get_eurostat_from_code(
+    code = "nrg_cb_gas",
+    use_cache = use_cache,
+    filters = list(nrg_bal = gas_nrg_bal_yearly)
+  )
 
   cons_yearly_raw$oil <- lapply(
     c("O4600", "O4100_TOT_4200-4500"),
@@ -52,7 +69,10 @@ get_eurostat_cons <- function(diagnostics_folder = "diagnostics",
     trans_cons <- x %>%
       filter(
         (grepl("Transformation input|Final consumption.*(industry sector$|other sectors$)", nrg_bal)) |
-          (nrg_bal == "Final consumption - industry sector - iron and steel" & siec == "Coke oven coke")
+          #(nrg_bal == "Final consumption - industry sector - iron and steel" & siec == "Coke oven coke")
+          # Monthly data is much closer to yearly industry consumption when using GID
+          # See diagnostic plot
+          (nrg_bal == "Gross inland deliveries - calculated" & siec == "Coke oven coke")
       ) %>%
       mutate(
         sector = ifelse(grepl("electricity", nrg_bal), SECTOR_ELEC, SECTOR_OTHERS),
@@ -112,9 +132,10 @@ get_eurostat_cons <- function(diagnostics_folder = "diagnostics",
         "Transformation input - electricity and heat generation - main activity producer combined heat and power - energy use",
         "Transformation input - electricity and heat generation - main activity producer electricity only - energy use",
         "Final consumption - energy use"
-      )) %>%
+      )|
+        (nrg_bal == "Final consumption - industry sector - iron and steel" & siec == "Coke oven coke")) %>%
       mutate(sector = ifelse(grepl("electricity", nrg_bal), SECTOR_ELEC, SECTOR_ALL),
-             fuel = FUEL_COAL)
+             fuel = ifelse(siec == "Coke oven coke", FUEL_COKE, FUEL_COAL))
   }
 
 
@@ -290,21 +311,39 @@ get_eurostat_cons <- function(diagnostics_folder = "diagnostics",
       ) %>%
       select(-c(year, month, month_share))
 
-  # Combine
+  # Keep monthly when both are available
+  # unless specified otherwise after looking at diagnostic charts
+  cutoff_monthly <- tibble(
+    fuel=c("gas", "coke"),
+    sector=c("others", "others"),
+    cutoff_date=c("2020-01-01", "2019-01-01"),
+    source="monthly"
+  )
+
   cons_combined <- bind_rows(
     cons_yearly_monthly %>% mutate(source = "yearly"),
     cons_monthly %>% mutate(source = "monthly"),
   ) %>%
+    # Cut off monthly that didn't look good on charts
+    left_join(cutoff_monthly) %>%
+    filter(
+      is.na(cutoff_date) |time >= cutoff_date
+    ) %>%
+    select(-c(cutoff_date)) %>%
+    group_by(geo, sector, time, unit, siec, fuel) %>%
+    arrange(source) %>% # monthly < yearly
+    slice(1) %>%
     ungroup()
 
   # Visual check
   diagnostic_eurostat_cons_yearly_monthly(
+    diagnostics_folder = diagnostics_folder,
     cons_yearly = cons_yearly,
     cons_monthly = cons_monthly,
     cons_combined = cons_combined
   )
 
-  # Keep monthly when both are available
+  #
   cons <- cons_combined %>%
     group_by(geo, sector, time, unit, siec, fuel) %>%
     arrange(source) %>%
@@ -485,14 +524,20 @@ get_eurostat_indprod <- function(diagnostics_folder = "diagnostics",
 }
 
 
-get_eurostat_from_code <- function(code, use_cache = T, filters = NULL) {
-  filepath <- file.path("cache", paste0("eurostat_", code, ".RDS"))
+get_eurostat_from_code <- function(code, iso2s=NULL, use_cache = T, filters = NULL) {
+
+  # Create a digest of iso2s and filters
   dir.create("cache", F, T)
+  digest <- digest::digest(list(iso2s, filters))
+  filepath <- file.path("cache", glue("eurostat_{code}_{digest}.rds"))
 
   if (use_cache & file.exists(filepath)) {
     return(readRDS(filepath))
   }
 
+  if(!is.null(iso2s)){
+    filters$geo <- iso2s
+  }
 
   raw <- eurostat::get_eurostat(code, filters = filters)
   keep_code <- intersect(names(raw), c("nrg_bal", "siec", "nace_r2"))
