@@ -47,8 +47,8 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
   # Add total
   co2_daily <- add_total_co2(co2_daily)
 
-  # Diagnostics
-  diagnostic_co2(co2_daily, diagnostics_folder=diagnostics_folder)
+  # Validation
+  validate_co2(co2_daily, diagnostics_folder=diagnostics_folder, region=iso2s)
 
   # Cut tails, add unit
   co2_daily <- co2_daily %>%

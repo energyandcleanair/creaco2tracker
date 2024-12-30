@@ -13,10 +13,11 @@ recode_siec <- function(x){
       "Oil shale and oil sands" = "Oil shale"))
 }
 
-add_iso2 <- function(x){
+add_iso2 <- function(x, country_col="geo"){
   x %>%
-    mutate(iso2=countrycode::countrycode(geo, "country.name", "iso2c",
+    mutate(iso2=countrycode::countrycode(!!sym(country_col), "country.name", "iso2c",
                                          custom_match = c("European Union - 27 countries (from 2020)"="EU",
+                                                          "EU27 & UK"="EU28",
                                                           "Kosovo*"="XK")))
 }
 
@@ -27,7 +28,7 @@ split_gas_to_elec_others <- function(co2){
     co2 %>%
       filter(fuel=='gas') %>%
       group_by(iso2, geo, date, fuel) %>%
-      summarise(value_co2_tonne = sum(value_co2_tonne * case_when(sector==SECTOR_ALL ~ 1,
+      summarise(value = sum(value * case_when(sector==SECTOR_ALL ~ 1,
                                                                   sector==SECTOR_ELEC ~ -1)),
                 .groups = "drop") %>%
       mutate(sector='others') %>%
@@ -48,8 +49,8 @@ split_gas_to_elec_all <- function(co2){
       filter(fuel=='gas', sector != SECTOR_ALL) %>%
       group_by(iso2, geo, date, fuel) %>%
       summarise(
-        # coverage=weighted.mean(coverage, value_co2_tonne),
-        across(value_co2_tonne, sum), .groups = "drop") %>%
+        # coverage=weighted.mean(coverage, value),
+        across(value, sum), .groups = "drop") %>%
       mutate(sector=SECTOR_ALL) %>%
       bind_rows(co2 %>% filter(fuel!='gas' | (!sector %in% c(SECTOR_OTHERS, SECTOR_ALL))))
   }else{
@@ -62,7 +63,7 @@ add_total_co2 <- function(co2){
   co2 %>%
     filter(fuel!='total') %>%
     group_by(iso2, geo, date) %>%
-    summarise(across(value_co2_tonne, sum), .groups="drop") %>%
+    summarise(across(value, sum), .groups="drop") %>%
     mutate(fuel='total', sector=SECTOR_ALL) %>%
     bind_rows(co2 %>% filter(fuel!='total')) %>%
     ungroup()

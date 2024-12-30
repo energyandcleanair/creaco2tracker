@@ -23,6 +23,7 @@ update_all <- function(production=T, diagnostics_folder="diagnostics"){
   library(glue)
   library(logger)
   library(creaco2tracker)
+  library(magick)
 
   update_gas_demand(production=production, diagnostics_folder=diagnostics_folder)
   update_co2_daily(production=production, diagnostics_folder=diagnostics_folder)

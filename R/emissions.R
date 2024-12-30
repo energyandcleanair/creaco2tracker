@@ -7,7 +7,10 @@ get_co2_from_eurostat_cons <- function(eurostat_cons, diagnostics_folder="diagno
                        unit=='Terajoule (gross calorific value - GCV)' & siec == "Natural gas" ~ values * ncv_gcv_gas * co2_factor_t_per_TJ
              )) %>%
     group_by(iso2, geo, date=time, fuel, sector) %>%
-    summarise_at('value_co2_tonne', sum, na.rm=T)
+    summarise(value = sum(value_co2_tonne),
+              unit='t',
+              .groups="drop"
+    )
 }
 
 

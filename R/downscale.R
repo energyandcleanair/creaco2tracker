@@ -7,7 +7,7 @@ downscale_daily <- function(co2, pwr_demand, gas_demand){
   daily_proxy <- get_daily_proxy(pwr_demand = pwr_demand, gas_demand = gas_demand)
 
   #identify variable combos with data
-  grps <- co2 %>% ungroup %>% filter(value_co2_tonne>0) %>% distinct(fuel, sector)
+  grps <- co2 %>% ungroup %>% filter(value>0) %>% distinct(fuel, sector)
 
   #dates for which to output estimates
   dts_daily <- seq.Date(min(co2$date), max(daily_proxy$date), by='d')
@@ -21,7 +21,7 @@ downscale_daily <- function(co2, pwr_demand, gas_demand){
       relationship = "many-to-many",
       by="month"
       ) %>%
-    mutate(value_co2_tonne = value_co2_tonne/days_in_month(date)) %>%
+    mutate(value = value/days_in_month(date)) %>%
     right_join(grps, by=c("fuel", "sector")) %>%
     left_join(daily_proxy, by=c("fuel", "sector", "date")) ->
     co2_daily
@@ -29,12 +29,12 @@ downscale_daily <- function(co2, pwr_demand, gas_demand){
   #use daily data when available
   co2_daily <- co2_daily %>%
     group_by(iso2, geo, fuel, sector) %>%
-    mutate(has_both=!is.na(value_co2_tonne+proxy_value) & date>='2021-03-01',
-           proxy_eurostat_ratio = mean(proxy_value[has_both]) / mean(value_co2_tonne[has_both]),
+    mutate(has_both=!is.na(value+proxy_value) & date>='2021-03-01',
+           proxy_eurostat_ratio = mean(proxy_value[has_both]) / mean(value[has_both]),
            proxy_CO2 = proxy_value / proxy_eurostat_ratio,
-           value_co2_tonne = case_when(!is.na(proxy_CO2) & date>='2021-03-01' ~ proxy_CO2,
-                                  #value_co2_tonne * coverage + proxy_CO2 * 1-coverage,
-                                  T ~ value_co2_tonne))
+           value = case_when(!is.na(proxy_CO2) & date>='2021-03-01' ~ proxy_CO2,
+                                  #value * coverage + proxy_CO2 * 1-coverage,
+                                  T ~ value))
 
   return(co2_daily)
 }
