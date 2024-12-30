@@ -1,4 +1,3 @@
-
 #' Project CO2 emissions until today using various proxies
 #'
 #' @param co2
@@ -18,7 +17,8 @@ project_until_now <- function(co2, pwr_demand, gas_demand, eurostat_indprod){
     project_until_now_elec(pwr_demand=pwr_demand, dts_month=dts_month) %>%
     project_until_now_gas(gas_demand=gas_demand, dts_month=dts_month) %>%
     project_until_now_coal_others(eurostat_indprod=eurostat_indprod, dts_month=dts_month) %>%
-    project_until_now_yoy(dts_month=dts_month)
+    project_until_now_oil(dts_month=dts_month) %>%
+    project_until_now_ets(dts_month=dts_month)
 }
 
 
@@ -120,10 +120,10 @@ project_until_now_yoy <- function(co2, dts_month, last_years=3, last_months=3){
 
       df %<>%
         group_by(month=month(date)) %>%
-        mutate(mean3y = value %>%
+        mutate(mean3y = value_co2_tonne %>%
                  lag %>%
                  zoo::rollapplyr(last_years, mean, na.rm=F, fill=NA),
-               yoy = value / mean3y - 1) %>%
+               yoy = value_co2_tonne / mean3y - 1) %>%
         ungroup %>%
         select(-month)
 
@@ -132,16 +132,15 @@ project_until_now_yoy <- function(co2, dts_month, last_years=3, last_months=3){
         na.omit %>%
         tail(1)
 
-      latest_data <- max(df$date[!is.na(df$value)])
+      latest_data <- max(df$date[!is.na(df$value_co2_tonne)])
 
-      df %>% mutate(value = ifelse(date > latest_data,
-                                           mean3y * (1+latest_yoy),
-                                           value)) %>%
+      df %>% mutate(value_co2_tonne = ifelse(date > latest_data,
+                                             mean3y * (1+latest_yoy),
+                                             value_co2_tonne)) %>%
         select(-c(mean3y, yoy))
     }) %>%
     ungroup()
 }
-
 
 project_until_now_elec <- function(co2, pwr_demand, dts_month, last_years=5, min_r2=0.85){
 
@@ -227,10 +226,178 @@ project_until_now_coal_others <- function(co2, eurostat_indprod, dts_month, last
   #   geom_line() +
   #   scale_x_date(date_minor_breaks = "1 year", date_labels = "%Y") +
   #   rcrea::scale_y_crea_zero()
-
-
   project_until_now_lm(co2, proxy, dts_month=dts_month, last_years=20, min_r2=min_r2)
 
 }
+
+
+#' Complete latest months of EU Oil using European countries latest data
+#'
+#' @param co2
+#' @param dts_month
+#' @param last_years
+#' @param min_r2
+#'
+#' @return
+#' @export
+#'
+#' @examples
+project_until_now_oil <- function(co2, dts_month, last_years=5, min_r2=0.85) {
+
+  # Prepare proxy data from other countries
+  proxy <- co2 %>%
+    filter(fuel == 'oil') %>%
+    complete(
+      date,
+      iso2,
+      fuel,
+      sector
+    ) %>%
+    # Split into EU and others
+    mutate(is_eu = iso2 == 'EU') %>%
+    filter(iso2 %in% get_eu_iso2s()) %>%
+    arrange(desc(date)) %>%
+    # Get the last month with good coverage for non-EU countries
+    group_by(date, fuel, sector) %>%
+    mutate(coverage = mean(!is.na(value[!is_eu]))) %>%
+    ungroup() %>%
+    # Find latest date with ~80% coverage
+    filter(date <= max(date[coverage >= 0.8])) %>%
+    filter(!is_eu) %>%
+    # Fill missing country-level data through interpolation
+    arrange(date) %>%
+    mutate(
+      value = zoo::na.approx(value, na.rm = FALSE)
+    ) %>%
+    # Sum all EU countries
+    group_by(date, fuel, sector) %>%
+    summarise(
+      value_proxy = sum(value, na.rm = TRUE),
+      .groups = 'drop'
+    ) %>%
+    mutate(iso2="EU")
+
+  # Filter EU data
+  co2_eu <- co2 %>%
+    filter(iso2 == 'EU', fuel == 'oil')
+
+  # Use project_until_now_lm for the actual projection
+  new_eu_oil <- project_until_now_lm(
+    co2_eu,
+    proxy,
+    dts_month = dts_month,
+    last_years = last_years,
+    min_r2 = min_r2
+  )
+
+  bind_rows(
+    co2 %>% filter(fuel != 'oil' | iso2 != 'EU'),
+    new_eu_oil
+  )
+}
+
+
+project_until_now_ets <- function(co2, dts_month, last_years=3, conf_level=0.95){
+
+  res <- co2 %>%
+    group_by(iso2, geo, fuel, sector) %>%
+    expand_dates('date', dts_month) %>%
+    arrange(date) %>%
+    group_modify(function(df, group_keys) {
+
+      # Get the latest date with actual data
+      latest_data <- max(df$date[!is.na(df$value)])
+
+      if(max(dts_month) == latest_data | all(is.na(df$value))) {
+        return(df %>%
+                 rename(value_central = value))
+      }
+
+      # Create time series object from historical data, limited to last_years
+      historical_data <- df %>%
+        filter(date <= latest_data,
+               date >= latest_data - years(last_years)) %>%
+        arrange(date)  # Ensure data is in chronological order
+
+      ts_data <- ts(historical_data$value,
+                    frequency = 12,
+                    start = c(year(min(historical_data$date)),
+                             month(min(historical_data$date))))
+
+      # Fit ETS model
+      ets_model <- tryCatch({
+        forecast::ets(ts_data)
+      }, error = function(e) {
+        log_warn(glue("{group_keys$iso2} - {group_keys$fuel} {group_keys$sector}: ETS model failed."))
+        return(NULL)
+      })
+
+
+      if(is.null(ets_model)) {
+        return(df)
+      }
+
+      # Calculate number of periods to forecast
+      periods_ahead <- as.numeric(difftime(max(dts_month), latest_data, units="days") / 30.44)
+      periods_ahead <- ceiling(periods_ahead)
+
+
+      # Generate forecast
+      fc <- tryCatch({
+        forecast::forecast(ets_model, h=periods_ahead, level=conf_level*100)
+      }, error = function(e) {
+        log_warn(glue("{group_keys$iso2} - {group_keys$fuel} {group_keys$sector}: Forecast failed."))
+        return(NULL)
+      })
+
+      # Create sequence of dates for forecast
+      forecast_dates <- seq.Date(from=latest_data + months(1),
+                                 by="month",
+                                 length.out=periods_ahead)
+
+      # Update values in the original dataframe
+      df %>%
+        mutate(
+          value_central = case_when(
+            date <= latest_data ~ value,
+            date %in% forecast_dates ~ as.numeric(fc$mean[match(date, forecast_dates)]),
+            TRUE ~ NA_real_
+          ),
+          value_lower = case_when(
+            date <= latest_data ~ value,
+            date %in% forecast_dates ~ as.numeric(fc$lower[match(date, forecast_dates)]),
+            TRUE ~ NA_real_
+          ),
+          value_upper = case_when(
+            date <= latest_data ~ value,
+            date %in% forecast_dates ~ as.numeric(fc$upper[match(date, forecast_dates)]),
+            TRUE ~ NA_real_
+          )
+      ) %>%
+        select(-c(value))
+    }) %>%
+    ungroup()
+
+  res %>%
+    fill_lower_upper() %>%
+    pivot_longer(cols=starts_with('value_'), names_to='estimate', values_to='value') %>%
+    ggplot() +
+    geom_line(aes(date, value, col=estimate)) +
+    facet_wrap(sector~fuel + iso2)
+
+  res %>%
+    fill_lower_upper() %>%
+    pivot_longer(cols=starts_with('value_'), names_to='estimate', values_to='value',
+                 names_prefix='value_')
+}
+
+fill_lower_upper <- function(df) {
+  df %>%
+    mutate(
+      value_lower = coalesce(value_lower, value_central),
+      value_upper = coalesce(value_upper, value_central)
+    )
+}
+
 
 

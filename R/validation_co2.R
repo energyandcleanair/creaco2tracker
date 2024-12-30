@@ -1,14 +1,14 @@
-validate_co2 <- function(co2_daily, folder="diagnostics", region="EU", date_from="1990-01-01") {
+validate_co2 <- function(co2_daily, diagnostics_folder="diagnostics", region="EU", date_from="1990-01-01") {
 
-  dir.create(folder, FALSE, TRUE)
+  dir.create(diagnostics_folder, FALSE, TRUE)
 
   # Get validation data once
   validation_data <- get_validation_data(region=unique(co2_daily$iso2))
 
   # Run all validations with shared validation data
-  validate_co2_historical(co2_daily, validation_data, region, folder, date_from)
-  validate_co2_timeseries(co2_daily, folder)
-  validate_co2_monthly(co2_daily, validation_data, folder)
+  validate_co2_historical(co2_daily %>% filter(estimate=="central"), validation_data, region, diagnostics_folder, date_from)
+  validate_co2_timeseries(co2_daily %>% filter(estimate=="central"), diagnostics_folder)
+  validate_co2_monthly(co2_daily %>% filter(estimate=="central"), diagnostics_folder)
 }
 
 # Update the historical validation function signature
@@ -26,7 +26,9 @@ validate_co2_historical <- function(co2_daily = NULL,
                                           download_co2_daily(date_from = date_from, iso2s=region)) %>%
     filter(sector == SECTOR_ALL,
            fuel == FUEL_TOTAL,
-           iso2 %in% c(!!region)) %>%
+           iso2 %in% c(!!region),
+           estimate == "central"
+           ) %>%
     group_by(iso2, year = year(date)) %>%
     summarise(value = sum(value)/1e6,
               unit = "mt",
@@ -34,7 +36,8 @@ validate_co2_historical <- function(co2_daily = NULL,
     filter(year < 2025)
 
   # Load validation data
-  co2_validate <- validation_data
+  co2_validate <- validation_data %>%
+    filter(iso2 %in% unique(co2_crea$iso2))
 
   co2_extended <- extend_validation_data(co2_crea = co2_crea,
                                          co2_validate = co2_validate)
@@ -83,69 +86,74 @@ validate_co2_historical <- function(co2_daily = NULL,
 
 
   # Create a version with hline and vline -----------------------------------
-  last_year <- max(co2_crea$year)
-  interpolated <- co2_validate %>%
-    filter(source %in% c('PIK', 'GCP')) %>%
-    group_by(source) %>%
-    arrange(year) %>%
-    left_join(co2_extended %>%
-                filter(source %in% c('PIK', 'GCP'),
-                       year==last_year) %>% select(target_value=value, source)) %>%
-    dplyr::summarise(
+  if("EU" %in% co2_crea$iso2){
+    last_year <- max(co2_crea$year)
+    interpolated <- co2_validate %>%
+      filter(iso2=="EU") %>%
+      filter(source %in% c('PIK', 'GCP')) %>%
+      group_by(iso2, source) %>%
+      arrange(year) %>%
+      filter(!is.na(value)) %>%
+      left_join(co2_extended %>%
+                  filter(source %in% c('PIK', 'GCP'),
+                         year==last_year) %>% select(iso2, target_value=value, source)) %>%
+      dplyr::summarise(
 
-      interpolated_year = {
-        # Finding the two points around the target value
-        lower = max(year[value < target_value[1]], na.rm = TRUE)
-        upper = min(year[value > target_value[1]], na.rm = TRUE)
-        lower_val = value[year == lower]
-        upper_val = value[year == upper]
+        interpolated_year = {
+          # Finding the two points around the target value
+          lower = max(year[value < target_value[1]], na.rm = TRUE)
+          upper = min(year[value > target_value[1]], na.rm = TRUE)
+          lower_val = value[year == lower]
+          upper_val = value[year == upper]
 
-        # Linear interpolation
-        if (!is.na(lower) && !is.na(upper) && lower_val != upper_val) {
-          lower + (target_value[1] - lower_val) / (upper_val - lower_val) * (upper - lower)
-        } else {
-          NA_real_ # NA if interpolation is not possible
-        }
-      })
-
-
-  (plt +
-    scale_x_continuous(limits=c(1940, NA)) +
-    geom_hline(
-      data = co2_projected %>% filter(year==max(year), source %in% c('PIK', 'GCP')),
-      aes(yintercept = value / 1e3, col=source), linetype='solid', alpha=0.2, linewidth=1,
-      show.legend = F) +
-    geom_vline(
-      data = interpolated,
-      aes(xintercept = interpolated_year, col=source), linetype='solid', alpha=0.2, linewidth=1,
-      show.legend = F) +
-    # Indicate the interpolated value
-    ggrepel::geom_text_repel(
-      data = interpolated,
-      # inherit.aes = F,
-      aes(x = interpolated_year, y = 4, label = round(interpolated_year), col=source, alpha="CREA"),
-      size = 4,
-      show.legend = F,
-      segment.size = 0.2,
-      segment.alpha = 0,
-      segment.color = 'grey50',
-      direction = 'x',
-      nudge_y = 0.5,
-      # add padding around text
-      box.padding = 0.5,
-      min.segment.length = 0.5,
-      ) +
-    labs(
-      caption=paste(c("Source: Climate Watch and CREA's own estimates based on ENTSOE, ENTSOG, EUROSTAT and IPCC.",
-    "Agriculture and LULUCF are not included. GCP and PIK times series are extended to 2024 using CREA’s estimates."), collapse="\n")) -> plt_full)
+          # Linear interpolation
+          if (!is.na(lower) && !is.na(upper) && lower_val != upper_val) {
+            lower + (target_value[1] - lower_val) / (upper_val - lower_val) * (upper - lower)
+          } else {
+            NA_real_ # NA if interpolation is not possible
+          }
+        })
 
 
-  quicksave(file.path(folder, "validation_full.jpg"),
-            plot=plt_full,
-            width=8,
-            height=5,
-            scale=1,
-            logo_scale=1.4)
+    (plt +
+        scale_x_continuous(limits=c(1940, NA)) +
+        geom_hline(
+          data = co2_extended %>% filter(year==max(year), source %in% c('PIK', 'GCP')),
+          aes(yintercept = value / 1e3, col=source), linetype='solid', alpha=0.2, linewidth=1,
+          show.legend = F) +
+        geom_vline(
+          data = interpolated,
+          aes(xintercept = interpolated_year, col=source), linetype='solid', alpha=0.2, linewidth=1,
+          show.legend = F) +
+        # Indicate the interpolated value
+        ggrepel::geom_text_repel(
+          data = interpolated,
+          # inherit.aes = F,
+          aes(x = interpolated_year, y = 4, label = round(interpolated_year), col=source, alpha="CREA"),
+          size = 4,
+          show.legend = F,
+          segment.size = 0.2,
+          segment.alpha = 0,
+          segment.color = 'grey50',
+          direction = 'x',
+          nudge_y = 0.5,
+          # add padding around text
+          box.padding = 0.5,
+          min.segment.length = 0.5,
+        ) +
+        labs(
+          caption=paste(c("Source: Climate Watch and CREA's own estimates based on ENTSOE, ENTSOG, EUROSTAT and IPCC.",
+                          "Agriculture and LULUCF are not included. GCP and PIK times series are extended to 2024 using CREA’s estimates."), collapse="\n")) -> plt_full)
+
+
+    quicksave(file.path(folder, "validation_full.jpg"),
+              plot=plt_full,
+              width=8,
+              height=5,
+              scale=1,
+              logo_scale=1.4)
+
+  }
 
 
   # Check fuel --------------------------------------------------------------

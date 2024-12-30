@@ -409,7 +409,7 @@ add_gas_non_energy <- function(cons_monthly_raw_gas, cons_yearly_raw_gas) {
     tidyr::complete(year = years, geo, siec) %>%
     group_by(geo, siec) %>%
     arrange(year) %>%
-    fill(share_non_energy) %>%
+    tidyr::fill(share_non_energy) %>%
     ungroup()
 
 

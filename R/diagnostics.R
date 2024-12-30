@@ -97,12 +97,12 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s, diagnostics_folder="d
   if(!is.null(diagnostics_folder)){
 
     dir.create(diagnostics_folder, showWarnings = FALSE)
+    plt_data <- eurostat_cons %>%
+      filter(is.null(iso2s) | iso2 %in% iso2s) %>%
+      group_by(iso2, geo, fuel, sector, unit, time) %>%
+      summarise(values=sum(values))
 
-    (plt <- eurostat_cons %>%
-       filter(iso2 %in% iso2s) %>%
-       group_by(geo, fuel, sector, unit, time) %>%
-       summarise(values=sum(values)) %>%
-      ggplot(aes(time, values, col=sector)) +
+    (ggplot(plt_data, aes(time, values, col=sector)) +
       geom_line() +
        rcrea::scale_y_crea_zero() +
        ggh4x::facet_grid2(geo ~ glue("{fuel}\n({unit})"), scales = "free_y", independent = "y") +
@@ -111,10 +111,10 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s, diagnostics_folder="d
       rcrea::theme_crea() +
         theme(panel.grid.minor.x = element_line(color="grey95"),
               panel.grid.major.x = element_line(color="grey90"),
-              ))
+              ) -> plt)
 
     ggsave(file.path(diagnostics_folder, 'eurostat_cons.png'),
-           width=10, height=min(30,max(6, 2*length(iso2s))), bg='white', plot=plt, scale=1.5)
+           width=10, height=min(30, max(6, 1.5*n_distinct(plt_data$iso2))), bg='white', plot=plt, scale=1.5)
 
 
 
