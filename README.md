@@ -2,6 +2,10 @@ Computing EU CO2 emissions from EUROSTAT, ENTSOG, and ENTSOE
 
 ## Release Notes
 
+### Version 0.5
+#### Changes
+- Added confidence interval in the projection of most recent data
+
 ### Version 0.4
 
 #### Changes
