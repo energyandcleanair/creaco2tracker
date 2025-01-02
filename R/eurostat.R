@@ -10,9 +10,11 @@
 #' @export
 #'
 #' @examples
-get_eurostat_cons <- function(diagnostics_folder = "diagnostics",
-                              use_cache = F,
-                              iso2s = NULL) {
+get_eurostat_cons <- function(
+    pwr_demand,
+    diagnostics_folder = "diagnostics",
+    use_cache = F,
+    iso2s = NULL) {
 
   # Get monthly data
   consumption_codes_monthly <- c("nrg_cb_sffm", "nrg_cb_oilm", "nrg_cb_gasm")
@@ -66,7 +68,7 @@ get_eurostat_cons <- function(diagnostics_folder = "diagnostics",
     # EUROSTAT has gross inland deliveries data but no transformation/consumption data
     # We should make sure to filter out these months so that it's not considered months without coal
     # consumption
-    trans_cons <- x %>%
+    by_sector <- x %>%
       filter(
         (grepl("Transformation input|Final consumption.*(industry sector$|other sectors$)", nrg_bal)) |
           #(nrg_bal == "Final consumption - industry sector - iron and steel" & siec == "Coke oven coke")
@@ -86,43 +88,136 @@ get_eurostat_cons <- function(diagnostics_folder = "diagnostics",
         grepl("Gross inland deliveries", nrg_bal),
         time >= "2014-01-01"
       ) %>%
-      group_by(geo, time, siec) %>%
-      summarise(value_siec_gid = mean(values, na.rm = T)) # mean of observed and calculated
+      group_by(nrg_bal="Gross inland deliveries", geo, time, siec, unit) %>%
+      # I had a look at data. Observed is a better option. Otherwise the ratio_siec varies widely
+      # and excludes data points that shouldn't be excluded
+      arrange(desc(nrg_bal_code)) %>% # observed > calculated
+      summarise(value_siec_gid = first(na.omit(values)), .groups = "drop")
 
-    valid <- trans_cons %>%
+
+    #############################
+    # Apply manual fixes
+    #############################
+    # Greece has started declaring 0 brown coal values for elec starting from 2015-09-01,
+    # but apparently 100% of brown coal was used for elec before that
+    by_sector_fixed <-
+      bind_rows(
+        by_sector %>%
+          filter(!(geo=="Greece" & siec =="Brown coal" & time >= "2015-09-01" & sector==SECTOR_ELEC)),
+        gross_inland_deliv %>%
+          filter((geo=="Greece" & siec =="Brown coal" & time >= "2015-09-01")) %>%
+          mutate(sector=SECTOR_ELEC) %>%
+          rename(values=value_siec_gid
+        )
+      )
+
+    stopifnot(nrow(by_sector) == nrow(by_sector_fixed))
+
+
+
+    # Get months without coal power generation to prevent excluding false positive
+    has_coal_generation <- pwr_demand %>%
+      filter(source=="Coal") %>%
+      group_by(iso2, time=floor_date(date, "month")) %>%
+      summarise(value_mwh = sum(value_mwh, na.rm=T)) %>%
+      mutate(
+        value_mwh_threshold = quantile(value_mwh[value_mwh>0], 0.1), # Could be due to stock changes
+        has_coal_generation = value_mwh > value_mwh_threshold) %>%
+      ungroup() %>%
+      tidyr::complete(iso2, time=unique(x$time), fill=list(has_coal_generation=FALSE, value_mwh=NA))
+
+
+    threshold_thousand_tonnes <- 100
+
+    valid <- by_sector_fixed %>%
       group_by(geo, time, siec, sector) %>%
-      summarise(value_siec_sector = sum(values, na.rm = T)) %>%
+      summarise(value_siec_sector = sum(values, na.rm = T),
+                has_any_confidential = "c" %in% flags
+                ) %>%
       mutate(value_siec = sum(value_siec_sector)) %>%
       left_join(gross_inland_deliv, by = c("geo", "time", "siec")
       )  %>%
       mutate(ratio_siec = value_siec / value_siec_gid) %>%
+      ungroup() %>%
+      # Attach power generation
+      add_iso2() %>%
+      left_join(has_coal_generation, by = c("iso2", "time")) %>%
       #############################################################
       # This is the key criteria: Need value, and not too far from
       #############################################################
-      mutate(valid = value_siec_sector > 0 | value_siec_gid == 0 | ratio_siec > 0.7)
-
-
-    # Plot heat map of validity
-    ggplot(valid) +
-      geom_tile(aes(time, geo, fill = valid), color=NA) +
-      facet_wrap(sector~siec) +
-      scale_fill_manual(values = c("TRUE" = "green", "FALSE" = "grey", "NA" = "black")) +
-      theme_minimal() +
-      theme(
-        panel.grid = element_blank(),
-        panel.background = element_blank(),
-        axis.ticks = element_blank(),
-        # axis.text = element_blank(),
-        axis.title = element_blank()
+      group_by(geo, siec, sector) %>%
+      mutate(
+        ratio_siec_threshold_loose =  min(0.6, quantile(ratio_siec[ratio_siec > 0], 0.5, na.rm=T)),
+        ratio_siec_threshold_strict =  min(0.8, quantile(ratio_siec[ratio_siec > 0], 0.5, na.rm=T))
+      ) %>%
+      mutate(valid =
+               # If no coal power generation, we don't expect any coal consumption in elec sector
+               (sector == SECTOR_ELEC & !has_coal_generation & value_siec_sector == 0) |
+               # If elec sector value >0, we assume it is correct (this is generally the others that is wrong)
+               (sector == SECTOR_ELEC & value_siec_sector > 0) |
+               # If no coal GID or almost, then fine to have zero as well
+               (value_siec_gid <= threshold_thousand_tonnes) |
+               # When has confidential, needs to be quite strict
+               (has_any_confidential & (ratio_siec >= ratio_siec_threshold_strict)) |
+               # If not, can be a bit more relax
+               (!has_any_confidential & (ratio_siec >= ratio_siec_threshold_loose))
       )
 
-    # Return only valid records
-    trans_cons %>%
+    # Then ignore dates that are only invalid for a single month (unless has_confidentials changed to False)
+    valid <- valid %>%
+      group_by(geo, siec, sector) %>%
+      arrange(time) %>%
+      mutate(valid = case_when(
+        valid ~ valid,
+        has_any_confidential & lag(has_any_confidential, default = FALSE) ~ valid,
+        T ~ valid | ( lag(valid, default = FALSE) & lead(valid, default = FALSE))
+      ))  %>%
+      ungroup()
+
+    # Print what we're removing
+    removed <- valid %>%
+      filter(!valid) %>%
+      group_by(siec, sector) %>%
+      summarise(removed = n())
+
+    message(glue("Removed invalid coal records from EUROSTAT"))
+    print(as.data.frame(removed))
+
+    valid_by_sector <- by_sector_fixed %>%
       inner_join(
         valid %>%
           filter(valid) %>%
           select(geo, time, siec, sector)
       )
+
+    # We add total coal so that we can deduct coal - others after projecting coal - elec using ENTSOE
+    # WARNING: It means we'll have the three sectors for coal: SECTOR_ALL, SECTOR_ELEC, SECTOR_OTHERS
+    # i.e. there'll be some double counting we need to be aware of
+    total <- gross_inland_deliv %>%
+      filter(siec != "Coke oven coke") %>%
+      mutate(sector = SECTOR_ALL, fuel = FUEL_COAL) %>%
+      rename(values = value_siec_gid) %>%
+      ungroup()
+
+    # Plot heat map of validity
+    # ggplot(valid_by_sector) +
+    #   geom_tile(aes(time, geo, fill = valid), color=NA) +
+    #   facet_wrap(sector~siec) +
+    #   scale_fill_manual(values = c("TRUE" = "green", "FALSE" = "grey", "NA" = "black")) +
+    #   theme_minimal() +
+    #   theme(
+    #     panel.grid = element_blank(),
+    #     panel.background = element_blank(),
+    #     axis.ticks = element_blank(),
+    #     # axis.text = element_blank(),
+    #     axis.title = element_blank()
+    #   )
+
+    # Return only valid records
+    bind_rows(
+      valid_by_sector,
+      total
+    )
   }
 
   process_coal_yearly <- function(x) {
@@ -455,12 +550,12 @@ fill_ng_elec_eu27 <- function(cons_monthly_raw_gas) {
     filter(nrg_bal == nrg_bal_elec) %>%
     filter(iso2 == "EU")
 
-  ggplot(bind_rows(
-    eu27_ng_elec_new %>% mutate(source = "new"),
-    eu27_ng_elec_old %>% mutate(source = "old"),
-  )) +
-    geom_line(aes(time, values, col = source, linetype = source)) +
-    facet_wrap(~unit)
+  # ggplot(bind_rows(
+  #   eu27_ng_elec_new %>% mutate(source = "new"),
+  #   eu27_ng_elec_old %>% mutate(source = "old"),
+  # )) +
+  #   geom_line(aes(time, values, col = source, linetype = source)) +
+  #   facet_wrap(~unit)
 
 
   eu27_ng_elec <- eu27_ng_elec_old %>%
@@ -539,7 +634,7 @@ get_eurostat_from_code <- function(code, iso2s=NULL, use_cache = T, filters = NU
     filters$geo <- iso2s
   }
 
-  raw <- eurostat::get_eurostat(code, filters = filters)
+  raw <- eurostat::get_eurostat(code, filters = filters, keepFlags=T)
   keep_code <- intersect(names(raw), c("nrg_bal", "siec", "nace_r2"))
   if (length(keep_code) == 0) keep_code <- NULL
   raw %>%

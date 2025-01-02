@@ -6,9 +6,9 @@ validate_co2 <- function(co2_daily, diagnostics_folder="diagnostics", region="EU
   validation_data <- get_validation_data(region=unique(co2_daily$iso2))
 
   # Run all validations with shared validation data
-  validate_co2_historical(co2_daily %>% filter(estimate=="central"), validation_data, region, diagnostics_folder, date_from)
-  validate_co2_timeseries(co2_daily %>% filter(estimate=="central"), diagnostics_folder)
-  validate_co2_monthly(co2_daily %>% filter(estimate=="central"), diagnostics_folder)
+  validate_co2_historical(co2_daily, validation_data, region, diagnostics_folder, date_from)
+  validate_co2_timeseries(co2_daily, diagnostics_folder)
+  validate_co2_monthly(co2_daily, diagnostics_folder)
 }
 
 # Update the historical validation function signature
@@ -86,6 +86,7 @@ validate_co2_historical <- function(co2_daily = NULL,
 
 
   # Create a version with hline and vline -----------------------------------
+  tryCatch({
   if("EU" %in% co2_crea$iso2){
     last_year <- max(co2_crea$year)
     interpolated <- co2_validate %>%
@@ -152,9 +153,9 @@ validate_co2_historical <- function(co2_daily = NULL,
               height=5,
               scale=1,
               logo_scale=1.4)
-
-  }
-
+  }}, error=function(e){
+    print("Failed to generate interpolated plot. Maybe because estimated values are too low.")
+  })
 
   # Check fuel --------------------------------------------------------------
   co2_yearly <- co2_daily %>%
@@ -231,11 +232,14 @@ validate_co2_timeseries <- function(co2_daily, diagnostics_folder="diagnostics")
       plt_data <- co2_daily %>%
         filter(iso2==!!iso2) %>%
         mutate(across(c(fuel, sector), tolower)) %>%
-        group_by(sector, fuel) %>%
-        mutate(CO2_30d = zoo::rollapplyr(value, 30, mean, fill=NA),
+        group_by(sector, fuel, estimate) %>%
+        mutate(value = zoo::rollapplyr(value, 30, mean, fill=NA),
                year=as.factor(year(date)),
                plotdate=date %>% 'year<-'(2022)) %>%
-        filter(year(date)>=2015)
+        filter(year(date)>=2015) %>%
+        select(plotdate, year, fuel, sector, estimate, value) %>%
+        ungroup() %>%
+        pivot_wider(names_from=estimate, values_from=value)
 
       # Generate a custom red gradient palette
       n_years <- length(unique(plt_data$year))
@@ -248,12 +252,16 @@ validate_co2_timeseries <- function(co2_daily, diagnostics_folder="diagnostics")
 
 
       (plt <- plt_data %>%
-          ggplot(aes(plotdate, CO2_30d/1e6, col=year)) +
+          ggplot(aes(plotdate, central/1e6, col=year, fill=year)) +
           geom_line(aes(size=year)) +
+          geom_ribbon(aes(ymin=lower/1e6, ymax=upper/1e6),
+                      color = "transparent",
+                      alpha=0.3, show.legend = F) +
           facet_wrap(~glue("{str_to_title(fuel)} - {str_to_title(sector)}"), scales='free_y') +
           expand_limits(y=0)  + scale_x_date(expand=c(0,0)) +
           # scale_color_viridis_d(direction=-1) +
           scale_color_manual(values=red_palette)+
+          scale_fill_manual(values=red_palette) +
           scale_size_manual(values=size_values) +
           theme_crea_new() +
           rcrea::scale_y_crea_zero() +
@@ -280,7 +288,7 @@ validate_co2_monthly <- function(co2_daily, diagnostics_folder="diagnostics"){
   if(!is.null(diagnostics_folder)){
 
   co2_crea <- co2_daily %>%
-    filter(fuel!='total') %>%
+    filter(fuel!='total', estimate=="central") %>%
     group_by(iso2, geo, month=floor_date(date, 'month')) %>%
     summarise(value=sum(value)/1e6/(as.integer(difftime(max(date),min(date)))+1),
               unit="mt/day",

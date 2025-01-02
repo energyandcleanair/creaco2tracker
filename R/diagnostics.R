@@ -100,7 +100,13 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s, diagnostics_folder="d
     plt_data <- eurostat_cons %>%
       filter(is.null(iso2s) | iso2 %in% iso2s) %>%
       group_by(iso2, geo, fuel, sector, unit, time) %>%
-      summarise(values=sum(values))
+      summarise(values=sum(values)) %>%
+      # Complete dates
+      ungroup() %>%
+      complete(time=seq.Date(min(.$time), max(.$time), by='month'),
+               nesting(iso2,geo),
+               nesting(fuel, unit, sector),
+               fill=list(values=NA))
 
     (ggplot(plt_data, aes(time, values, col=sector)) +
       geom_line() +

@@ -12,14 +12,15 @@
 #' @examples
 get_co2_daily <- function(diagnostics_folder='diagnostics',
                           use_cache=F,
-                          iso2s = c("EU"),
-                          cut_tail_days = 3
+                          iso2s = c("EU")
                           ){
 
   # Collect necessary data
   gas_demand <- download_gas_demand(region_id=NULL, use_cache = use_cache)
   pwr_demand <- download_pwr_demand(use_cache = use_cache)
-  eurostat_cons <- get_eurostat_cons(diagnostics_folder = diagnostics_folder, use_cache = use_cache)
+  eurostat_cons <- get_eurostat_cons(pwr_demand = pwr_demand,
+                                     diagnostics_folder = diagnostics_folder,
+                                     use_cache = use_cache)
   eurostat_indprod <- get_eurostat_indprod(use_cache = use_cache)
 
   # Quick sanity checks
@@ -39,20 +40,20 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
   co2_filled <- co2_filled %>%
     filter(iso2 %in% iso2s)
 
-
-  co2_filled %>%
-    filter(iso2=="EU", fuel=="oil", date >= "2020-01-01") %>%
-    ggplot() +
-    geom_line(aes(date, value, color=estimate))
-
   # Downscale to daily data
   co2_daily <- downscale_daily(co2 = co2_filled, pwr_demand = pwr_demand, gas_demand = gas_demand)
 
   # Resplit gas
   co2_daily <- split_gas_to_elec_others(co2_daily)
 
+  # Check no duplicate
+  check_no_duplicate(co2_daily)
+
   # Add total
   co2_daily <- add_total_co2(co2_daily)
+
+  # Check no double counting
+  check_no_double_counting(co2_daily)
 
   # Validation
   validate_co2(co2_daily, diagnostics_folder=diagnostics_folder, region=iso2s)
