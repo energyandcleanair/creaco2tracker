@@ -1,6 +1,7 @@
 # Sectors
 SECTOR_ELEC <- "electricity"
 SECTOR_ALL <- "all"
+SECTOR_TRANSPORT <- "transport"
 SECTOR_OTHERS <- "others"
 
 # Fuels

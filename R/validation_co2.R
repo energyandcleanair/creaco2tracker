@@ -9,6 +9,7 @@ validate_co2 <- function(co2_daily, diagnostics_folder="diagnostics", region="EU
   validate_co2_historical(co2_daily, validation_data, region, diagnostics_folder, date_from)
   validate_co2_timeseries(co2_daily, diagnostics_folder)
   validate_co2_monthly(co2_daily, diagnostics_folder)
+  validate_co2_transport(co2_daily, diagnostics_folder)
 }
 
 # Update the historical validation function signature
@@ -398,6 +399,73 @@ validate_co2_monthly <- function(co2_daily, diagnostics_folder="diagnostics"){
 }
 
 
+validate_co2_transport <- function(co2_daily,
+                                   diagnostics_folder="diagnostics",
+                                   date_from = "1990-01-01"){
+
+  validation_data_transport <- load_climatewatch_csv("climatewatch-transport") %>%
+    mutate(source="Climate Watch")
+
+
+    # Load CREA data
+    co2_crea <-co2_daily %>%
+      filter(sector == SECTOR_TRANSPORT,
+             fuel == FUEL_OIL,
+             estimate == "central"
+      ) %>%
+      group_by(iso2, year = year(date)) %>%
+      summarise(value = sum(value)/1e6,
+                unit = "mt",
+                source = 'CREA') %>%
+      filter(year < 2025)
+
+    # Load validation data
+    co2_validate <- validation_data_transport %>%
+      filter(iso2 %in% unique(co2_crea$iso2))
+
+    plot_data <- bind_rows(
+      co2_crea %>% filter(year >= 1990),
+      co2_validate
+    ) %>%
+      write_csv(file.path(diagnostics_folder, "validation_transport.csv")) %>%
+      # filter(type=="estimated") %>%
+      mutate(
+        source=factor(source, levels=c("CREA", unique(co2_validate$source)))
+      )
+
+    n_sources <- n_distinct(plot_data$source)
+    alphas <- c(0.9, rep(1, n_sources-1))
+    linewidths <- c(1.6, rep(0.5, n_sources-1))
+    colors <- unname(rcrea::pal_crea[c("Blue", "Dark.red", "Dark.blue", "Orange", "Red", "Yellow", "Dark.violet", "Turquoise")])
+
+    ggplot(plot_data) +
+      geom_line(aes(year, value/1e3, col=source, linewidth=source, alpha=source)) +
+      scale_x_continuous(limits=c(min(co2_crea$year), NA)) +
+      scale_alpha_manual(values=alphas) +
+      scale_linewidth_manual(values=linewidths) +
+      scale_color_manual(values=colors) +
+      rcrea::theme_crea_new() +
+      rcrea::scale_y_crea_zero() +
+      {
+        if(length(unique(co2_crea$iso2)) > 1){
+          facet_wrap(~iso2, scales='free_y')
+        }
+      } +
+      labs(title="EU CO2 emissions in transport sector",
+           subtitle="Projection of historical sources using CREA CO2 tracker, in billion tonne CO2 per year",
+           y=NULL,
+           x=NULL,
+           linewidth="Source",
+           linetype=NULL,
+           alpha="Source",
+           color="Source",
+           caption="Source: CREA analysis based on Climate Watch data.") -> plt
+
+    plt
+    quicksave(file.path(diagnostics_folder, "validation_transport.jpg"), plot=plt)
+
+}
+
 #' Compare different versions of our tracker
 #'
 #' @param iso2s
@@ -567,11 +635,4 @@ extend_validation_data <- function(co2_crea, co2_validate) {
   return(projected_data)
 }
 
-# Example usage:
-# projected_data <- extend_validation_data(co2_crea, co2_validate)
-#
-# plot_data <- bind_rows(
-#   co2_crea %>% filter(year >= 1990) %>% mutate(type = 'estimated'),
-#   co2_validate %>% mutate(type = 'estimated'),
-#   projected_data %>% mutate(type = 'projected')
-# )
+

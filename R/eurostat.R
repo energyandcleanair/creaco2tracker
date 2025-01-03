@@ -43,7 +43,7 @@ get_eurostat_cons <- function(
   )
 
   cons_yearly_raw$oil <- lapply(
-    c("O4600", "O4100_TOT_4200-4500"),
+    c("O4600", "O4100_TOT_4200-4500", "O46711", "O4652", "O4671XR5220B"),
     function(x) {
       get_eurostat_from_code(
         code = "nrg_cb_oil",
@@ -60,10 +60,16 @@ get_eurostat_cons <- function(
     cons_yearly_raw_gas = cons_yearly_raw$gas
   )
 
+  # Add Oil transport
+  cons_monthly_raw$oil <- add_oil_transport(
+    cons_monthly_raw_oil = cons_monthly_raw$oil,
+    cons_yearly_raw_oil = cons_yearly_raw$oil
+  )
+
   # Add missing 2019 elec data for gas
   cons_monthly_raw$gas <- fill_ng_elec_eu27(cons_monthly_raw_gas = cons_monthly_raw$gas)
 
-  process_coal_monthly <- function(x) {
+  process_coal_monthly <- function(x, pwr_demand) {
     # This one is a bit tricky: for certain months/regions,
     # EUROSTAT has gross inland deliveries data but no transformation/consumption data
     # We should make sure to filter out these months so that it's not considered months without coal
@@ -241,30 +247,47 @@ get_eurostat_cons <- function(
     mult <- x %>%
       ungroup() %>%
       filter(
+        # Direct use of crude oil
+        (grepl("Direct use", nrg_bal) & grepl("Crude oil, NGL", siec)) |
+        # Oil products: SECTOR_TOTAL
         (nrg_bal %in% c(
           "Gross inland deliveries - observed",
           "Gross deliveries to petrochemical industry"
         ) & siec == "Oil products") |
-          (grepl("Direct use", nrg_bal) & grepl("Crude oil, NGL", siec))
+        # Oil products: SECTOR_TRANSPORT
+          # Electricity (different categories yearly and monthly)
+          (nrg_bal_code %in% c("FC_TRA_E") # Added in add_oil_transport function
+           & siec %in% c("Motor gasoline", "Road diesel"))
       ) %>%
-      distinct(siec_code, nrg_bal_code) %>%
+      distinct(siec_code, nrg_bal, nrg_bal_code) %>%
       mutate(factor = case_when(
         nrg_bal_code == "GD_PI" ~ -1,
         T ~ 1
-      ))
+      ),
+      sector = case_when(
+        grepl("transport", nrg_bal) ~ SECTOR_TRANSPORT,
+        T ~ SECTOR_ALL
+      )
+    ) %>%
+      select(-c(nrg_bal))
 
-    if (nrow(mult) != 3) stop("Please fix process_oil")
+    # Need three for all and one or two for transport
+    stopifnot("Fix oil"=nrow(mult[mult$sector==SECTOR_ALL,]) == 3,
+              "Fix oil"=nrow(mult[mult$sector==SECTOR_TRANSPORT,]) == 2)
 
     x %>%
       inner_join(mult) %>%
       mutate(
         values = values * factor,
-        sector = SECTOR_ALL,
         fuel = FUEL_OIL
       ) %>%
       select(-c(factor)) %>%
       arrange(desc(time)) %>%
-      filter(!is.na(values))
+      filter(!is.na(values)) %>%
+      # After validation, we find that transport data is only correct from ~2010
+      filter(
+        sector == SECTOR_ALL | time >= "2010-01-01"
+      )
   }
 
   process_oil_monthly <- function(x) {
@@ -350,7 +373,7 @@ get_eurostat_cons <- function(
   }
 
   cons_monthly <- list(
-    coal = process_coal_monthly(cons_monthly_raw$coal),
+    coal = process_coal_monthly(cons_monthly_raw$coal, pwr_demand=pwr_demand),
     oil = process_oil_monthly(cons_monthly_raw$oil),
     gas = process_gas_monthly(cons_monthly_raw$gas) %>% split_elec_others()
   ) %>%
@@ -526,6 +549,77 @@ add_gas_non_energy <- function(cons_monthly_raw_gas, cons_yearly_raw_gas) {
   ))
 }
 
+#' Monthly data is not as detailed as yearly one.
+#' Most importantly, non-energy use
+#' is available in yearly but not in monthly data.
+#'
+#' We use yearly ratio 'Gross inland deliveries - energy use' / 'Gross inland deliveries - observed'
+#' to update monthly data
+#'
+#' A more accurate way would be to predict this ratio using industrial production index (e.g. fertiliser, petrochemicals)
+#' For a later version.
+#'
+#' @param cons_yearly_raw
+#' @param cons_monthly_raw
+#'
+#' @return
+#' @export
+#'
+#' @examples
+add_oil_transport <- function(cons_monthly_raw_oil, cons_yearly_raw_oil) {
+
+
+  # Get share of diesel and gasoline used in transportation
+  shares <- cons_yearly_raw_oil %>%
+    filter(time >= "1990-01-01") %>%
+    filter(siec %in% c("Motor gasoline",
+                       "Road diesel"
+                       )) %>%
+    filter(grepl("Thousand tonnes", unit)) %>%
+    filter(nrg_bal %in% c("Gross inland deliveries - observed",
+                          "Final consumption - transport sector - energy use")) %>%
+    mutate(year = year(time)) %>%
+    select(nrg_bal_code, siec, geo, year, values) %>%
+    tidyr::spread(nrg_bal_code, values) %>%
+    mutate(share_transport = FC_TRA_E / GID_OBS) %>%
+    select(-c(FC_TRA_E, GID_OBS))
+
+  ggplot(shares) +
+    geom_line(aes(year, share_transport, col = siec)) +
+    facet_wrap(~geo)
+
+  # Project til now
+  years <- unique(year(cons_monthly_raw_oil$time))
+  shares_filled <- shares %>%
+    tidyr::complete(year = years, geo, siec) %>%
+    group_by(geo, siec) %>%
+    arrange(year) %>%
+    tidyr::fill(share_transport) %>%
+    ungroup()
+
+  # Fill missing with average
+  shares_filled <- shares_filled %>%
+    group_by(siec, year) %>%
+    mutate(share_transport = ifelse(is.na(share_transport), mean(share_transport, na.rm=T), share_transport)) %>%
+    ungroup()
+
+  cons_monthly_raw_oil_transport <- cons_monthly_raw_oil %>%
+    filter(nrg_bal %in% c("Gross inland deliveries - observed")) %>%
+    mutate(year = year(time)) %>%
+    inner_join(shares_filled) %>%
+    mutate(
+      nrg_bal = "Final consumption - transport sector - energy use",
+      nrg_bal_code = "FC_TRA_E",
+      values = values * share_transport
+    ) %>%
+    select(-c(share_transport, year))
+
+  return(bind_rows(
+    cons_monthly_raw_oil,
+    cons_monthly_raw_oil_transport
+  ))
+}
+
 
 #' NG for Elec for EU27 is missing in 2019, simply because CY 0 data is missing...
 #'
@@ -595,7 +689,8 @@ remove_last_incomplete <- function(cons) {
     arrange(desc(time)) %>%
     mutate(cumsum = cumsum(values)) %>%
     filter(cumsum != 0 | max(cumsum) == 0 | row_number() >= max_months) %>%
-    ungroup()
+    ungroup() %>%
+    select(-c(cumsum))
 }
 
 
@@ -642,3 +737,4 @@ get_eurostat_from_code <- function(code, iso2s=NULL, use_cache = T, filters = NU
     dplyr::rename(dplyr::any_of(c(time = "TIME_PERIOD"))) %T>% # Column changed with new EUROSTAT version
     saveRDS(filepath)
 }
+
