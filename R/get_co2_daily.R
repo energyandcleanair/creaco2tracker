@@ -33,7 +33,10 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
 
   # Project data til now
   # Need to be after filter since we're using all countries to fill missing EU data
-  co2_filled <- project_until_now(co2, pwr_demand = pwr_demand, gas_demand=gas_demand, eurostat_indprod=eurostat_indprod)
+  co2_filled <- project_until_now(co2,
+                                  pwr_demand = pwr_demand,
+                                  gas_demand=gas_demand,
+                                  eurostat_indprod=eurostat_indprod)
 
   # Filter regions
   # Note: this need to be done after co2 estimates,
@@ -59,7 +62,7 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
   # Validation
   validate_co2(co2_daily, diagnostics_folder=diagnostics_folder, region=iso2s)
 
-  # Fill missing
+  # Final tweaks
   co2_daily <- co2_daily %>%
     rename(region=geo) %>%
     mutate(unit='t/day') %>%

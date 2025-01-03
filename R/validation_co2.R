@@ -462,7 +462,7 @@ validate_co2_transport <- function(co2_daily,
            caption="Source: CREA analysis based on Climate Watch data.") -> plt
 
     plt
-    quicksave(file.path(diagnostics_folder, "validation_tranposrt.jpg"), plot=plt)
+    quicksave(file.path(diagnostics_folder, "validation_transport.jpg"), plot=plt)
 
 }
 

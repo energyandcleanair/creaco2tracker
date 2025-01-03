@@ -20,12 +20,15 @@ project_until_now <- function(co2, pwr_demand, gas_demand, eurostat_indprod){
     project_until_now_oil(dts_month=dts_month) %>%
 
     # Before we apply ETS projection (which has large attached uncertainty)
-    # We give a chance to other = total - electricity
-    # It only applies to coal so far
+    # We give a chance to other = total - sum(other sectors)
+    # It applies to coal and oil so far
     detotalise_co2() %>%
 
     # Then run projections
-    project_until_now_ets(dts_month=dts_month)
+    project_until_now_ets(dts_month=dts_month) %>%
+
+    # And re-detotalise, since data from total and other sectors may now overlap again
+    detotalise_co2()
 }
 
 
