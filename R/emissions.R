@@ -18,19 +18,35 @@ add_ncv <- function(x, diagnostics_folder=NULL){
 
   conversion_raw <- iea.get_conversion_factors(iso2=c(get_eu_iso2s(),"EU"))
 
-  add_siec <- function(x){
-    x %>%
+  #' Add EUROSTAT Siec name to IEA. Some products have two SIEC because they are used differently in the transport sector for instance.
+  add_siec <- function(y){
+    separator <- "###"
+    products <- y %>%
+      distinct(product)
+
+    products %>%
       mutate(siec = case_when(
         grepl("anthracite", product, ignore.case = TRUE) ~ "Hard coal",
         grepl("lignite", product, ignore.case = TRUE) ~ "Brown coal",
         grepl("peat and peat products", product, ignore.case = TRUE) ~ "Peat",
         grepl("oil shale and oil sands", product, ignore.case = TRUE) ~ "Oil shale",
-        grepl("gas/diesel oil excl. biofuels|motor gasoline excl. biofuels", product, ignore.case = TRUE) ~ "Oil products",
+        # grepl("gas/diesel oil excl. biofuels|motor gasoline excl. biofuels", product, ignore.case = TRUE) ~ "Oil products",
         grepl("crude oil", product, ignore.case = TRUE) ~ "Crude oil",
         grepl("natural gas", product, ignore.case = TRUE) ~ "Natural gas",
         grepl("coke oven coke", product, ignore.case = TRUE) ~ "Coke oven coke",
+        # Oil products both used as Oil products in SECTOR_ALL and more granularily in transport
+        grepl("Gas/diesel oil", product, ignore.case = TRUE) ~ paste(c("Oil products", "Road diesel"), collapse=separator),
+        grepl("Motor gasoline", product, ignore.case = TRUE) ~ paste(c("Oil products", "Motor gasoline"), collapse=separator),
         TRUE ~ NA_character_
-      ))
+      )) %>%
+      filter(!is.na(siec)) %>%
+      rowwise() %>%
+      mutate(siec=list(stringr::str_split(siec, separator)[[1]])) %>%
+      ungroup() %>%
+      unnest(siec) %>%
+      right_join(y,
+                 relationship = "many-to-many",
+      )
   }
 
   # Brown coal consists of the addition of lignite and sub-bituminous coal.
@@ -40,13 +56,14 @@ add_ncv <- function(x, diagnostics_folder=NULL){
   conversion <- conversion_raw %>%
     filter(flow_raw=="NAVERAGE", unit=="KJKG", iso2 %in% get_eu_iso2s()) %>%
     add_siec() %>%
+    mutate(source="IEA") %>%
     group_by(iso2, siec, year) %>%
     summarise(ncv_kjkg=mean(value),
               max=max(value),
               min=min(value),
               source="IEA",
               .groups="drop"
-              ) %>%
+    ) %>%
     filter(!is.na(siec))
 
   # There are weird outliers values (e.g. Brown coal for NL and FR)
@@ -56,7 +73,11 @@ add_ncv <- function(x, diagnostics_folder=NULL){
     summarise(ncv_kjkg=mean(ncv_kjkg),
               .groups="drop") %>%
     group_by(siec) %>%
-    mutate(zscore=(ncv_kjkg-mean(ncv_kjkg))/sd(ncv_kjkg)) %>%
+    mutate(zscore=
+             case_when(
+               sd(ncv_kjkg)==0 ~ 0,
+              T ~ (ncv_kjkg-mean(ncv_kjkg))/sd(ncv_kjkg))
+    ) %>%
     arrange(desc(zscore)) %>%
     filter(abs(zscore)<2) %>%
     select(-zscore, -ncv_kjkg) %>%
@@ -79,7 +100,6 @@ add_ncv <- function(x, diagnostics_folder=NULL){
     filter(!is.na(ncv_kjkg_wmean))
 
   conversion_filled <- conversion %>%
-    select(-c(min, max)) %>%
     ungroup() %>%
     tidyr::complete(
       iso2=unique(add_iso2(x)$iso2),
@@ -126,6 +146,8 @@ add_emission_factor <- function(x){
       siec=='Peat'~117.766, #EFID=122005
       grepl('Oil shale', siec)~108,
       grepl('Oil products', siec)~72.3, #EFID=113617
+      grepl('Motor gasoline', siec)~72.1 	, #EFID=18667
+      grepl('Road diesel', siec)~72.1, #EFID=18919
       grepl('Crude oil', siec)~73, #EFID=110603
       siec=='Natural gas'~55.74, #Average of EFID123092-123095
       siec=='Coke oven coke' ~ 113) #EFID=110624

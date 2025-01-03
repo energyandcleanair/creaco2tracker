@@ -45,11 +45,11 @@ project_until_now <- function(co2, pwr_demand, gas_demand, eurostat_indprod){
 project_until_now_lm <- function(co2, proxy, dts_month, last_years=5, min_r2=0.9, force_overwrite=F, verbose=F){
 
   co2 %>%
-    group_by(iso2, geo, fuel, sector) %>%
+    group_by(iso2, geo, fuel, sector, unit) %>%
     expand_dates('date', dts_month) %>%
     arrange(desc(date)) %>%
     ungroup() %>%
-    group_by(iso2, geo, fuel, sector) %>%
+    group_by(iso2, geo, fuel, sector, unit) %>%
     group_modify(function(df, keys, ...) {
 
       iso2 <- keys %>% add_iso2() %>% pull(iso2)
@@ -157,6 +157,7 @@ project_until_now_elec <- function(co2, pwr_demand, dts_month, last_years=5, min
     mutate(fuel=case_when(
       source=='Coal' ~ 'coal',
       source=='Fossil Gas' ~ 'gas',
+
       T ~ NA_character_
     )) %>%
     filter(!is.na(fuel)) %>%
@@ -267,19 +268,21 @@ project_until_now_oil <- function(co2, dts_month, last_years=5, min_r2=0.85) {
     # Get the last month with good coverage for non-EU countries
     group_by(date, fuel, sector) %>%
     mutate(coverage = mean(!is.na(value[!is_eu]))) %>%
-    ungroup() %>%
-    # Find latest date with ~80% coverage
+    group_by(fuel, sector) %>%
+    # Exclude date tails with low coverage
     filter(date <= max(date[coverage >= 0.8])) %>%
+    filter(date >= min(date[coverage >= 0.8])) %>%
     filter(!is_eu) %>%
     # Fill missing country-level data through interpolation
     arrange(date) %>%
+    group_by(fuel, sector) %>%
     mutate(
-      value = zoo::na.approx(value, na.rm = FALSE)
+      value = zoo::na.approx(value, na.rm = F)
     ) %>%
     # Sum all EU countries
     group_by(date, fuel, sector) %>%
     summarise(
-      value_proxy = sum(value, na.rm = TRUE),
+      value_proxy = sum(value, na.rm = T),
       .groups = 'drop'
     ) %>%
     mutate(iso2="EU")

@@ -83,7 +83,7 @@ add_total_co2 <- function(co2){
     group_by(iso2, geo, date) %>%
     summarise(
       # First calculate central value and std dev
-      central_value = sum(value[estimate == "central"]),
+      central_value = sum(value[estimate == "central"], na.rm = TRUE),
       std_dev = sqrt(sum(
         # Convert confidence intervals to standard deviations
         (value[estimate == "upper"] - value[estimate == "central"])^2
