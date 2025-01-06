@@ -17,15 +17,17 @@ upload_co2_daily <- function(co2_daily, production=T, clear_all_first=F){
   unique_cols <-  c('region', 'date', 'fuel', 'sector', 'unit', 'frequency', 'version')
 
   p <- co2_daily_formatted %>%
-    select(region, date, fuel, sector, unit, frequency, version, value)
+    select(region, date, fuel, sector, unit, frequency, version, value, value_lower, value_upper)
 
   db <- dbx::dbxConnect(adapter="postgres",
                         url=get_pg_url(production=production))
   if(clear_all_first){
     dbx::dbxExecute(db, sprintf("DELETE FROM co2_emission;"))
+    # Insert all in one go
+    dbx::dbxInsert(db, "co2_emission", p)
+  }else{
+    dbx::dbxUpsert(db, "co2_emission", p, where_cols=unique_cols)
   }
-
-  dbx::dbxUpsert(db, "co2_emission", p, where_cols=unique_cols)
   dbx::dbxDisconnect(db)
 }
 

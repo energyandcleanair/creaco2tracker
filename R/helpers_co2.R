@@ -106,23 +106,50 @@ add_total_co2 <- function(co2){
     ungroup()
 }
 
+combine_coke_coal <- function(co2){
+
+  group_by_cols <- intersect(names(co2), c("iso2", "geo", "region", "date", "fuel", "sector", "unit"))
+  co2 %>%
+    filter(fuel %in% c(FUEL_COAL, FUEL_COKE)) %>%
+    mutate(fuel=FUEL_COAL) %>%
+    group_by_at(group_by_cols) %>%
+    summarise(
+      # First calculate central value and std dev
+      central_value = sum(value[estimate == "central"], na.rm = TRUE),
+      std_dev = sqrt(sum(
+        # Convert confidence intervals to standard deviations
+        (value[estimate == "upper"] - value[estimate == "central"])^2
+      )),
+      .groups = "drop"
+    ) %>%
+    # Create three rows for each group with the different estimates
+    tidyr::crossing(estimate = c("central", "lower", "upper")) %>%
+    mutate(
+      value = case_when(
+        estimate == "central" ~ central_value,
+        estimate == "lower" ~ central_value - std_dev,
+        estimate == "upper" ~ central_value + std_dev
+      )
+    ) %>%
+    select(-central_value, -std_dev) %>%
+    bind_rows(
+      co2 %>% filter(! fuel %in% c(FUEL_COAL, FUEL_COKE))
+    ) %>%
+    ungroup()
+}
+
 format_co2_for_db <- function(co2_daily, cut_tail_days=3){
 
   co2_daily %>%
-    pivot_wider(names_from = estimate, values_from = value, names_prefic = "value_") %>%
-    rename(value=value_central) %>%
     # Combine coal and coke
-    mutate(fuel=case_when(
-      fuel %in% c(FUEL_COAL, FUEL_COKE) ~ FUEL_COAL,
-      T ~ fuel
-    )) %>%
-    group_by(iso2, date, fuel, sector, unit) %>%
-    summarise(value = sum(value), .groups = "drop") %>%
+    combine_coke_coal() %>%
     mutate(across(c(fuel, sector), stringr::str_to_title),
            frequency='daily',
            region=iso2,
            version=as.character(packageVersion("creaco2tracker"))) %>%
-    select(region, date, fuel, sector, unit, frequency, version, value)
+    select(region, date, fuel, sector, unit, frequency, version, estimate, value) %>%
+    pivot_wider(names_from=estimate, values_from=value, names_prefix="value_") %>%
+    rename(value=value_central)
 }
 
 check_no_duplicate <- function(x){
