@@ -1,7 +1,7 @@
 validate_co2 <- function(co2_daily, diagnostics_folder="diagnostics", region="EU", date_from="1990-01-01") {
 
   if(is.null(diagnostics_folder)){
-    info("No diagnostics folder provided. Skipping validation.")
+    message("No diagnostics folder provided. Skipping validation.")
     return()
   }
 
