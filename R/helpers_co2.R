@@ -1,7 +1,9 @@
-get_eu_iso2s <- function(eurostat=F){
+get_eu_iso2s <- function(eurostat=F, include_EU=F){
   cl <- countrycode::codelist
   iso2s <- cl$iso2c[which(cl$eu28=="EU" & cl$iso2c != "GB")]
   if(eurostat) iso2s[iso2s=="GR"]="EL"
+
+  if(include_EU) iso2s <- c(iso2s, "EU")
   iso2s
 }
 
@@ -20,6 +22,11 @@ add_iso2 <- function(x, country_col="geo"){
                                                           "EU27 & UK"="EU28",
                                                           "Kosovo*"="XK")))
 }
+
+iso2_to_name <- function(x){
+  countrycode(x, "iso2c", "country.name", custom_match = c("EU" = "EU"))
+}
+
 
 split_gas_to_elec_others <- function(co2){
 

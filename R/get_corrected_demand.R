@@ -2,7 +2,7 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
                                  use_co2_in_db=T){
 
   dir.create(diagnostics_folder, F, T)
-  eu_members <- setdiff(countrycode::codelist$iso2c[which(countrycode::codelist$eu28=="EU")], "GB")
+  eu_members <- get_eu_iso2s()
 
   # load data
   # co2 <- get_co2_daily()
