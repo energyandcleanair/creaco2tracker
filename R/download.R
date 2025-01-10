@@ -45,16 +45,19 @@ download_gas_demand <- function(region_id=NULL,
 
 }
 
-download_pwr_demand <- function(date_from="2015-01-01", region=NULL, use_cache=T, refresh_cache=F) {
+download_pwr_demand <- function(date_from="2015-01-01", region="EU", use_cache=T, refresh_cache=T, use_local=F) {
 
-  pwr <- creahelpers::api.get('api.energyandcleanair.org/power/generation',
+  base_url <- ifelse(use_local, "http://localhost:8080", "https://api.energyandcleanair.org")
+  pwr <- creahelpers::api.get(glue('{base_url}/power/generation'),
                               date_from=date_from,
                               aggregate_by='country,source,date',
-                              region='EU',
+                              region=region,
+                              data_source='entsoe',
                               split_by = 'year',
                               use_cache = use_cache,
                               refresh_cache = refresh_cache,
-                              cache_folder = "cache")
+                              cache_folder = "cache",
+                              verbose = T)
 
   #add total generation
   pwr <- pwr %>%
