@@ -1,4 +1,6 @@
-validate_co2 <- function(co2_daily, diagnostics_folder="diagnostics", region="EU", date_from="1990-01-01") {
+validate_co2 <- function(co2_daily,
+                         diagnostics_folder="diagnostics",
+                         date_from="1990-01-01") {
 
   if(is.null(diagnostics_folder)){
     message("No diagnostics folder provided. Skipping validation.")
@@ -11,28 +13,50 @@ validate_co2 <- function(co2_daily, diagnostics_folder="diagnostics", region="EU
   validation_data <- get_validation_data(region=unique(co2_daily$iso2))
 
   # Run all validations with shared validation data
-  validate_co2_historical(co2_daily, validation_data, region, diagnostics_folder, date_from)
-  validate_co2_timeseries(co2_daily, diagnostics_folder)
-  validate_co2_monthly(co2_daily, diagnostics_folder)
-  validate_co2_transport(co2_daily, diagnostics_folder)
+  validate_co2_historical(co2_daily,
+                          validation_data,
+                          folder = file.path(diagnostics_folder, "co2_historical"),
+                          date_from = date_from)
+
+  validate_co2_timeseries(co2_daily,
+                          folder = file.path(diagnostics_folder, "co2_timeseries")
+                          )
+
+  validate_co2_monthly(co2_daily,
+                       folder = file.path(diagnostics_folder, "co2_monthly")
+                       )
+
+  validate_co2_transport(co2_daily,
+                         folder = file.path(diagnostics_folder, "co2_transport")
+                         )
 }
+
 
 # Update the historical validation function signature
 validate_co2_historical <- function(co2_daily = NULL,
-                                  validation_data,  # New parameter
-                                  region = "EU",
+                                    validation_data,
+                                  iso2s = NULL,
                                   folder = "diagnostics",
                                   date_from = "1990-01-01") {
+
+
+
   # Remove the get_validation_data() call since data is passed in
   # Rest of function remains the same
   dir.create(folder, F, T)
 
+
+  if(is.null(iso2s)){
+    iso2s <- unique(co2_daily$iso2)
+  }
+
+  lapply(iso2s, function(iso2){
+
   # Load CREA data
-  co2_crea <- creahelpers::default_if_null(co2_daily,
-                                          download_co2_daily(date_from = date_from, iso2s=region)) %>%
+  co2_crea <- co2_daily %>%
     filter(sector == SECTOR_ALL,
            fuel == FUEL_TOTAL,
-           iso2 %in% c(!!region),
+           iso2 %in% c(!!iso2),
            estimate == "central"
            ) %>%
     group_by(iso2, year = year(date)) %>%
@@ -45,13 +69,13 @@ validate_co2_historical <- function(co2_daily = NULL,
   co2_validate <- validation_data %>%
     filter(iso2 %in% unique(co2_crea$iso2))
 
-  co2_extended <- extend_validation_data(co2_crea = co2_crea,
-                                         co2_validate = co2_validate)
+  # co2_extended <- extend_validation_data(co2_crea = co2_crea,
+  #                                        co2_validate = co2_validate)
 
   plot_data <- bind_rows(
     co2_crea %>% filter(year >= 1990) %>% mutate(type='estimated'),
-    co2_validate %>% mutate(type='estimated'),
-    co2_extended %>% mutate(type='projected')
+    co2_validate %>% mutate(type='estimated')
+    # co2_extended %>% mutate(type='projected')
   ) %>%
       write_csv(file.path(folder, "validation.csv")) %>%
       # filter(type=="estimated") %>%
@@ -77,7 +101,7 @@ validate_co2_historical <- function(co2_daily = NULL,
           facet_wrap(~iso2, scales='free_y')
         }
       } +
-      labs(title="EU CO2 emissions from fossil fuels",
+      labs(title=glue("{iso2_to_name(iso2)} CO2 emissions from fossil fuels"),
            subtitle="Projection of historical sources using CREA CO2 tracker, in billion tonne CO2 per year",
            y=NULL,
            x=NULL,
@@ -87,13 +111,16 @@ validate_co2_historical <- function(co2_daily = NULL,
            color="Source",
            caption="Source: CREA analysis based on Climate Watch data. Agriculture and LULUCF are not included in this comparison.") -> plt
 
-  plt
-  quicksave(file.path(folder, "validation.jpg"), plot=plt)
+  quicksave(file.path(folder, glue("validation_co2_{tolower(iso2)}.jpg")),
+            plot=plt,
+            preview = F)
+
+  })
 
 
   # Create a version with hline and vline -----------------------------------
   tryCatch({
-  if("EU" %in% co2_crea$iso2){
+  if("EU" %in% iso2s){
     last_year <- max(co2_crea$year)
     interpolated <- co2_validate %>%
       filter(iso2=="EU") %>%
@@ -226,10 +253,10 @@ validate_co2_historical <- function(co2_daily = NULL,
 
 
 
-validate_co2_timeseries <- function(co2_daily, diagnostics_folder="diagnostics"){
+validate_co2_timeseries <- function(co2_daily, folder="diagnostics"){
 
-  if(!is.null(diagnostics_folder)){
-    dir.create(diagnostics_folder, showWarnings = FALSE)
+  if(!is.null(folder)){
+    dir.create(folder, showWarnings = FALSE)
 
     iso2s <- unique(co2_daily$iso2)
 
@@ -281,17 +308,16 @@ validate_co2_timeseries <- function(co2_daily, diagnostics_folder="diagnostics")
                size=NULL) +
         guides(size=guide_legend(ncol=1), color=guide_legend(ncol=1)))
 
-      filepath <- file.path(diagnostics_folder, glue("co2_{iso2}_.png"))
+      filepath <- file.path(folder, glue("co2_timeseries_byfuel_{tolower(iso2)}_.png"))
       rcrea::quicksave(filepath, plot=plt, width=10, height=7, bg='white', scale=1)
     })
   }
 }
 
 
-validate_co2_monthly <- function(co2_daily, diagnostics_folder="diagnostics"){
+validate_co2_monthly <- function(co2_daily, folder="diagnostics"){
 
-  #TODO add diagnostics data to package
-  if(!is.null(diagnostics_folder)){
+  dir.create(folder, showWarnings = FALSE, recursive = T)
 
   co2_crea <- co2_daily %>%
     filter(fuel!='total', estimate=="central") %>%
@@ -302,8 +328,6 @@ validate_co2_monthly <- function(co2_daily, diagnostics_folder="diagnostics"){
               .groups="drop") %>%
     ungroup() %>%
     rename(date=month)
-
-
 
 
   url <- "https://datas.carbonmonitor.org/API/downloadFullDataset.php?source=carbon_eu"
@@ -394,27 +418,31 @@ validate_co2_monthly <- function(co2_daily, diagnostics_folder="diagnostics"){
            fill="Sector",
            caption="Source: CREA analysis.") -> plt
 
-  plt
+  quicksave(file.path(folder, "co2_benchmark_carbonmonitor_monthly.jpg"), plot=plt,
+            width=12, height=8, logo=F, preview=F)
 
-  quicksave(file.path(diagnostics_folder, "co2_benchmark_carbonmonitor_monthly.jpg"), plot=plt,
-            width=8, height=4, scale=1, logo=F, dpi=600)
-            # height=min(30,max(4, 1.5*length(unique(co2_crea$iso2)))),
-
-}
 }
 
 
 validate_co2_transport <- function(co2_daily,
-                                   diagnostics_folder="diagnostics",
+                                   folder="diagnostics",
                                    date_from = "1990-01-01"){
+
+
+  dir.create(folder, showWarnings = FALSE, recursive = T)
 
   validation_data_transport <- load_climatewatch_csv("climatewatch-transport") %>%
     mutate(source="Climate Watch")
 
+  iso2s <- unique(co2_daily$iso2)
+
+  lapply(iso2s, function(iso2){
 
     # Load CREA data
     co2_crea <-co2_daily %>%
-      filter(sector == SECTOR_TRANSPORT,
+      filter(
+             iso2 == !!iso2,
+             sector == SECTOR_TRANSPORT,
              fuel == FUEL_OIL,
              estimate == "central"
       ) %>%
@@ -432,7 +460,7 @@ validate_co2_transport <- function(co2_daily,
       co2_crea %>% filter(year >= 1990),
       co2_validate
     ) %>%
-      write_csv(file.path(diagnostics_folder, "validation_transport.csv")) %>%
+      # write_csv(file.path(folder, "validation_transport.csv")) %>%
       # filter(type=="estimated") %>%
       mutate(
         source=factor(source, levels=c("CREA", unique(co2_validate$source)))
@@ -456,7 +484,7 @@ validate_co2_transport <- function(co2_daily,
           facet_wrap(~iso2, scales='free_y')
         }
       } +
-      labs(title="EU CO2 emissions in transport sector",
+      labs(title=glue("{iso2_to_name(iso2)} CO2 emissions in transport sector"),
            subtitle="Projection of historical sources using CREA CO2 tracker, in billion tonne CO2 per year",
            y=NULL,
            x=NULL,
@@ -464,10 +492,13 @@ validate_co2_transport <- function(co2_daily,
            linetype=NULL,
            alpha="Source",
            color="Source",
-           caption="Source: CREA analysis based on Climate Watch data.") -> plt
+           caption="Source: CREA analysis based on EUROSTAT and IPCC. Only refers to road transporation.") -> plt
 
-    plt
-    quicksave(file.path(diagnostics_folder, "validation_transport.jpg"), plot=plt)
+
+    quicksave(file.path(folder, glue("validation_co2_transport_{tolower(iso2)}.jpg")),
+              plot=plt,
+              preview = F)
+  })
 
 }
 
