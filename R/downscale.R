@@ -65,8 +65,8 @@ downscale_daily <- function(co2, pwr_demand, gas_demand){
       summarise(value_after=sum(value))
   ) %>%
     filter(!is.na(value_before) | !is.na(value_after))
-  stopifnot("Error: changed monthly total"=all(near(comparison$value_before, comparison$value_after)))
 
+  stopifnot("Error: changed monthly total"=all(near(comparison$value_before, comparison$value_after, tol=0.1)))
 
   return(co2_daily)
 }

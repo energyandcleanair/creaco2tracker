@@ -20,7 +20,7 @@ download_co2_daily <- function(date_from="2015-01-01", use_cache = F, refresh_ca
     select_if_exists(region, date, fuel, sector, unit, frequency, value, version)
 }
 
-download_gas_demand <- function(region_id=NULL,
+download_gas_demand <- function(iso2=NULL,
                                 use_cache=F,
                                 refresh_cache=F,
                                 date_from="2015-01-01"){
@@ -30,7 +30,7 @@ download_gas_demand <- function(region_id=NULL,
     data_source='crea',
     date_from=date_from,
     format='csv',
-    region_id=region_id
+    region_id=iso2
   )
 
   # Remove null elements
@@ -41,7 +41,8 @@ download_gas_demand <- function(region_id=NULL,
                        use_cache = use_cache,
                        refresh_cache = refresh_cache,
                        cache_folder = "cache") %>%
-    select_if_exists(region_id, date, fuel, sector, unit, frequency, value)
+    select_if_exists(region_id, date, fuel, sector, unit, frequency, value) %>%
+    rename(iso2=region_id)
 
 }
 

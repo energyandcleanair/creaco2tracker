@@ -96,7 +96,7 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s, diagnostics_folder="d
   # Plot heatmap of consumption by sector
   if(!is.null(diagnostics_folder)){
 
-    dir.create(diagnostics_folder, showWarnings = FALSE)
+    dir.create(diagnostics_folder, F, T)
     plt_data <- eurostat_cons %>%
       filter(is.null(iso2s) | iso2 %in% iso2s) %>%
       group_by(iso2, geo, fuel, sector, unit, time) %>%
@@ -141,6 +141,210 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s, diagnostics_folder="d
     plt
     quicksave(file.path(diagnostics_folder, 'eurostat_data_availability.png'),
            width=10, height=8, bg='white', plot=plt, scale=1.5)
+
+  }
+}
+
+#' How close are EU estimates to the sum of EU countries
+#'
+#' @param co2_filled
+#' @param diagnostics_folder
+#'
+#' @return
+#' @export
+#'
+#' @examples
+diagnose_eu_vs_countries <- function(co2_filled,
+                                     eurostat_cons,
+                                     pwr_demand,
+                                     diagnostics_folder="diagnostics"){
+
+  if(!is.null(diagnostics_folder)){
+    dir.create(diagnostics_folder, showWarnings = FALSE)
+
+
+    # Power demand --------------------------------------------------
+    plt_data <- pwr_demand %>%
+      filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+      # {
+      #   n_countries <- n_distinct(.$iso2)
+      #   print(n_countries)
+      #   stopifnot('Expected 27 EU countries + EU'= n_countries == 28)
+      #   .
+      # } %>%
+      mutate(is_eu=case_when(iso2=="EU" ~ "EU", TRUE ~ "EU member states")) %>%
+      filter(date < "2025-01-01") %>%
+      filter(date >= "2015-01-01") %>%
+      group_by(
+        source,
+        year=year(date),
+        is_eu) %>%
+      summarise(value=sum(value_mwh, na.rm=T)/1e6) %>%
+      arrange(desc(year))
+
+
+    plt_data %>%
+      group_by(source) %>%
+      ggplot(aes(year, value, col=is_eu)) +
+      geom_line(show.legend = F) +
+      ggrepel::geom_text_repel(
+        data = . %>% filter(year==max(year)),
+        aes(label=is_eu), nudge_x = 0.5, nudge_y = 0.5,
+        show.legend = F,
+        # hide segment
+        segment.color = NA,
+        # vertically aligned
+        direction = 'x',
+        hjust = 0,
+        # bold
+        fontface = 'bold',
+
+      ) +
+      facet_wrap(~source, scales='free_y')  +
+      scale_x_continuous(expand = expansion(add = c(0, 3)),
+                         breaks = seq(2015, 2025, 1)
+      ) +
+      rcrea::scale_y_crea_zero() +
+      rcrea::scale_color_crea_d() +
+      rcrea::theme_crea_new() +
+      labs(
+        title='[DIAGNOSTIC] Power demand EU vs sum of EU countries',
+        subtitle='Gap is theoretically NOT OK',
+        y='TWh per year',
+        x=''
+      )
+
+    quicksave(file.path(diagnostics_folder, 'eu_vs_countries_power.png'),
+              plot=plt,
+              width=10, height=8, bg='white', scale=1.5)
+
+
+
+    # Eurostat --------------------------------------------------
+    plt_data <- eurostat_cons %>%
+      filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+      {
+        n_countries <- n_distinct(.$iso2)
+        print(n_countries)
+        stopifnot('Expected 27 EU countries + EU'= n_countries == 28)
+        .
+      } %>%
+      mutate(is_eu=case_when(iso2=="EU" ~ "EU", TRUE ~ "EU member states")) %>%
+      filter(time < "2025-01-01") %>%
+      filter(time >= "2015-01-01") %>%
+      group_by(
+        siec,
+        sector,
+        time,
+        is_eu) %>%
+      summarise(value=sum(values, na.rm=T)) %>%
+      arrange(desc(time))
+
+    plt_data %>%
+      group_by(siec, sector, is_eu) %>%
+      ggplot(aes(time, value, col=is_eu, linetype=is_eu)) +
+      geom_line(show.legend = F) +
+      ggrepel::geom_text_repel(
+        data = . %>% filter(time==max(time)),
+        aes(label=is_eu), nudge_x = 0.5, nudge_y = 0.5,
+        show.legend = F,
+        # hide segment
+        segment.color = NA,
+        # vertically aligned
+        direction = 'x',
+        hjust = 0,
+        # bold
+        fontface = 'bold',
+
+      ) +
+      facet_wrap(sector~siec, scales='free_y') +
+      # scale_x_continuous(expand = expansion(add = c(0, 3)),
+      #                    breaks = seq(2015, 2025, 1)
+      # ) +
+      rcrea::scale_color_crea_d() +
+      rcrea::theme_crea_new() +
+      labs(
+        title='[DIAGNOSTIC] Eurostat data EU vs sum of EU countries',
+        subtitle='BEFORE filling missing data - Gap is theoretically OK',
+        y='Gt CO2 per year',
+        x=''
+      ) +
+      rcrea::scale_y_crea_zero() -> plt
+
+    plt
+    quicksave(file.path(diagnostics_folder, 'eu_vs_countries_eurostat.png'),
+              plot=plt,
+              width=10, height=8, bg='white', scale=1.5)
+
+
+    # CO2 (total and number of points) ---------------------------------------------------
+    plt_data <- co2_filled %>%
+      # filter(estimate=="central") %>%
+      detotalise_co2() %>%
+      filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+      {
+        n_countries <- n_distinct(.$iso2)
+        print(n_countries)
+        stopifnot('Expected 27 EU countries + EU'= n_countries == 28)
+        .
+      } %>%
+      mutate(is_eu=case_when(iso2=="EU" ~ "EU", TRUE ~ "EU member states")) %>%
+      filter(date < "2025-01-01") %>%
+      filter(date >= "2015-01-01") %>%
+      group_by(
+        fuel,
+        sector,
+        date=floor_date(date, "month"),
+        is_eu) %>%
+      summarise(value=sum(value, na.rm=T)/1e9) %>%
+      arrange(desc(date))
+
+    # Add total
+    plt_data <- bind_rows(
+      plt_data,
+      plt_data %>%
+        group_by(is_eu, date) %>%
+        summarise(value=sum(value, na.rm=T),
+                  fuel="total",
+                  sector="all")
+    )
+
+    # Check EU vs countries
+    plt_data %>%
+      group_by(fuel) %>%
+      ggplot(aes(date, value, col=is_eu)) +
+      geom_line(show.legend = F) +
+      ggrepel::geom_text_repel(
+        data = . %>% filter(date==max(date)),
+        aes(label=is_eu), nudge_x = 0.5, nudge_y = 0.5,
+        show.legend = F,
+        # hide segment
+        segment.color = NA,
+        # vertically aligned
+        direction = 'x',
+        hjust = 0,
+        # bold
+        fontface = 'bold',
+
+        ) +
+      facet_wrap(sector~fuel) +
+      # scale_x_continuous(expand = expansion(add = c(0, 3)),
+      #                    breaks = seq(2015, 2025, 1)
+      #                    ) +
+      rcrea::scale_color_crea_d() +
+      rcrea::theme_crea_new() +
+      rcrea::scale_y_crea_zero() +
+      labs(
+        title='[DIAGNOSTIC] CO2 emissions EU vs sum of EU countries',
+        subtitle='AFTER filling missing data - Gap is theoretically NOT OK',
+        y='Gt CO2 per year',
+        x=''
+      ) -> plt
+
+    plt
+    quicksave(file.path(diagnostics_folder, 'eu_vs_countries_co2.png'),
+              plot=plt,
+           width=10, height=8, bg='white', scale=1.5)
 
   }
 }
