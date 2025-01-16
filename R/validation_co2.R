@@ -18,6 +18,8 @@ validate_co2 <- function(co2_daily,
                           folder = file.path(diagnostics_folder, "co2_historical"),
                           date_from = date_from)
 
+
+
   validate_co2_timeseries(co2_daily,
                           folder = file.path(diagnostics_folder, "co2_timeseries")
                           )
@@ -52,55 +54,133 @@ validate_co2_historical <- function(co2_daily = NULL,
 
   lapply(iso2s, function(iso2){
 
-  # Load CREA data
-  co2_crea <- co2_daily %>%
-    filter(sector == SECTOR_ALL,
-           fuel == FUEL_TOTAL,
-           iso2 %in% c(!!iso2),
-           estimate == "central"
-           ) %>%
-    group_by(iso2, year = year(date)) %>%
-    summarise(value = sum(value)/1e6,
-              unit = "mt",
-              source = 'CREA') %>%
-    filter(year < 2025)
 
-  # Load validation data
-  co2_validate <- validation_data %>%
-    filter(iso2 %in% unique(co2_crea$iso2))
+    ##############################
+    # Plot 1: FUEL_TOTAL
+    ##############################
+    # Load CREA data
+    co2_crea <- co2_daily %>%
+      filter(sector == SECTOR_ALL,
+             fuel == FUEL_TOTAL,
+             iso2 %in% c(!!iso2),
+             estimate == "central"
+             ) %>%
+      group_by(iso2, year = year(date)) %>%
+      summarise(value = sum(value)/1e6,
+                unit = "mt",
+                source = 'CREA') %>%
+      filter(year < 2025)
 
-  # co2_extended <- extend_validation_data(co2_crea = co2_crea,
-  #                                        co2_validate = co2_validate)
+    # Load validation data
+    co2_validate <- validation_data %>%
+      filter(iso2 %in% unique(co2_crea$iso2),
+             sector == SECTOR_ALL,
+             fuel == FUEL_TOTAL) %>%
+      filter(source != "Carbon Monitor")
 
-  plot_data <- bind_rows(
-    co2_crea %>% filter(year >= 1990) %>% mutate(type='estimated'),
-    co2_validate %>% mutate(type='estimated')
-    # co2_extended %>% mutate(type='projected')
-  ) %>%
+    # co2_extended <- extend_validation_data(co2_crea = co2_crea,
+    #                                        co2_validate = co2_validate)
+
+    plot_data <- bind_rows(
+      co2_crea %>% filter(year >= 1990) %>% mutate(type='estimated'),
+      co2_validate %>% mutate(type='estimated')
+      # co2_extended %>% mutate(type='projected')
+    ) %>%
+        write_csv(file.path(folder, "validation.csv")) %>%
+        # filter(type=="estimated") %>%
+        mutate(
+          source=factor(source, levels=c("CREA", unique(co2_validate$source)))
+        )
+
+    n_sources <- n_distinct(plot_data$source)
+    alphas <- c(0.9, rep(1, n_sources-1))
+    linewidths <- c(1.6, rep(0.5, n_sources-1))
+    colors <- unname(rcrea::pal_crea[c("Blue", "Dark.red", "Dark.blue", "Orange", "Red",
+                                       "Dark.purple", "Dark.violet", "Green", "Turquoise")])
+
+    ggplot(plot_data) +
+        geom_line(aes(year, value/1e3, col=source, linewidth=source, alpha=source, linetype=type)) +
+        scale_x_continuous(limits=c(min(co2_crea$year), NA)) +
+        scale_alpha_manual(values=alphas) +
+        scale_linewidth_manual(values=linewidths) +
+        scale_color_manual(values=colors) +
+        rcrea::theme_crea_new() +
+        rcrea::scale_y_crea_zero() +
+        {
+          if(length(unique(co2_crea$iso2)) > 1){
+            facet_wrap(~iso2, scales='free_y')
+          }
+        } +
+        labs(title=glue("{iso2_to_name(iso2)} CO2 emissions from fossil fuels"),
+             subtitle="Projection of historical sources using CREA CO2 tracker, in billion tonne CO2 per year",
+             y=NULL,
+             x=NULL,
+             linewidth="Source",
+             linetype=NULL,
+             alpha="Source",
+             color="Source",
+             caption="Source: CREA analysis based on Climate Watch data. Agriculture and LULUCF are not included in this comparison.") -> plt
+
+    quicksave(file.path(folder, glue("validation_co2_{tolower(iso2)}.jpg")),
+              plot=plt,
+              preview = F)
+
+
+    ##############################
+    # Plot 2: BY FUEL
+    ##############################
+    # Load CREA data
+    co2_crea <- co2_daily %>%
+      combine_coke_coal() %>%
+      filter(
+        # sector == SECTOR_ALL,
+             # fuel != FUEL_TOTAL,
+             iso2 %in% c(!!iso2),
+             estimate == "central"
+      ) %>%
+      group_by(iso2, year = year(date), fuel) %>%
+      summarise(value = sum(value, na.rm=T)/1e6,
+                unit = "mt",
+                source = 'CREA') %>%
+      filter(year < 2025)
+
+    # Load validation data
+    co2_validate <- validation_data %>%
+      filter(iso2 %in% unique(co2_crea$iso2),
+             sector == SECTOR_ALL,
+             ) %>%
+      group_by(source) %>%
+      filter(any(fuel != FUEL_TOTAL))
+
+    # co2_extended <- extend_validation_data(co2_crea = co2_crea,
+    #                                        co2_validate = co2_validate)
+
+    plot_data <- bind_rows(
+      co2_crea %>% filter(year >= 1990) %>% mutate(type='estimated'),
+      co2_validate %>% mutate(type='estimated')
+      # co2_extended %>% mutate(type='projected')
+    ) %>%
       write_csv(file.path(folder, "validation.csv")) %>%
       # filter(type=="estimated") %>%
       mutate(
         source=factor(source, levels=c("CREA", unique(co2_validate$source)))
       )
 
-  n_sources <- n_distinct(plot_data$source)
-  alphas <- c(0.9, rep(1, n_sources-1))
-  linewidths <- c(1.6, rep(0.5, n_sources-1))
-  colors <- unname(rcrea::pal_crea[c("Blue", "Dark.red", "Dark.blue", "Orange", "Red", "Yellow", "Dark.violet", "Turquoise")])
+    n_sources <- n_distinct(plot_data$source)
+    alphas <- c(0.9, rep(1, n_sources-1))
+    linewidths <- c(1.6, rep(0.5, n_sources-1))
+    colors <- unname(rcrea::pal_crea[c("Blue", "Dark.red", "Dark.blue", "Orange", "Red",
+                                       "Dark.purple", "Dark.violet", "Green", "Turquoise")])
 
-  ggplot(plot_data) +
-      geom_line(aes(year, value/1e3, col=source, linewidth=source, alpha=source, linetype=type)) +
+    ggplot(plot_data) +
+      geom_line(aes(year, value/1e3, col=source, linewidth=source, alpha=source)) +
       scale_x_continuous(limits=c(min(co2_crea$year), NA)) +
       scale_alpha_manual(values=alphas) +
       scale_linewidth_manual(values=linewidths) +
       scale_color_manual(values=colors) +
       rcrea::theme_crea_new() +
       rcrea::scale_y_crea_zero() +
-      {
-        if(length(unique(co2_crea$iso2)) > 1){
-          facet_wrap(~iso2, scales='free_y')
-        }
-      } +
+      facet_wrap(~stringr::str_to_title(fuel), scales='free_y') +
       labs(title=glue("{iso2_to_name(iso2)} CO2 emissions from fossil fuels"),
            subtitle="Projection of historical sources using CREA CO2 tracker, in billion tonne CO2 per year",
            y=NULL,
@@ -111,9 +191,9 @@ validate_co2_historical <- function(co2_daily = NULL,
            color="Source",
            caption="Source: CREA analysis based on Climate Watch data. Agriculture and LULUCF are not included in this comparison.") -> plt
 
-  quicksave(file.path(folder, glue("validation_co2_{tolower(iso2)}.jpg")),
-            plot=plt,
-            preview = F)
+    quicksave(file.path(folder, glue("validation_co2_{tolower(iso2)}_byfuel.jpg")),
+              plot=plt,
+              preview = F)
 
   })
 
@@ -122,7 +202,7 @@ validate_co2_historical <- function(co2_daily = NULL,
   tryCatch({
   if("EU" %in% iso2s){
     last_year <- max(co2_crea$year)
-    interpolated <- co2_validate %>%
+    interpolated <- validation_data %>%
       filter(iso2=="EU") %>%
       filter(source %in% c('PIK', 'GCP')) %>%
       group_by(iso2, source) %>%
@@ -191,23 +271,33 @@ validate_co2_historical <- function(co2_daily = NULL,
   })
 
   # Check fuel --------------------------------------------------------------
-  co2_yearly <- co2_daily %>%
-    filter(fuel!=FUEL_TOTAL) %>%
-    group_by(iso2, year=year(date), fuel) %>%
-    summarise(value=sum(value)/1e6,
-              unit="mt",
-              source='CREA')
-
-  ggplot(co2_yearly) +
-    geom_area(aes(year, value, fill=fuel)) +
-    geom_line(data=co2_validate %>% filter(year >= 1990), aes(year, value, col=source)) +
-    # geom_line(data=co2_yearly %>% filter(year >= 1990), aes(year, value, col=fuel)) +
-    {
-      if(length(unique(co2_yearly$iso2)) > 1){
-        facet_wrap(~iso2, scales='free_y')
-      }
-    }
-
+  # co2_yearly <- co2_daily %>%
+  #   filter(fuel!=FUEL_TOTAL) %>%
+  #   group_by(iso2, year=year(date), fuel) %>%
+  #   summarise(value=sum(value)/1e6,
+  #             unit="mt",
+  #             source='CREA')
+  #
+  # co2_validate_yearly <- validation_data %>%
+  #   filter(iso2 %in% unique(co2_yearly$iso2),
+  #          sector == SECTOR_ALL,
+  #          source=="GCP2"
+  #   ) %>%
+  #   filter(any(fuel != FUEL_TOTAL)) %>%
+  #   group_by(iso2, source, year) %>%
+  #   summarise(value=sum(value))
+  #
+  #
+  # ggplot(co2_yearly) +
+  #   geom_area(aes(year, value, fill=fuel)) +
+  #   geom_line(data=co2_validate_yearly %>% filter(year >= 1990), aes(year, value, col=source)) +
+  #   # geom_line(data=co2_yearly %>% filter(year >= 1990), aes(year, value, col=fuel)) +
+  #   {
+  #     if(length(unique(co2_yearly$iso2)) > 1){
+  #       facet_wrap(~iso2, scales='free_y')
+  #     }
+  #   }
+  #
 #
 #   co2_monthly <- co2_daily %>%
 #     filter(fuel!='Total',
@@ -225,29 +315,29 @@ validate_co2_historical <- function(co2_daily = NULL,
 
 
 # Are we understimating any? ----------------------------------------------
-  summary(co2_validate %>% filter(source=='PIK') %>%
-    left_join(co2_yearly %>% select(year, fuel, value) %>%
-                tidyr::spread(fuel, value)) %>%
-    filter(!is.na(oil)) %>%
-    lm(value - oil - gas ~ coal + 0, data=.))
-
-  summary(co2_validate %>% filter(source=='GCP') %>%
-            left_join(co2_yearly %>% select(year, fuel, value) %>%
-                        tidyr::spread(fuel, value)) %>%
-            filter(!is.na(oil)) %>%
-            lm(value - oil - coal ~ gas + 0, data=.))
-
-  summary(co2_validate %>% filter(source=='GCP') %>%
-            left_join(co2_yearly %>% select(year, fuel, value) %>%
-                        tidyr::spread(fuel, value)) %>%
-            filter(!is.na(oil)) %>%
-            lm(value - gas - coal ~ oil + 0, data=.))
-
-  summary(co2_validate %>% filter(source=='GCP') %>%
-            left_join(co2_yearly %>% select(year, fuel, value) %>%
-                        tidyr::spread(fuel, value)) %>%
-            filter(!is.na(oil)) %>%
-            lm(value ~ gas + coal + oil + 0, data=.))
+  # summary(co2_validate %>% filter(source=='PIK') %>%
+  #   left_join(co2_yearly %>% select(year, fuel, value) %>%
+  #               tidyr::spread(fuel, value)) %>%
+  #   filter(!is.na(oil)) %>%
+  #   lm(value - oil - gas ~ coal + 0, data=.))
+  #
+  # summary(co2_validate %>% filter(source=='GCP') %>%
+  #           left_join(co2_yearly %>% select(year, fuel, value) %>%
+  #                       tidyr::spread(fuel, value)) %>%
+  #           filter(!is.na(oil)) %>%
+  #           lm(value - oil - coal ~ gas + 0, data=.))
+  #
+  # summary(co2_validate %>% filter(source=='GCP') %>%
+  #           left_join(co2_yearly %>% select(year, fuel, value) %>%
+  #                       tidyr::spread(fuel, value)) %>%
+  #           filter(!is.na(oil)) %>%
+  #           lm(value - gas - coal ~ oil + 0, data=.))
+  #
+  # summary(co2_validate %>% filter(source=='GCP') %>%
+  #           left_join(co2_yearly %>% select(year, fuel, value) %>%
+  #                       tidyr::spread(fuel, value)) %>%
+  #           filter(!is.na(oil)) %>%
+  #           lm(value ~ gas + coal + oil + 0, data=.))
 
 }
 
