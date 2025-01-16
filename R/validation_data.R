@@ -8,6 +8,7 @@ get_validation_data <- function(region="EU", source_name = NULL, ...) {
     "UNFCCC" = load_climatewatch_csv,
     "GCP" = load_climatewatch_csv,
     "PIK" = load_climatewatch_csv,
+    "GCP2" = load_gcb,
 
     # Diagnostic sources
     "Carbon Monitor" = load_carbonmonitor,
@@ -35,6 +36,36 @@ get_validation_data <- function(region="EU", source_name = NULL, ...) {
                                                custom_match = c("EU" = "European Union",
                                                                 "EU28" = "EU28"))) %>%
       filter(is.null(region) | iso2 %in% region)
+}
+
+load_gcb <- function(source_name, region, ...) {
+
+  filepath <- get_data_filepath("GCB2023.csv")
+  gcb <- read_csv(filepath)
+  gcb %>%
+    pivot_longer(-c(Year,Country),
+                 names_prefix='Fuels_',
+                 names_to='fuel'
+                 ) %>%
+    filter(fuel %in% c('Coal', 'Oil', 'Gas')) %>%
+    mutate(iso2 = countrycode(Country, "iso3c", "iso2c", custom_match = c("EU27"="EU")),
+      fuel=tolower(fuel),
+      source='GCB2023',
+      sector=SECTOR_ALL,
+      unit='mt',
+      value = value * 44/12, #C to CO2
+      country=countrycode(iso2, "iso2c", "country.name", custom_match = c("EU"="EU"))
+    ) %>%
+    rename(year=Year) %>%
+    select(-c(Country)) %>%
+    # Add total
+    bind_rows(
+      .,
+      group_by(., iso2, country, year, sector) %>%
+        summarise(value=sum(value),
+                  fuel = FUEL_TOTAL,
+                  .groups="drop")
+    )
 }
 
 # Load Carbon Monitor data
@@ -65,6 +96,7 @@ load_carbonmonitor <- function(source_name, region, ...) {
       unit='mt',
       source=source_name,
       sector=SECTOR_ALL,
+      fuel=FUEL_TOTAL,
       distinct_dates=n_distinct(date)
     ) %>%
     filter(distinct_dates >= 365) %>%
@@ -113,7 +145,8 @@ load_primap <- function(source_name, region, version="2.6", ...) {
     mutate(
       unit = "mt",
       source = source_name,
-      sector = SECTOR_ALL
+      sector = SECTOR_ALL,
+      fuel = FUEL_TOTAL
     )
 }
 
@@ -133,6 +166,7 @@ load_climatewatch_csv <- function(source_name, region, ...) {
     rename(country=`Country/Region`) %>%
     tidyr::gather(key = "year", value = "value", -c(iso2, country, unit)) %>%
     mutate(year = as.numeric(year),
+           fuel = FUEL_TOTAL,
            sector = SECTOR_ALL,
            value = as.numeric(value))
 }
