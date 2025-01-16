@@ -41,13 +41,239 @@ collect_solid <- function(use_cache = FALSE) {
 }
 
 
+
+investigate_solid <- function(monthly, yearly){
+
+
+  NRG_TRANS_ELEC <- "TI_EHG_MAP"
+  NRG_FINAL_INDUSTRY <- "FC_IND"
+  NRG_FINAL_OTHERS <- "FC_OTH"
+  NRG_GID_CALCULATED <- "GID_CAL"
+
+  result_yearly <- yearly %>%
+    filter(nrg_bal %in% c(
+      "Final consumption - energy use",
+      "Transformation input - energy use",
+      "Transformation input - electricity and heat generation - main activity producer combined heat and power - energy use",
+      "Transformation input - electricity and heat generation - main activity producer electricity only - energy use"
+    ) |
+      (nrg_bal == "Final consumption - industry sector - iron and steel" & siec == "Coke oven coke")) %>%
+    mutate(
+      sector = ifelse(grepl("electricity", nrg_bal), SECTOR_ELEC, SECTOR_ALL),
+      fuel = ifelse(siec == "Coke oven coke", FUEL_COKE, FUEL_COAL)
+    )
+
+
+  # result_monthly <- monthly %>%
+  #   filter(
+  #     # (siec=="Hard coal" &nrg_bal_code %in% c(NRG_TRANS_ELEC, NRG_FINAL_INDUSTRY, NRG_FINAL_OTHERS))
+  #     (siec=="Hard coal" &nrg_bal_code %in% c(NRG_GID_CALCULATED, NRG_TRANS_ELEC))
+  #     | (siec=="Coke oven coke" & nrg_bal_code==NRG_GID_CALCULATED)
+  #     | (siec=="Brown coal" & nrg_bal_code %in% c(NRG_GID_CALCULATED, NRG_TRANS_ELEC))
+  #     # nrg_bal_code==NRG_GID_CALCULATED
+  #     ) %>%
+  #   mutate( sector = ifelse(grepl("electricity", nrg_bal), SECTOR_ELEC, SECTOR_ALL))
+  #
+  # # result_monthly <- bind_rows(
+  # #   result_monthly %>% mutate(sector="all"),
+  # #   result_monthly%>% filter(nrg_bal_code==NRG_TRANS_ELEC) %>% mutate(sector="electricity")
+  # # )
+  result_monthly <- process_solid_monthly(monthly, pwr_demand)
+
+  bind_rows(
+    result_yearly %>% mutate(freq="A"),
+    result_monthly %>% mutate(freq="M")
+  ) %>%
+    filter(grepl("Poland", geo)) %>%
+    group_by(geo, time=floor_date(time,"year"), siec, sector, fuel, freq) %>%
+    summarise(values = sum(values, na.rm=T)) %>%
+    ggplot() +
+    geom_line(aes(time, values, color=sector, linetype=freq)) +
+    facet_wrap(~siec)
+
+
+   # Compare sum of countries vs EU
+  result_monthly %>%
+    add_iso2() %>%
+    filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+    mutate(is_eu=case_when(iso2=="EU" ~ "EU", TRUE ~ "EU member states")) %>%
+    group_by(
+      siec,
+      sector,
+      time,
+      is_eu) %>%
+    summarise(value=sum(values, na.rm=T)) %>%
+    ggplot() +
+    geom_line(aes(time, value, color=is_eu, linetype=is_eu)) +
+    facet_wrap(siec~sector, scales="free_y")
+
+
+  # Data availability: hard coal stops very early for EU
+  result_monthly %>%
+    add_iso2() %>%
+    filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+    filter(!is.na(values)) %>%
+    group_by(
+      siec,
+      sector,
+      iso2) %>%
+    summarise(max_date=max(time)) %>%
+    ggplot() +
+    geom_bar(aes(x=max_date, y=iso2, fill=iso2=="EU"), stat='identity') +
+    scale_x_date(limits=c(as.Date("2023-01-01"), NA), oob = scales::squish) +
+    facet_wrap(~siec+sector)
+
+  # Slovenia is blocking hard coal: can safely be replaced with 0
+  # and consider EU is sum of all countries
+  # as the power is closely matching
+  bind_rows(
+    pwr_demand %>%
+      filter(source=="Coal", iso2=="SI") %>%
+      group_by(time=floor_date(date, "month"), type="coal power") %>%
+      summarise(values=sum(value_mwh, na.rm=T)),
+    result_monthly %>%
+      add_iso2() %>%
+      filter(iso2=="SI", sector==SECTOR_ELEC) %>%
+      group_by(time, type="solid fuel") %>%
+      summarise(values=sum(values, na.rm=T))
+  ) %>%
+    group_by(type) %>%
+    mutate(values=values/values[time=="2020-01-01"]) %>%
+    ggplot() +
+    geom_line(aes(time, values, color=type))
+    # facet_wrap(~type, scales='free_y')
+}
+
 process_solid_monthly <- function(x, pwr_demand) {
+
+
+  # This one is a bit tricky: for certain months/regions,
+  # EUROSTAT has gross inland deliveries data but no transformation/consumption data
+  # We should make sure to filter out these months so that it's not considered months without coal
+  # consumption
+  NRG_TRANS_ELEC <- "TI_EHG_MAP"
+  NRG_GID_CALCULATED <- "GID_CAL"
+
+  by_sector <- x %>%
+    filter(nrg_bal_code %in% c(NRG_GID_CALCULATED, NRG_TRANS_ELEC)) %>%
+    mutate(sector = if_else(grepl("electricity", nrg_bal), SECTOR_ELEC, SECTOR_ALL)) %>%
+    # Date valid only from 2014
+    filter(time >= "2014-01-01")
+
+
+  #############################
+  # Apply manual fixes
+  #############################
+  # Greece has started declaring 0 brown coal values for elec starting from 2015-09-01,
+  # but apparently 100% of brown coal was used for elec before that
+  by_sector_fixed <-
+    bind_rows(
+      by_sector %>%
+        filter(!(geo == "Greece" & siec == "Brown coal" & time >= "2015-09-01" & sector == SECTOR_ELEC)),
+      gross_inland_deliv %>%
+        filter((geo == "Greece" & siec == "Brown coal" & time >= "2015-09-01")) %>%
+        mutate(sector = SECTOR_ELEC) %>%
+        rename(values = value_siec_gid)
+    )
+
+  # Add the difference to EU
+  to_add_to_eu <-  gross_inland_deliv %>%
+    filter((geo == "Greece" & siec == "Brown coal" & time >= "2015-09-01")) %>%
+    mutate(sector = SECTOR_ELEC) %>%
+    rename(values = value_siec_gid) %>%
+    mutate(geo = unique(grep("European Union", by_sector$geo, value=T))) %>%
+    select(geo, time, siec, sector, value_to_add=values)
+
+  by_sector_fixed <- by_sector_fixed %>%
+    left_join(to_add_to_eu) %>%
+    mutate(values = ifelse(is.na(value_to_add), values, values + value_to_add)) %>%
+    select(-value_to_add)
+
+
+  stopifnot(nrow(by_sector) == nrow(by_sector_fixed))
+
+  #########################
+  # Fill hard coal electricity
+  # Slovenia stopped declaring hard coal elec since 2023-12-01
+  # yet it seems to be 0 (see investigate function above)
+  # As a result, EU has no data either since that date
+  # We rebuild EU Hard coal elec as the sum of all countries (when there are enough that is)
+  ##########################
+  # max_date_before <- by_sector_fixed %>%
+  #   filter(sector == SECTOR_ELEC, siec == "Hard coal", grepl("European", geo)) %>%
+  #   summarise(max_date=max(time)) %>%
+  #   pull(max_date)
+  # message(glue("[BEFORE] EU last hard coal elec: {max_date_before}"))
+
+  by_sector_fixed <- by_sector_fixed %>%
+    tidyr::complete(geo="Slovenia",
+                    time,
+                    siec="Hard coal",
+                    unit,
+                    sector="electricity",
+                    fill=list(values=0))
+
+  hard_coal_elec_eu_from_countries <- by_sector_fixed %>%
+    filter(
+      sector == SECTOR_ELEC,
+      siec == "Hard coal",
+    ) %>%
+    add_iso2() %>%
+    filter(iso2 %in% get_eu_iso2s(include_eu = F)) %>%
+    group_by(sector, siec, time, unit) %>%
+    summarise(values_sum_countries=sum(values, na.rm=T),
+              n=n()) %>%
+    filter(n==27)
+
+  hard_coal_elec_eu <- by_sector_fixed  %>%
+    filter(grepl("European", geo),
+           sector == SECTOR_ELEC,
+           siec == "Hard coal") %>%
+    tidyr::complete(geo, sector, siec, time=hard_coal_elec_eu_from_countries$time, unit) %>%
+    left_join(hard_coal_elec_eu_from_countries) %>%
+    {
+      # Check that when both values exist they're similar
+      comparison <- filter(., !is.na(values), !is.na(values_sum_countries))
+      stopifnot(all(abs(comparison$values - comparison$values_sum_countries) < 1))
+      .
+    } %>%
+    mutate(values = coalesce(values, values_sum_countries))
+
+
+    # Replace
+  by_sector_fixed <- bind_rows(
+    by_sector_fixed %>% filter(!(grepl("European", geo) & siec == "Hard coal" & sector == SECTOR_ELEC)),
+    hard_coal_elec_eu
+  ) %>%
+    mutate(fuel = ifelse(siec == "Coke oven coke", FUEL_COKE, FUEL_COAL))
+
+  # max_date_after <- by_sector_fixed %>%
+  #   filter(sector == SECTOR_ELEC, siec == "Hard coal", grepl("European", geo)) %>%
+  #   summarise(max_date=max(time)) %>%
+  #   pull(max_date)
+  # message(glue("[AFTER] EU last hard coal elec: {max_date_after}"))
+
+    return(by_sector_fixed)
+
+}
+
+
+process_solid_monthly_old <- function(x, pwr_demand) {
 
 
     # This one is a bit tricky: for certain months/regions,
     # EUROSTAT has gross inland deliveries data but no transformation/consumption data
     # We should make sure to filter out these months so that it's not considered months without coal
     # consumption
+
+  x %>%
+    distinct(nrg_bal_code, nrg_bal)
+
+    NRG_TRANS_ELEC <- "TI_EHG_MAP"
+    # NRG_FINAL_INDUSTRY <- "FC_IND"
+    # NRG_FINAL_OTHERS <- "FC_OTH"
+    NRG_GID_CALCULATED <- "GID_CAL"
+
     by_sector <- x %>%
         filter(
             (grepl("Transformation input|Final consumption.*(industry sector$|other sectors$)", nrg_bal)) |
@@ -221,35 +447,35 @@ process_solid_monthly <- function(x, pwr_demand) {
         total
     )
 
-    # # Debug plot
-    # plt_data <- result %>%
-    #   add_iso2() %>%
-    #   filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
-    #   {
-    #     n_countries <- n_distinct(.$iso2)
-    #     print(n_countries)
-    #     stopifnot('Expected 27 EU countries + EU'= n_countries == 28)
-    #     .
-    #   } %>%
-    #   mutate(is_eu=case_when(iso2=="EU" ~ "EU", TRUE ~ "EU member states")) %>%
-    #   filter(time < "2025-01-01") %>%
-    #   filter(time >= "2015-01-01") %>%
-    #   group_by(
-    #     siec,
-    #     sector,
-    #     time,
-    #     is_eu) %>%
-    #   summarise(value=sum(values, na.rm=T)) %>%
-    #   arrange(desc(time))
-    #
-    # plt_data %>%
-    #   ggplot() +
-    #   geom_line(aes(time, value, color=is_eu, linetype=is_eu)) +
-    #   facet_wrap(siec~sector, scales="free_y") +
-    #   theme_minimal() +
-    #   theme(
-    #     legend.position = "none"
-    #   )
+    # Debug plot
+    plt_data <- result %>%
+      add_iso2() %>%
+      filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+      {
+        n_countries <- n_distinct(.$iso2)
+        print(n_countries)
+        stopifnot('Expected 27 EU countries + EU'= n_countries == 28)
+        .
+      } %>%
+      mutate(is_eu=case_when(iso2=="EU" ~ "EU", TRUE ~ "EU member states")) %>%
+      filter(time < "2025-01-01") %>%
+      filter(time >= "2015-01-01") %>%
+      group_by(
+        siec,
+        sector,
+        time,
+        is_eu) %>%
+      summarise(value=sum(values, na.rm=T)) %>%
+      arrange(desc(time))
+
+    plt_data %>%
+      ggplot() +
+      geom_line(aes(time, value, color=is_eu, linetype=is_eu)) +
+      facet_wrap(siec~sector, scales="free_y") +
+      theme_minimal() +
+      theme(
+        legend.position = "none"
+      )
 
     return(result)
 }
