@@ -177,7 +177,6 @@ project_until_now_elec <- function(co2, pwr_demand, dts_month, last_years=5, min
 project_until_now_gas <- function(co2, gas_demand, dts_month, last_years=5, min_r2=0.85){
 
   proxy <- gas_demand %>%
-    rename(iso2=region_id) %>%
     filter(iso2 %in% co2$iso2) %>%
     ungroup() %>%
     filter(unit=='m3') %>%
@@ -221,8 +220,6 @@ project_until_now_coal_others <- function(co2, eurostat_indprod, dts_month, last
       fuel='coal',
       sector=SECTOR_OTHERS
     )
-
-
 
 
   #TODO
