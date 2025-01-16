@@ -45,40 +45,8 @@ collect_solid <- function(use_cache = FALSE) {
 investigate_solid <- function(monthly, yearly){
 
 
-  NRG_TRANS_ELEC <- "TI_EHG_MAP"
-  NRG_FINAL_INDUSTRY <- "FC_IND"
-  NRG_FINAL_OTHERS <- "FC_OTH"
-  NRG_GID_CALCULATED <- "GID_CAL"
-
-  result_yearly <- yearly %>%
-    filter(nrg_bal %in% c(
-      "Final consumption - energy use",
-      "Transformation input - energy use",
-      "Transformation input - electricity and heat generation - main activity producer combined heat and power - energy use",
-      "Transformation input - electricity and heat generation - main activity producer electricity only - energy use"
-    ) |
-      (nrg_bal == "Final consumption - industry sector - iron and steel" & siec == "Coke oven coke")) %>%
-    mutate(
-      sector = ifelse(grepl("electricity", nrg_bal), SECTOR_ELEC, SECTOR_ALL),
-      fuel = ifelse(siec == "Coke oven coke", FUEL_COKE, FUEL_COAL)
-    )
-
-
-  # result_monthly <- monthly %>%
-  #   filter(
-  #     # (siec=="Hard coal" &nrg_bal_code %in% c(NRG_TRANS_ELEC, NRG_FINAL_INDUSTRY, NRG_FINAL_OTHERS))
-  #     (siec=="Hard coal" &nrg_bal_code %in% c(NRG_GID_CALCULATED, NRG_TRANS_ELEC))
-  #     | (siec=="Coke oven coke" & nrg_bal_code==NRG_GID_CALCULATED)
-  #     | (siec=="Brown coal" & nrg_bal_code %in% c(NRG_GID_CALCULATED, NRG_TRANS_ELEC))
-  #     # nrg_bal_code==NRG_GID_CALCULATED
-  #     ) %>%
-  #   mutate( sector = ifelse(grepl("electricity", nrg_bal), SECTOR_ELEC, SECTOR_ALL))
-  #
-  # # result_monthly <- bind_rows(
-  # #   result_monthly %>% mutate(sector="all"),
-  # #   result_monthly%>% filter(nrg_bal_code==NRG_TRANS_ELEC) %>% mutate(sector="electricity")
-  # # )
   result_monthly <- process_solid_monthly(monthly, pwr_demand)
+  result_yearly <- process_solid_yearly(yearly)
 
   bind_rows(
     result_yearly %>% mutate(freq="A"),
@@ -144,6 +112,7 @@ investigate_solid <- function(monthly, yearly){
     # facet_wrap(~type, scales='free_y')
 }
 
+
 process_solid_monthly <- function(x, pwr_demand) {
 
 
@@ -153,9 +122,10 @@ process_solid_monthly <- function(x, pwr_demand) {
   # consumption
   NRG_TRANS_ELEC <- "TI_EHG_MAP"
   NRG_GID_CALCULATED <- "GID_CAL"
+  NRG_TRANS_COKING <- "TI_CO"
 
   by_sector <- x %>%
-    filter(nrg_bal_code %in% c(NRG_GID_CALCULATED, NRG_TRANS_ELEC)) %>%
+    filter(nrg_bal_code %in% c(NRG_GID_CALCULATED, NRG_TRANS_ELEC, NRG_TRANS_COKING)) %>%
     mutate(sector = if_else(grepl("electricity", nrg_bal), SECTOR_ELEC, SECTOR_ALL)) %>%
     # Date valid only from 2014
     filter(time >= "2014-01-01")
@@ -237,20 +207,22 @@ process_solid_monthly <- function(x, pwr_demand) {
     mutate(values = coalesce(values, values_sum_countries))
 
 
-    # Replace
+   # Replace
   by_sector_fixed <- bind_rows(
     by_sector_fixed %>% filter(!(grepl("European", geo) & siec == "Hard coal" & sector == SECTOR_ELEC)),
     hard_coal_elec_eu
   ) %>%
     mutate(fuel = ifelse(siec == "Coke oven coke", FUEL_COKE, FUEL_COAL))
 
-  # max_date_after <- by_sector_fixed %>%
-  #   filter(sector == SECTOR_ELEC, siec == "Hard coal", grepl("European", geo)) %>%
-  #   summarise(max_date=max(time)) %>%
-  #   pull(max_date)
-  # message(glue("[AFTER] EU last hard coal elec: {max_date_after}"))
 
-    return(by_sector_fixed)
+  # Remove part of the coal that is used to produced coke to avoid double counting
+  result <- by_sector_fixed %>%
+    mutate(factor = case_when( nrg_bal_code == NRG_TRANS_COKING ~ -1,
+                               TRUE ~ 1)) %>%
+    group_by(geo, time, siec, sector, fuel, unit) %>%
+    summarise(values = sum(values * factor, na.rm = T))
+
+  return(result)
 
 }
 
@@ -479,18 +451,32 @@ process_solid_monthly <- function(x, pwr_demand) {
 
 process_solid_yearly <- function(x) {
 
+
+  NRG_FINAL_ENERGY <- "FC_E"
+  NRG_TRANS_ENERGY <- "TI_E"
+  NRG_ELEC_CHP <- "TI_EHG_MAPCHP_E"
+  NRG_ELEC_ONLY <- "TI_EHG_MAPE_E"
+  NRG_TRANS_COKING <- "TI_CO_E"
+  NRG_FINAL_IRON_STEEL <- "FC_IND"
+
   result <- x %>%
-        filter(nrg_bal %in% c(
-          "Final consumption - energy use",
-          "Transformation input - energy use",
-          "Transformation input - electricity and heat generation - main activity producer combined heat and power - energy use",
-          "Transformation input - electricity and heat generation - main activity producer electricity only - energy use"
-        ) |
-            (nrg_bal == "Final consumption - industry sector - iron and steel" & siec == "Coke oven coke")) %>%
+        filter(nrg_bal_code %in% c(NRG_FINAL_ENERGY,
+                              NRG_TRANS_ENERGY,
+                              NRG_ELEC_CHP,
+                              NRG_ELEC_ONLY,
+                              NRG_TRANS_COKING) |
+            (nrg_bal_code == NRG_FINAL_IRON_STEEL & siec == "Coke oven coke")) %>%
         mutate(
             sector = ifelse(grepl("electricity", nrg_bal), SECTOR_ELEC, SECTOR_ALL),
             fuel = ifelse(siec == "Coke oven coke", FUEL_COKE, FUEL_COAL)
-        )
+        ) %>%
+    # Remove coal used to produce coke to avoid double counting
+    mutate(factor = case_when(
+      nrg_bal_code == NRG_TRANS_COKING ~ -1,
+      TRUE ~ 1)
+      ) %>%
+    group_by(geo, time, siec, sector, fuel, unit) %>%
+    summarise(values = sum(values * factor, na.rm = T), .groups = "drop")
 
   # # Debug plot
   # plt_data <- result %>%
