@@ -1,9 +1,9 @@
-get_eu_iso2s <- function(eurostat=F, include_EU=F){
+get_eu_iso2s <- function(eurostat=F, include_eu=F){
   cl <- countrycode::codelist
   iso2s <- cl$iso2c[which(cl$eu28=="EU" & cl$iso2c != "GB")]
   if(eurostat) iso2s[iso2s=="GR"]="EL"
 
-  if(include_EU) iso2s <- c(iso2s, "EU")
+  if(include_eu) iso2s <- c(iso2s, "EU")
   iso2s
 }
 
