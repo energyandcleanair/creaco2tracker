@@ -31,7 +31,8 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
   eurostat_indprod <- get_eurostat_indprod(use_cache = use_cache)
 
   # Quick sanity checks
-  diagnostic_pwr(pwr_demand, diagnostics_folder = diagnostics_folder)
+  diagnostic_pwr(pwr_demand,
+                 diagnostics_folder = file.path(diagnostics_folder, "pwr"))
   diagnostic_eurostat_cons(eurostat_cons,
                            iso2s=iso2s,
                            diagnostics_folder = file.path(diagnostics_folder, 'eurostat_cons'))

@@ -148,6 +148,7 @@ combine_coke_coal <- function(co2){
 format_co2_for_db <- function(co2_daily, cut_tail_days=3){
 
   co2_daily %>%
+    ungroup() %>%
     # Combine coal and coke
     combine_coke_coal() %>%
     mutate(across(c(fuel, sector), stringr::str_to_title),

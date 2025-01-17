@@ -167,11 +167,11 @@ process_oil_yearly <- function(x) {
 #' @export
 #'
 #' @examples
-add_oil_transport <- function(cons_monthly_raw_oil, cons_yearly_raw_oil) {
+add_oil_transport <- function(cons_monthly_raw, cons_yearly_raw) {
 
 
   # Get share of diesel and gasoline used in transportation
-  shares <- cons_yearly_raw_oil %>%
+  shares <- cons_yearly_raw %>%
     filter(time >= "1990-01-01") %>%
     filter(siec %in% c("Motor gasoline",
                        "Road diesel"
@@ -190,21 +190,28 @@ add_oil_transport <- function(cons_monthly_raw_oil, cons_yearly_raw_oil) {
     facet_wrap(~geo)
 
   # Project til now
-  years <- unique(year(cons_monthly_raw_oil$time))
+  years <- unique(year(cons_monthly_raw$time))
   shares_filled <- shares %>%
     tidyr::complete(year = years, geo, siec) %>%
     group_by(geo, siec) %>%
     arrange(year) %>%
-    tidyr::fill(share_transport) %>%
+    tidyr::fill(share_transport,
+                .direction = c("updown")
+                ) %>%
     ungroup()
+
 
   # Fill missing with average
-  shares_filled <- shares_filled %>%
-    group_by(siec, year) %>%
-    mutate(share_transport = ifelse(is.na(share_transport), mean(share_transport, na.rm=T), share_transport)) %>%
-    ungroup()
+  # shares_filled <- shares_filled %>%
+  #   group_by(siec, year) %>%
+  #   mutate(share_transport = ifelse(is.na(share_transport), mean(share_transport, na.rm=T), share_transport)) %>%
+  #   ungroup()
 
-  cons_monthly_raw_oil_transport <- cons_monthly_raw_oil %>%
+  ggplot(shares_filled) +
+    geom_line(aes(year, share_transport, col = siec)) +
+    facet_wrap(~geo)
+
+  cons_monthly_raw_transport <- cons_monthly_raw %>%
     filter(nrg_bal %in% c("Gross inland deliveries - observed")) %>%
     mutate(year = year(time)) %>%
     inner_join(shares_filled) %>%
@@ -216,8 +223,8 @@ add_oil_transport <- function(cons_monthly_raw_oil, cons_yearly_raw_oil) {
     select(-c(share_transport, year))
 
   return(bind_rows(
-    cons_monthly_raw_oil,
-    cons_monthly_raw_oil_transport
+    cons_monthly_raw,
+    cons_monthly_raw_transport
   ))
 }
 
