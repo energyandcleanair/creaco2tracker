@@ -5,7 +5,8 @@ diagnostic_pwr <- function(pwr_demand, diagnostics_folder="diagnostics"){
     dir.create(diagnostics_folder, showWarnings = FALSE)
 
     #add rolling mean
-    pwr_demand <- pwr_demand %>%
+    plt_data <- pwr_demand %>%
+      filter(iso2=="EU") %>%
       group_by(region, country, source) %>%
       arrange(date) %>%
       mutate(plotdate = date %>% 'year<-'(2022),
@@ -13,29 +14,35 @@ diagnostic_pwr <- function(pwr_demand, diagnostics_folder="diagnostics"){
              output_mw_rollmean=zoo::rollapplyr(value_mw, 7, mean, fill=NA))
 
     #output range of values for several years
-    pwr_ranges <- pwr_demand %>% filter(year %in% 2015:2021) %>%
+    plt_range <- plt_data %>% filter(year %in% 2015:2022) %>%
       group_by(region, country, source, plotdate) %>%
       summarise(min=min(output_mw_rollmean), max=max(output_mw_rollmean),
                 .groups="drop")
 
-    plt <- pwr_demand %>%
-      filter(date<max(date)-3, year %in% 2021:2022, country=='EU total') %>%
+    plt <- plt_data %>%
+      filter(date<max(date)-3, year %in% 2023:2024, country=='EU total') %>%
       group_by(country) %>%
       filter(mean(value_mw, na.rm=T)>1e3) %>%
       ggplot(aes(plotdate)) +
       facet_wrap(~source, scales='free_y') +
-      geom_ribbon(data=pwr_ranges %>% filter(country=='EU total'),
-                  aes(ymin=min/1000, ymax=max/1000), fill=crea_palettes$CREA[2]) +
-      geom_line(aes(y=output_mw_rollmean/1000, col=as.factor(year)), linewidth=1) +
+      geom_ribbon(data=plt_range %>% filter(country=='EU total'),
+                  aes(ymin=min/1000, ymax=max/1000), fill=crea_palettes$CREA[2],
+                  alpha=0.5) +
+      geom_line(aes(y=output_mw_rollmean/1000, col=as.factor(year)), linewidth=0.5) +
       expand_limits(y=0) +
       # scale_x_datetime(date_labels = '%b') +
-      labs(title='EU power generation by source', y='GW, 7-day mean', x='', col='', fill='') +
-      rcrea::theme_crea(legend.position='top') +
+      labs(title='EU power generation by source',
+           subtitle='GW, 7-day mean',
+           y='',
+           x='', col='', fill='') +
+      rcrea::theme_crea_new() +
       rcrea::scale_color_crea_d('dramatic', guide=guide_legend(nrow = 1)) +
       rcrea::scale_fill_crea_d(col.index = 2)
 
+    plt
+
     ggsave(file.path(diagnostics_folder, 'EU power generation by source.png'),
-           width=8, height=6, bg='white', plot=plt)
+           width=10, height=8, bg='white', plot=plt)
   }
 }
 
