@@ -18,7 +18,7 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
     mutate(value_TWh = value / 55 / 3.6 / 1000) %>%
     select(date, value_TWh)
 
-  # gas_demand2 <- download_gas_demand(region_id='EU') %>%
+  # gas_demand2 <- download_gas_demand(iso2='EU') %>%
   #   mutate(value_TWh=value*gcv_kwh_m3/1e9)
   #
   #

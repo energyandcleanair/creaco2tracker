@@ -19,11 +19,11 @@
 ##
 ## ---------------------------
 
-get_gas_demand <- function(diagnostics_folder='diagnostics', verbose=F){
+get_gas_demand <- function(diagnostics_folder='diagnostics/gas_demand', verbose=F){
 
   years <- seq(2018, lubridate::year(lubridate::today()))
 
-  if(!is.null(diagnostics_folder)) dir.create(diagnostics_folder, showWarnings = F)
+  if(!is.null(diagnostics_folder)) dir.create(diagnostics_folder, F, T)
 
   # Estimate with two different methods
   message('Getting gas demand from Consumption + Distribution ENTSOG points')
