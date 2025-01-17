@@ -4,7 +4,7 @@ update_gas_demand <- function(production, diagnostics_folder){
 }
 
 update_co2_daily <- function(production, diagnostics_folder){
-  co2_daily <- get_co2_daily(diagnostics_folder=diagnostics_folder)
+  co2_daily <- get_co2_daily(diagnostics_folder=diagnostics_folder, iso2s="EU")
   upload_co2_daily(co2_daily, production=production)
 }
 
