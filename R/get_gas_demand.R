@@ -19,7 +19,7 @@
 ##
 ## ---------------------------
 
-get_gas_demand <- function(diagnostics_folder='diagnostics', verbose=F){
+get_gas_demand <- function(diagnostics_folder='diagnostics/gas_demand', verbose=F){
 
   years <- seq(2018, lubridate::year(lubridate::today()))
 

@@ -43,22 +43,28 @@ diagnostic_pwr <- function(pwr_demand, diagnostics_folder="diagnostics"){
 diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, cons_combined, diagnostics_folder="diagnostics"){
 
   if(!is.null(diagnostics_folder)){
-    (plt <- bind_rows(
+    plt <- bind_rows(
       cons_yearly %>% mutate(source='yearly'),
       cons_monthly %>% mutate(source='monthly')) %>%
-
-        filter(grepl('27', geo, T)) %>%
+        add_iso2() %>%
+        # filter(grepl('27', geo, T)) %>%
         recode_siec() %>%
         filter(siec %in% .[.$source=='monthly',]$siec) %>%
-        group_by(year=lubridate::year(time), siec, source, fuel, sector) %>%
+        group_by(iso2, year=lubridate::year(time), siec, source, fuel, sector) %>%
         summarise(values=sum(values)) %>%
-        ggplot(aes(year, values, col=siec, linetype=source)) +
+        ggplot(aes(year, values, col=sector, linetype=source)) +
         geom_line() +
-        facet_grid(fuel~sector, scales='free_y') +
+        facet_grid(iso2_to_name(iso2) ~ siec, scales='free') +
         theme(legend.position = 'bottom') +
-        rcrea::scale_y_crea_zero())
+        rcrea::scale_y_crea_zero()
 
-    ggsave(file.path(diagnostics_folder,'eurostat_annual_vs_monthly_yearly.png'), plot=plt, width=12, height=6, bg='white')
+    ggsave(file.path(diagnostics_folder,'eurostat_annual_vs_monthly_yearly.png'),
+           plot=plt,
+           width=12,
+           height=18,
+           bg='white',
+           scale=1.5
+           )
 
     (plt <- cons_combined %>%
       filter(grepl('European union', geo, T)) %>%
@@ -162,16 +168,9 @@ diagnose_eu_vs_countries <- function(co2_filled,
   if(!is.null(diagnostics_folder)){
     dir.create(diagnostics_folder, showWarnings = FALSE)
 
-
     # Power demand --------------------------------------------------
     plt_data <- pwr_demand %>%
       filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
-      # {
-      #   n_countries <- n_distinct(.$iso2)
-      #   print(n_countries)
-      #   stopifnot('Expected 27 EU countries + EU'= n_countries == 28)
-      #   .
-      # } %>%
       mutate(is_eu=case_when(iso2=="EU" ~ "EU", TRUE ~ "EU member states")) %>%
       filter(date < "2025-01-01") %>%
       filter(date >= "2015-01-01") %>%
@@ -212,11 +211,10 @@ diagnose_eu_vs_countries <- function(co2_filled,
         subtitle='Gap is theoretically NOT OK',
         y='TWh per year',
         x=''
-      )
-
+      ) -> plt
     quicksave(file.path(diagnostics_folder, 'eu_vs_countries_power.png'),
               plot=plt,
-              width=10, height=8, bg='white', scale=1.5)
+              width=10, height=8, bg='white', scale=1.5, preview=F)
 
 
 
@@ -271,10 +269,10 @@ diagnose_eu_vs_countries <- function(co2_filled,
       ) +
       rcrea::scale_y_crea_zero() -> plt
 
-    plt
+
     quicksave(file.path(diagnostics_folder, 'eu_vs_countries_eurostat.png'),
               plot=plt,
-              width=10, height=8, bg='white', scale=1.5)
+              width=10, height=8, bg='white', scale=1.5, preview=F)
 
 
     # CO2 (total and number of points) ---------------------------------------------------
@@ -290,7 +288,7 @@ diagnose_eu_vs_countries <- function(co2_filled,
       } %>%
       mutate(is_eu=case_when(iso2=="EU" ~ "EU", TRUE ~ "EU member states")) %>%
       filter(date < "2025-01-01") %>%
-      filter(date >= "2015-01-01") %>%
+      filter(date >= "2010-01-01") %>%
       group_by(
         fuel,
         sector,
@@ -341,10 +339,10 @@ diagnose_eu_vs_countries <- function(co2_filled,
         x=''
       ) -> plt
 
-    plt
-    quicksave(file.path(diagnostics_folder, 'eu_vs_countries_co2.png'),
+     plt
+     quicksave(file.path(diagnostics_folder, 'eu_vs_countries_co2.png'),
               plot=plt,
-           width=10, height=8, bg='white', scale=1.5)
+           width=10, height=8, bg='white', scale=1.5, preview=F)
 
   }
 }

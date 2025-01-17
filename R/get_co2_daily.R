@@ -16,6 +16,11 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
                           min_year = NULL
                           ){
 
+  # Create diagnostics folder if not exists
+  if(!is.null(diagnostics_folder)){
+    dir.create(diagnostics_folder, F, T)
+  }
+
   # Collect necessary data
   gas_demand <- download_gas_demand(iso2=NULL, use_cache = use_cache)
   pwr_demand <- download_pwr_demand(use_cache = use_cache)
@@ -43,10 +48,10 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
                                   eurostat_indprod=eurostat_indprod)
 
 
-  diagnose_eu_vs_countries(co2_filled,
-                           co2,
-                           eurostat_cons,
-                           diagnostics_folder = diagnostics_folder)
+  diagnose_eu_vs_countries(co2_filled = co2_filled,
+                           pwr_demand = pwr_demand,
+                           eurostat_cons = eurostat_cons,
+                           diagnostics_folder = file.path(diagnostics_folder, 'eu_vs_countries'))
 
   # Filter regions
   # Note: this need to be done after co2 estimates,

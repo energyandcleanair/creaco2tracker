@@ -40,7 +40,7 @@ get_eurostat_cons <- function(
     # Process data
   cons_monthly <- list(
     oil = process_oil_monthly(cons_raw_oil$monthly),
-    solid = process_solid_monthly(cons_raw_solid$monthly, pwr_demand=pwr_demand),
+    solid = process_solid_monthly(cons_raw_solid$monthly, pwr_demand=pwr_demand)%>% split_elec_others(),
     gas = process_gas_monthly(cons_raw_gas$monthly, pwr_demand=pwr_demand) %>% split_elec_others()
   ) %>%
     bind_rows() %>%
@@ -99,7 +99,7 @@ get_eurostat_cons <- function(
   # unless specified otherwise after looking at diagnostic charts
   cutoff_monthly <- tibble(
     fuel=c("gas", "coke"),
-    sector=c("others", "others"),
+    # sector=c("others", "others"),
     cutoff_date=c("2020-01-01", "2019-01-01"),
     source="monthly"
   )
@@ -111,7 +111,7 @@ get_eurostat_cons <- function(
     # Cut off monthly that didn't look good on charts
     left_join(cutoff_monthly) %>%
     filter(
-      is.na(cutoff_date) |time >= cutoff_date
+      is.na(cutoff_date) | time >= cutoff_date
     ) %>%
     select(-c(cutoff_date)) %>%
     group_by(geo, sector, time, unit, siec, fuel) %>%

@@ -46,7 +46,7 @@ download_gas_demand <- function(iso2=NULL,
 
 }
 
-download_pwr_demand <- function(date_from="2015-01-01", region="EU", use_cache=T, refresh_cache=T, use_local=F) {
+download_pwr_demand <- function(date_from="2015-01-01", region="EU", use_cache=T, refresh_cache=!use_cache, use_local=F) {
 
   base_url <- ifelse(use_local, "http://localhost:8080", "https://api.energyandcleanair.org")
   pwr <- creahelpers::api.get(glue('{base_url}/power/generation'),

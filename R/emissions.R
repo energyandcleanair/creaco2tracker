@@ -1,4 +1,10 @@
-get_co2_from_eurostat_cons <- function(eurostat_cons, diagnostics_folder="diagnostics"){
+get_co2_from_eurostat_cons <- function(eurostat_cons, diagnostics_folder="diagnostics", keep_siec=F){
+
+  group_by_cols <- c("iso2", "geo", "date"="time", "fuel", "sector", "unit")
+  if(keep_siec){
+    group_by_cols <- c(group_by_cols, "siec")
+  }
+
   eurostat_cons %>%
     add_ncv(diagnostics_folder = diagnostics_folder) %>%
     add_emission_factor() %>%
@@ -6,11 +12,12 @@ get_co2_from_eurostat_cons <- function(eurostat_cons, diagnostics_folder="diagno
              case_when(unit=='Thousand tonnes' ~ values * ncv_kjkg / 1000 * co2_factor_t_per_TJ,
                        unit=='Terajoule (gross calorific value - GCV)' & siec == "Natural gas" ~ values * ncv_gcv_gas * co2_factor_t_per_TJ
              )) %>%
-    group_by(iso2, geo, date=time, fuel, sector) %>%
-    summarise(value = sum(value_co2_tonne),
+    group_by_at(group_by_cols) %>%
+    summarise(value = sum(value_co2_tonne, na.rm=T),
               unit='t',
               .groups="drop"
-    )
+    ) %>%
+    ungroup()
 }
 
 
@@ -28,6 +35,7 @@ add_ncv <- function(x, diagnostics_folder=NULL){
       mutate(siec = case_when(
         grepl("anthracite", product, ignore.case = TRUE) ~ "Hard coal",
         grepl("lignite", product, ignore.case = TRUE) ~ "Brown coal",
+        grepl("BKB", product, ignore.case = TRUE) ~ "Brown coal briquettes",
         grepl("peat and peat products", product, ignore.case = TRUE) ~ "Peat",
         grepl("oil shale and oil sands", product, ignore.case = TRUE) ~ "Oil shale",
         # grepl("gas/diesel oil excl. biofuels|motor gasoline excl. biofuels", product, ignore.case = TRUE) ~ "Oil products",
@@ -37,6 +45,7 @@ add_ncv <- function(x, diagnostics_folder=NULL){
         # Oil products both used as Oil products in SECTOR_ALL and more granularily in transport
         grepl("Gas/diesel oil", product, ignore.case = TRUE) ~ paste(c("Oil products", "Road diesel"), collapse=separator),
         grepl("Motor gasoline", product, ignore.case = TRUE) ~ paste(c("Oil products", "Motor gasoline"), collapse=separator),
+        grepl("^Fuel oil$", product, ignore.case = TRUE) ~ paste(c("Fuel oil", "Heating and other gasoil"), collapse=separator),
         TRUE ~ NA_character_
       )) %>%
       filter(!is.na(siec)) %>%
@@ -138,14 +147,17 @@ add_ncv <- function(x, diagnostics_folder=NULL){
 }
 
 add_emission_factor <- function(x){
-
+  # Taken from https://www.ipcc-nggip.iges.or.jp/EFDB/find_ef.php
   x %>%
     mutate(co2_factor_t_per_TJ = case_when(
       siec=='Hard coal'~92.8, #EFID=110620
       siec=='Brown coal'~113.1, #EFID=123085
+      siec=="Brown coal briquettes"~99, #EFID=123073
       siec=='Peat'~117.766, #EFID=122005
       grepl('Oil shale', siec)~108,
       grepl('Oil products', siec)~72.3, #EFID=113617
+      grepl('Fuel oil', siec)~77.7, #EFID=121579
+      grepl('Heating and other gasoil', siec)~77.7, #EFID=121579
       grepl('Motor gasoline', siec)~72.1 	, #EFID=18667
       grepl('Road diesel', siec)~72.1, #EFID=18919
       grepl('Crude oil', siec)~73, #EFID=110603

@@ -16,6 +16,9 @@ collect_gas <- function(use_cache = FALSE) {
     "IC_OBS", # Inland consumption - observed
     "FC_NE", # Final consumption - non-energy use
     "TI_EHG_MAPE_E", # Transformation input - electricity and heat generation - main activity producers
+    # Monthly data doesn't have distinction between elec and heat only. We then include it to ensuire continuity
+    # even though this is technically innacurate
+    "TI_EHG_MAPH_E", # Transformation input - electricity and heat generation - HEAT ONLY
     "TI_EHG_MAPCHP_E" # Transformation input - electricity and heat generation - main activity producer combined heat and power - energy use
   )
 
@@ -156,9 +159,8 @@ add_gas_non_energy <- function(cons_monthly_raw, cons_yearly_raw) {
     mutate(share_non_energy = tidyr::replace_na(FC_NE / IC_OBS, 0)) %>%
     select(-c(FC_NE, IC_OBS))
 
-
   shares %>%
-    filter(geo=="Spain") %>%
+    filter(geo=="Belgium") %>%
     ggplot(aes(year, share_non_energy)) +
     geom_line()+
     rcrea::scale_y_crea_zero()
@@ -171,12 +173,6 @@ add_gas_non_energy <- function(cons_monthly_raw, cons_yearly_raw) {
     arrange(year) %>%
     tidyr::fill(share_non_energy) %>%
     ungroup()
-
-  shares_filled %>%
-    filter(geo=="Spain") %>%
-    ggplot(aes(year, share_non_energy)) +
-    geom_line()+
-    rcrea::scale_y_crea_zero()
 
 
   cons_monthly_raw_non_energy <- cons_monthly_raw %>%
