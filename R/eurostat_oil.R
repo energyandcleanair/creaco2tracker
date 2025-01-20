@@ -35,8 +35,8 @@ collect_oil <- function(use_cache = FALSE) {
 
   # Add Oil transport
   cons_monthly_raw <- add_oil_transport(
-    cons_monthly_raw_oil = cons_monthly_raw,
-    cons_yearly_raw_oil = cons_yearly_raw
+    cons_monthly_raw = cons_monthly_raw,
+    cons_yearly_raw = cons_yearly_raw
   )
 
   list(
