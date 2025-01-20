@@ -35,7 +35,8 @@ Imports:
     logger,
     tidytext,
     httr,
-    ggrepel
+    ggrepel,
+    forecast
 Remotes:
     energyandcleanair/creahelpers,
     energyandcleanair/rcrea

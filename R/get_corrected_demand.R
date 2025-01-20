@@ -1,7 +1,7 @@
 get_corrected_demand <- function(diagnostics_folder='diagnostics',
                                  use_co2_in_db=T){
 
-  dir.create(diagnostics_folder, F, T)
+  create_dir(diagnostics_folder)
   eu_members <- get_eu_iso2s()
 
   # load data

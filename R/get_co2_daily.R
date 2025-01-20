@@ -16,10 +16,7 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
                           min_year = NULL
                           ){
 
-  # Create diagnostics folder if not exists
-  if(!is.null(diagnostics_folder)){
-    dir.create(diagnostics_folder, F, T)
-  }
+  create_dir(diagnostics_folder)
 
   # Collect necessary data
   gas_demand <- download_gas_demand(iso2=NULL, use_cache = use_cache)
@@ -31,11 +28,14 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
   eurostat_indprod <- get_eurostat_indprod(use_cache = use_cache)
 
   # Quick sanity checks
-  diagnostic_pwr(pwr_demand,
-                 diagnostics_folder = file.path(diagnostics_folder, "pwr"))
-  diagnostic_eurostat_cons(eurostat_cons,
-                           iso2s=iso2s,
-                           diagnostics_folder = file.path(diagnostics_folder, 'eurostat_cons'))
+  if(!is.null(diagnostics_folder)){
+    diagnostic_pwr(pwr_demand,
+                   diagnostics_folder = file.path(diagnostics_folder, "pwr"))
+    diagnostic_eurostat_cons(eurostat_cons,
+                             iso2s=iso2s,
+                             diagnostics_folder = file.path(diagnostics_folder, 'eurostat_cons'))
+  }
+
 
   # Compute emissions from EUROSTAT first
   co2 <- get_co2_from_eurostat_cons(eurostat_cons)
@@ -49,10 +49,13 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
                                   eurostat_indprod=eurostat_indprod)
 
 
-  diagnose_eu_vs_countries(co2_filled = co2_filled,
-                           pwr_demand = pwr_demand,
-                           eurostat_cons = eurostat_cons,
-                           diagnostics_folder = file.path(diagnostics_folder, 'eu_vs_countries'))
+  if(!is.null(diagnostics_folder)){
+    diagnose_eu_vs_countries(co2_filled = co2_filled,
+                             pwr_demand = pwr_demand,
+                             eurostat_cons = eurostat_cons,
+                             diagnostics_folder = file.path(diagnostics_folder, 'eu_vs_countries'))
+  }
+
 
   # Filter regions
   # Note: this need to be done after co2 estimates,

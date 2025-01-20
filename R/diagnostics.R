@@ -2,7 +2,7 @@ diagnostic_pwr <- function(pwr_demand, diagnostics_folder="diagnostics"){
 
   #plot by source
   if(!is.null(diagnostics_folder)){
-    dir.create(diagnostics_folder, showWarnings = FALSE)
+    create_dir(diagnostics_folder)
 
     #add rolling mean
     plt_data <- pwr_demand %>%
@@ -109,7 +109,7 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s, diagnostics_folder="d
   # Plot heatmap of consumption by sector
   if(!is.null(diagnostics_folder)){
 
-    dir.create(diagnostics_folder, F, T)
+    create_dir(diagnostics_folder)
     plt_data <- eurostat_cons %>%
       filter(is.null(iso2s) | iso2 %in% iso2s) %>%
       group_by(iso2, geo, fuel, sector, unit, time) %>%
@@ -173,7 +173,7 @@ diagnose_eu_vs_countries <- function(co2_filled,
                                      diagnostics_folder="diagnostics"){
 
   if(!is.null(diagnostics_folder)){
-    dir.create(diagnostics_folder, showWarnings = FALSE)
+    create_dir(diagnostics_folder)
 
     # Power demand --------------------------------------------------
     plt_data <- pwr_demand %>%

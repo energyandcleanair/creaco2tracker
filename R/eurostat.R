@@ -201,7 +201,7 @@ get_eurostat_indprod <- function(diagnostics_folder = "diagnostics",
 get_eurostat_from_code <- function(code, iso2s=NULL, use_cache = T, filters = NULL) {
 
   # Create a digest of iso2s and filters
-  dir.create("cache", F, T)
+  create_dir("cache")
   digest <- digest::digest(list(iso2s, filters))
   filepath <- file.path("cache", glue("eurostat_{code}_{digest}.rds"))
 

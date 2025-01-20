@@ -25,7 +25,7 @@ project_until_now <- function(co2, pwr_demand, gas_demand, eurostat_indprod){
     detotalise_co2() %>%
 
     # Then run projections
-    project_until_now_ets(dts_month=dts_month) %>%
+    project_until_now_forecast(dts_month=dts_month) %>%
 
     # And re-detotalise, since data from total and other sectors may now overlap again
     detotalise_co2()
@@ -307,7 +307,7 @@ project_until_now_oil <- function(co2, dts_month, last_years=5, min_r2=0.85) {
 }
 
 
-project_until_now_ets <- function(co2, dts_month, last_years=3, conf_level=0.90){
+project_until_now_forecast <- function(co2, dts_month, last_years=10, conf_level=0.90){
 
   res <- co2 %>%
     group_by(iso2, geo, fuel, sector) %>%
@@ -334,66 +334,42 @@ project_until_now_ets <- function(co2, dts_month, last_years=3, conf_level=0.90)
                     start = c(year(min(historical_data$date)),
                              month(min(historical_data$date))))
 
-      # Fit ETS model
-      ets_model <- tryCatch({
-        forecast::ets(ts_data)
+      # Forecast using Holt-Winters method
+      forecasted <- tryCatch({
+        forecast::hw(ts_data, level=conf_level) %>%
+          as.data.frame() %>%
+          `names<-`(c("mean", "lower", "upper")) %>%
+          mutate(date = strptime(paste("01", row.names(.)), format="%d %b %Y") %>% as.Date()) %>%
+          `rownames<-`(NULL) %>%
+          filter(date %in% dts_month)
       }, error = function(e) {
-        log_warn(glue("{group_keys$iso2} - {group_keys$fuel} {group_keys$sector}: ETS model failed."))
+        log_warn(glue("{group_keys$iso2} - {group_keys$fuel} {group_keys$sector}: Forecast model failed."))
         return(NULL)
       })
 
-
-      if(is.null(ets_model)) {
+      if(is.null(forecasted)){
         return(df)
       }
 
-      # Calculate number of periods to forecast
-      periods_ahead <- as.numeric(difftime(max(dts_month), latest_data, units="days") / 30.44)
-      periods_ahead <- ceiling(periods_ahead)
-
-
-      # Generate forecast
-      fc <- tryCatch({
-        forecast::forecast(ets_model, h=periods_ahead, level=conf_level*100)
-      }, error = function(e) {
-        log_warn(glue("{group_keys$iso2} - {group_keys$fuel} {group_keys$sector}: Forecast failed."))
-        return(NULL)
-      })
-
-      # Create sequence of dates for forecast
-      forecast_dates <- seq.Date(from=latest_data + months(1),
-                                 by="month",
-                                 length.out=periods_ahead)
-
       # Update values in the original dataframe
       df %>%
+        left_join(forecasted, by="date") %>%
         mutate(
-          value_central = case_when(
-            date <= latest_data ~ value,
-            date %in% forecast_dates ~ as.numeric(fc$mean[match(date, forecast_dates)]),
-            TRUE ~ NA_real_
-          ),
-          value_lower = case_when(
-            date <= latest_data ~ value,
-            date %in% forecast_dates ~ as.numeric(fc$lower[match(date, forecast_dates)]),
-            TRUE ~ NA_real_
-          ),
-          value_upper = case_when(
-            date <= latest_data ~ value,
-            date %in% forecast_dates ~ as.numeric(fc$upper[match(date, forecast_dates)]),
-            TRUE ~ NA_real_
-          )
+          value_central = coalesce(value, mean),
+          value_lower = coalesce(value, lower),
+          value_upper = coalesce(value, upper)
       ) %>%
-        select(-c(value))
+        select(-c(value, mean, lower, upper))
     }) %>%
     ungroup()
 
-  res %>%
-    fill_lower_upper() %>%
-    pivot_longer(cols=starts_with('value_'), names_to='estimate', values_to='value') %>%
-    ggplot() +
-    geom_line(aes(date, value, col=estimate)) +
-    facet_wrap(sector~fuel + iso2)
+  # Quick diagnostic plot
+  # res %>%
+  #   fill_lower_upper() %>%
+  #   pivot_longer(cols=starts_with('value_'), names_to='estimate', values_to='value') %>%
+  #   ggplot() +
+  #   geom_line(aes(date, value, col=estimate)) +
+  #   facet_wrap(sector~fuel + iso2)
 
   res %>%
     fill_lower_upper() %>%

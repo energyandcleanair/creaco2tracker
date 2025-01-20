@@ -7,7 +7,7 @@ validate_co2 <- function(co2_daily,
     return()
   }
 
-  dir.create(diagnostics_folder, FALSE, TRUE)
+  create_dir(diagnostics_folder)
 
   # Get validation data once
   validation_data <- get_validation_data(region=unique(co2_daily$iso2))
