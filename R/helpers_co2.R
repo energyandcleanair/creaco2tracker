@@ -28,54 +28,76 @@ iso2_to_name <- function(x){
 }
 
 
-split_gas_to_elec_others <- function(co2){
+split_gas_to_elec_others <- function(co2) {
 
-  # sector should NOT be in group cols
-  group_by_cols <- intersect(names(co2), c("iso2", "geo", "date", "fuel", "estimate"))
-
-  gas_sectors <- co2 %>% filter(fuel==FUEL_GAS) %>% pull(sector) %>% unique()
-
-  if(length(gas_sectors)>2){stop("More than 2 sectors for gas. Shouldn't happen")}
-  if(sets_are_equal(gas_sectors, c(SECTOR_ALL, SECTOR_ELEC))){
-    gas_others <- co2 %>%
-      filter(fuel==FUEL_GAS) %>%
-      mutate(multiplier = ifelse(sector==SECTOR_ALL, 1, -1)) %>%
-      group_by(across(all_of(group_by_cols))) %>%
-      summarise(value = sum(value * multiplier),
-                .groups = "drop") %>%
-      mutate(sector=SECTOR_OTHERS)
-    check_no_duplicate(gas_others)
-    bind_rows(
-      gas_others,
-      co2 %>% filter(fuel!=FUEL_GAS | (!sector %in% c(SECTOR_OTHERS, SECTOR_ALL)))
-    ) %>%
-      ungroup()
-  }else{
-    log_info("Gas already split between electricity and others. Skipping.")
-    co2
+  # Quick return if no work needed
+  gas_data <- co2 %>% filter(fuel == 'gas')
+  gas_sectors <- unique(gas_data$sector)
+  if(setequal(gas_sectors, c(SECTOR_ELEC, SECTOR_OTHERS))) {
+    return(co2)
   }
+
+  group_cols <- intersect(names(co2), c("iso2", "geo", "date", "fuel", "estimate", "unit"))
+
+  # Process gas data using pivot operations
+  gas_result <- gas_data %>%
+    pivot_wider(
+      id_cols = all_of(group_cols),
+      names_from = sector,
+      values_from = value,
+      values_fill = NA
+    ) %>%
+    mutate(
+      others = coalesce(others, all - electricity),  # calculate others value
+      electricity = coalesce(electricity, all - others)  # calculate electricity value
+    ) %>%
+    select(-all) %>%
+    pivot_longer(
+      cols = c(electricity, others),
+      names_to = "sector",
+      values_to = "value"
+    )
+
+  # Combine results
+  bind_rows(
+    gas_result,
+    co2 %>% filter(fuel != 'gas')
+  )
 }
+
 
 split_gas_to_elec_all <- function(co2){
 
-  gas_sectors <- co2 %>% filter(fuel=='gas') %>% pull(sector) %>% unique()
-  group_cols <- intersect(names(co2), c("iso2", "geo", "date", "fuel", "estimate"))
+  # Quick return if no work needed
+  gas_data <- co2 %>% filter(fuel == 'gas')
+  gas_sectors <- unique(gas_data$sector)
 
-  if(length(gas_sectors)>2){stop("More than 2 sectors for gas. Shouldn't happen")}
+  group_cols <- intersect(names(co2), c("iso2", "geo", "date", "fuel", "estimate", "unit"))
 
-  if(sets_are_equal(gas_sectors, c(SECTOR_ELEC, SECTOR_OTHERS))){
-    co2 %>%
-      filter(fuel=='gas', sector != SECTOR_ALL) %>%
-      group_by_at(group_cols) %>%
-      summarise(
-        # coverage=weighted.mean(coverage, value),
-        across(value, sum), .groups = "drop") %>%
-      mutate(sector=SECTOR_ALL) %>%
-      bind_rows(co2 %>% filter(fuel!='gas' | (!sector %in% c(SECTOR_OTHERS, SECTOR_ALL))))
-  }else{
-    log_info("Gas already split between electricity and all Skipping.")
-    co2
-  }
+  # Process gas data using pivot operations
+  gas_result <- gas_data %>%
+    pivot_wider(
+      id_cols = all_of(group_cols),
+      names_from = sector,
+      values_from = value,
+      values_fill = NA
+    ) %>%
+    mutate(
+      all = coalesce(all, others + electricity),
+      electricity = coalesce(electricity, all - others)
+    ) %>%
+    select(-others) %>%
+    pivot_longer(
+      cols = c(electricity, all),
+      names_to = "sector",
+      values_to = "value"
+    )
+
+  # Combine results
+  bind_rows(
+    gas_result,
+    co2 %>% filter(fuel != 'gas')
+  )
 }
 
 #' This computes total co2, while properly aggregating uncertainty
