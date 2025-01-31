@@ -45,9 +45,14 @@ project_until_now <- function(co2, pwr_demand, gas_demand, eurostat_indprod){
 #' @export
 #'
 #' @examples
-project_until_now_lm <- function(co2, proxy, dts_month, last_years=5, min_r2=0.9, force_overwrite=F, verbose=F){
+project_until_now_lm <- function(co2, proxy, dts_month, min_r2=0.9, force_overwrite=F, verbose=F){
 
-  co2 %>%
+  co2_untouched <- co2 %>% anti_join(proxy %>% distinct(iso2, fuel, sector),
+                                      by=c('iso2', 'fuel', 'sector')
+                                     )
+  co2_touched <- co2 %>%
+    inner_join(proxy %>% distinct(iso2, fuel, sector),
+               by=c('iso2', 'fuel', 'sector')) %>%
     group_by(iso2, geo, fuel, sector, unit) %>%
     expand_dates('date', dts_month) %>%
     arrange(desc(date)) %>%
@@ -68,34 +73,56 @@ project_until_now_lm <- function(co2, proxy, dts_month, last_years=5, min_r2=0.9
                               by=c('iso2', 'fuel', 'sector')),
                   by=c('date'))
 
-      data_training <- data %>%
-        filter(value>0,
-               date >= max(date) - lubridate::years(last_years)) %>%
-        # only positive values in value_proxy_cols
-        filter_at(value_proxy_cols, all_vars(.>0))
+      get_trained_model <- function(data, n_year){
+        data_training <- data %>%
+          filter(value>0,
+                 date >= max(date) - lubridate::years(n_year)) %>%
+          # only positive values in value_proxy_cols
+          filter_at(value_proxy_cols, all_vars(.>0))
 
-      # If all value_proxy_cols are NA, stop
-      if(data_training %>% select_at(value_proxy_cols) %>% filter_all(any_vars(!is.na(.))) %>% nrow == 0){
-        # message(glue("{iso2} - {fuel}: Missing proxy data. Leaving as such"))
+        # If all value_proxy_cols are NA, stop
+        if(data_training %>% select_at(value_proxy_cols) %>% filter_all(any_vars(!is.na(.))) %>% nrow == 0){
+          # message(glue("{iso2} - {fuel}: Missing proxy data. Leaving as such"))
+          return(NULL)
+        }
+
+        if(sum(data_training$value)==0){
+          return(NULL)
+        }
+
+        if(data_training %>% select_at(value_proxy_cols) %>% filter_all(any_vars(!is.na(.))) %>% nrow > 0){
+          lm(data=data_training, formula= paste0('value ~ 0+', paste0(value_proxy_cols, collapse=' + ')))
+        }else{
+          NULL
+        }
+      }
+
+      # We automatically determine the number of years to consider based on adjusted R2
+      n_years <- seq(1,10)
+      r2s <- lapply(n_years, function(n_year){
+        model <- get_trained_model(data, n_year)
+        if(!is.null(model)){
+          summary(model)$adj.r.squared
+        }else{
+          0
+        }
+      })
+
+      # Best R2
+      if(all(r2s==0)){
+        log_warn(glue("{iso2} - {fuel} {sector}: No proxy data. Leaving as such."))
         return(df)
       }
 
-      if(sum(data_training$value)==0){
-        return(df)
-      }
-
-      formula_str <- paste0(value_proxy_cols, collapse=' + ')
-      model <- lm(data=data_training, formula= paste0('value ~ 0+', formula_str))
-      if(verbose){
-        print(summary(model))
-      }
+      n_year <- n_years[which.max(r2s)]
+      model <- get_trained_model(data, n_year)
 
       r2 <- summary(model)$adj.r.squared
       if(r2 < min_r2){
         log_warn(glue("{iso2} - {fuel} {sector}: Model CO2 ~ proxy not good enough (R2={round(r2,2)}). Leaving as NA."))
         return(df)
       }else{
-        log_success(glue("{iso2} - {fuel} {sector}: Model CO2 ~ proxy OK (R2={round(r2,2)})"))
+        log_success(glue("{iso2} - {fuel} {sector}: Model CO2 ~ proxy OK (R2={round(r2,2)}). Using {n_year} years for training."))
       }
 
       if(force_overwrite){
@@ -106,6 +133,12 @@ project_until_now_lm <- function(co2, proxy, dts_month, last_years=5, min_r2=0.9
       df
     }) %>%
     ungroup()
+
+
+  bind_rows(
+    co2_untouched,
+    co2_touched
+  )
 }
 
 
@@ -152,7 +185,7 @@ project_until_now_yoy <- function(co2, dts_month, last_years=3, last_months=3){
     ungroup()
 }
 
-project_until_now_elec <- function(co2, pwr_demand, dts_month, last_years=5, min_r2=0.85){
+project_until_now_elec <- function(co2, pwr_demand, dts_month, min_r2=0.85){
 
   proxy <- pwr_demand %>%
     filter(iso2 %in% co2$iso2) %>%
@@ -169,12 +202,12 @@ project_until_now_elec <- function(co2, pwr_demand, dts_month, last_years=5, min
     arrange(desc(date))
 
 
-  project_until_now_lm(co2, proxy, dts_month=dts_month, last_years=last_years, min_r2=min_r2)
+  project_until_now_lm(co2, proxy, dts_month=dts_month, min_r2=min_r2)
 
 }
 
 
-project_until_now_gas <- function(co2, gas_demand, dts_month, last_years=5, min_r2=0.85){
+project_until_now_gas <- function(co2, gas_demand, dts_month, min_r2=0.85){
 
   proxy <- gas_demand %>%
     filter(iso2 %in% co2$iso2) %>%
@@ -185,10 +218,10 @@ project_until_now_gas <- function(co2, gas_demand, dts_month, last_years=5, min_
     arrange(desc(date)) %>%
     mutate(fuel='gas', sector=SECTOR_ALL)
 
-  project_until_now_lm(co2, proxy, dts_month=dts_month, last_years=last_years, min_r2=min_r2)
+  project_until_now_lm(co2, proxy, dts_month=dts_month, min_r2=min_r2)
 }
 
-project_until_now_coal_others <- function(co2, eurostat_indprod, dts_month, last_years=5, min_r2=0.85){
+project_until_now_coal_others <- function(co2, eurostat_indprod, dts_month, min_r2=0.85){
 
   # Cement, Steel, Glass, Coke
   products_ind <-
@@ -234,7 +267,7 @@ project_until_now_coal_others <- function(co2, eurostat_indprod, dts_month, last
   #   geom_line() +
   #   scale_x_date(date_minor_breaks = "1 year", date_labels = "%Y") +
   #   rcrea::scale_y_crea_zero()
-  project_until_now_lm(co2, proxy, dts_month=dts_month, last_years=20, min_r2=min_r2)
+  project_until_now_lm(co2, proxy, dts_month=dts_month, min_r2=min_r2)
 
 }
 
@@ -250,7 +283,7 @@ project_until_now_coal_others <- function(co2, eurostat_indprod, dts_month, last
 #' @export
 #'
 #' @examples
-project_until_now_oil <- function(co2, dts_month, last_years=5, min_r2=0.85) {
+project_until_now_oil <- function(co2, dts_month, min_r2=0.85) {
 
   # Prepare proxy data from other countries
   proxy <- co2 %>%
@@ -296,7 +329,6 @@ project_until_now_oil <- function(co2, dts_month, last_years=5, min_r2=0.85) {
     co2_eu,
     proxy,
     dts_month = dts_month,
-    last_years = last_years,
     min_r2 = min_r2
   )
 
