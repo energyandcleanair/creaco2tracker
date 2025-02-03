@@ -248,7 +248,6 @@ project_until_now_coal_others <- function(co2, eurostat_indprod, dts_month, min_
     ungroup() %>%
     select(iso2, date=time, nace_r2_code, value=values) %>%
     pivot_wider(names_from=nace_r2_code, values_from=value, names_prefix="value_proxy_") %>%
-    filter(year(date) >= year(today()) - last_years) %>%
     mutate(
       fuel='coal',
       sector=SECTOR_OTHERS
@@ -342,7 +341,7 @@ project_until_now_oil <- function(co2, dts_month, min_r2=0.85) {
 project_until_now_forecast <- function(co2, dts_month, last_years=10, conf_level=0.90){
 
   res <- co2 %>%
-    group_by(iso2, geo, fuel, sector) %>%
+    group_by(iso2, geo, fuel, sector, unit) %>%
     expand_dates('date', dts_month) %>%
     arrange(date) %>%
     group_modify(function(df, group_keys) {

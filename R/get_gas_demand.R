@@ -33,6 +33,7 @@ get_gas_demand <- function(diagnostics_folder='diagnostics/gas_demand', verbose=
   message('Getting gas demand from storage,crossborder,production using AGSI for storage')
   apparent_w_agsi <- get_gas_demand_apparent(years=years, use_agsi_for_storage=T, verbose=verbose)
 
+
   # Keep the best ones, and only those that match quality criteria
   gas_demand <- keep_best(consumption=bind_rows(consdist,
                                                 apparent,
@@ -111,7 +112,6 @@ get_gas_demand_consdist <- function(years, verbose=F){
 get_gas_demand_apparent <- function(years, use_agsi_for_storage=F, verbose=F){
 
 
-  eu_iso2 <- setdiff(countrycode::codelist$iso2c[which(countrycode::codelist$eu28=="EU")], "GB")
 
   entsog <- creahelpers::api.get("https://api.russiafossiltracker.com/v0/entsogflow",
                                  date_from=glue("{min(years)}-01-01}"),
@@ -140,7 +140,7 @@ get_gas_demand_apparent <- function(years, use_agsi_for_storage=F, verbose=F){
     # Well, at least for Austria which has no storage data in ENTSOG
     storage_drawdown <- agsi.get_storage_change(date_from=min(as.Date(entsog$date)),
                                                 date_to=max(as.Date(entsog$date)),
-                                                iso2=eu_iso2,
+                                                iso2=get_eu_iso2s(),
                                                 verbose=verbose
                                                 )
     entsog <- entsog %>%
@@ -364,4 +364,5 @@ keep_best<- function(consumption,
     left_join(consumption) %>%
     ungroup()
 }
+
 

@@ -23,6 +23,15 @@ add_iso2 <- function(x, country_col="geo"){
                                                           "Kosovo*"="XK")))
 }
 
+add_missing_cols <- function(df, cols){
+  for(col in cols){
+    if(!col %in% names(df)){
+      df[[col]] <- NA
+    }
+  }
+  df
+}
+
 iso2_to_name <- function(x){
   countrycode(x, "iso2c", "country.name", custom_match = c("EU" = "EU"))
 }
@@ -47,6 +56,7 @@ split_gas_to_elec_others <- function(co2) {
       values_from = value,
       values_fill = NA
     ) %>%
+    add_missing_cols(c("all", "others", "electricity")) %>%
     mutate(
       others = coalesce(others, all - electricity),  # calculate others value
       electricity = coalesce(electricity, all - others)  # calculate electricity value
@@ -82,6 +92,7 @@ split_gas_to_elec_all <- function(co2){
       values_from = value,
       values_fill = NA
     ) %>%
+    add_missing_cols(c("all", "others", "electricity")) %>%
     mutate(
       all = coalesce(all, others + electricity),
       electricity = coalesce(electricity, all - others)
