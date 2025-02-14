@@ -21,19 +21,21 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
   # Collect necessary data
   gas_demand <- download_gas_demand(iso2=NULL, use_cache = use_cache)
   pwr_demand <- download_pwr_demand(use_cache = use_cache)
-  eurostat_cons <- get_eurostat_cons(diagnostics_folder = diagnostics_folder,
-                                     pwr_demand = pwr_demand,
-                                     use_cache = use_cache)
+  eurostat_cons <- get_eurostat_cons(
+    diagnostics_folder = file.path(diagnostics_folder, "eurostat"),
+    pwr_demand = pwr_demand,
+    use_cache = use_cache)
 
-  eurostat_indprod <- get_eurostat_indprod(use_cache = use_cache)
+  eurostat_indprod <- get_eurostat_indprod(
+    use_cache = use_cache,
+    diagnostics_folder = file.path(diagnostics_folder, 'eurostat')
+    )
+
 
   # Quick sanity checks
   if(!is.null(diagnostics_folder)){
     diagnostic_pwr(pwr_demand,
                    diagnostics_folder = file.path(diagnostics_folder, "pwr"))
-    diagnostic_eurostat_cons(eurostat_cons,
-                             iso2s=iso2s,
-                             diagnostics_folder = file.path(diagnostics_folder, 'eurostat_cons'))
   }
 
 
@@ -44,7 +46,7 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
   # Project data til now
   # Need to be after filter since we're using all countries to fill missing EU data
   co2_filled <- project_until_now(co2,
-                                  pwr_demand = pwr_demand,
+                                  pwr_demand=pwr_demand,
                                   gas_demand=gas_demand,
                                   eurostat_indprod=eurostat_indprod)
 
