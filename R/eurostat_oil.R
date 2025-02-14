@@ -67,23 +67,15 @@ process_oil <- function(x) {
   SIEC_KEROSENE_XBIO <- "Kerosene-type jet fuel (excluding biofuel portion)"
   SIEC_GASOIL_AND_DIESEL_OIL <- "Gas oil and diesel oil (excluding biofuel portion)"
 
-  # Debug
-  # x %>%
-  #   filter(nrg_bal_code %in% c("GID_OBS", "GD_PI"),
-  #          time=="2010-01-01",
-  #          grepl("European", geo)) %>%
-  #   filter(siec %in% c(SIEC_OIL_PRODUCTS, SIEC_FUEL_OIL, SIEC_HEATING_OIL,
-  #                      SIEC_DIESEL, SIEC_GASOLINE, SIEC_BIOGASOLINE, SIEC_BIODIESEL)) %>%
-  #   group_by(nrg_bal, siec) %>%
-  #   summarise(values = sum(values, na.rm=T)) %>%
-  #   arrange(desc(values))
 
   # Only keep what interests us
   x <- x %>% filter(
+
     # Oil products: SECTOR_TOTAL
     (nrg_bal_code %in% c("GID_OBS", "GD_PI")
     & siec %in% c(SIEC_OIL_PRODUCTS, SIEC_FUEL_OIL, SIEC_HEATING_OIL,
                     SIEC_BIOGASOLINE, SIEC_BIODIESEL)) |
+
 
       # Oil products: SECTOR_TRANSPORT
       (nrg_bal_code %in% c("FC_TRA_E") # Added in add_oil_transport function
@@ -162,14 +154,9 @@ process_oil_yearly <- function(x) {
 
 
 #' Monthly data is not as detailed as yearly one.
-#' Most importantly, non-energy use
-#' is available in yearly but not in monthly data.
+#' We make and test some assumptions to fill the gaps (see in code)
 #'
-#' We use yearly ratio 'Gross inland deliveries - energy use' / 'Gross inland deliveries - observed'
-#' to update monthly data
 #'
-#' A more accurate way would be to predict this ratio using industrial production index (e.g. fertiliser, petrochemicals)
-#' For a later version.
 #'
 #' @param cons_yearly_raw
 #' @param cons_monthly_raw
@@ -180,63 +167,357 @@ process_oil_yearly <- function(x) {
 #' @examples
 add_oil_transport <- function(cons_monthly_raw, cons_yearly_raw) {
 
+  eu_iso2s <- get_eu_iso2s(include_eu = T)
+  filter_plot <- function(x) {
+    x %>% add_iso2() %>% filter(iso2 %in% eu_iso2s) %>% filter(time >= "2010-01-01")
+  }
+  stopifnot(all(cons_yearly_raw$unit == "Thousand tonnes"))
+  stopifnot(all(cons_monthly_raw$unit == "Thousand tonnes"))
 
-  # Get share of diesel and gasoline used in transportation
-  shares <- cons_yearly_raw %>%
-    filter(time >= "1990-01-01") %>%
-    filter(siec %in% c("Motor gasoline",
-                       "Road diesel"
-                       )) %>%
-    filter(grepl("Thousand tonnes", unit)) %>%
-    filter(nrg_bal %in% c("Gross inland deliveries - observed",
-                          "Final consumption - transport sector - energy use")) %>%
-    mutate(year = year(time)) %>%
-    select(nrg_bal_code, siec, geo, year, values) %>%
-    tidyr::spread(nrg_bal_code, values) %>%
-    mutate(share_transport = FC_TRA_E / GID_OBS) %>%
-    select(-c(FC_TRA_E, GID_OBS))
+  project_shares <- function(x){
+    x %>%
+      ungroup() %>%
+      tidyr::complete(time = unique(cons_monthly_raw$time), geo, siec) %>%
+      group_by(geo, siec) %>%
+      arrange(time) %>%
+      tidyr::fill(share, .direction = c("updown")) %>%
+      ungroup()
+  }
 
-  ggplot(shares) +
-    geom_line(aes(year, share_transport, col = siec)) +
-    facet_wrap(~geo)
+  # Visually validate computation
+  validate_computation <- function(computed_monthly){
+    computed_monthly %>%
+      group_by(time=floor_date(time, "year"), geo, nrg_bal_code, siec) %>%
+      summarise(values_monthly = sum(values, na.rm=T),
+                n=n()
+      ) %>%
+      filter(n==12) %>%
+      # split and unnest nrg_bal_code
+      mutate(nrg_bal_code = strsplit(nrg_bal_code, "\\+")) %>%
+      unnest(nrg_bal_code) %>%
+      # Prevent double counting
+      group_by(time, geo, siec) %>%
+      mutate(values_monthly = values_monthly / n()) %>%
+      left_join(
+        cons_yearly_raw %>%
+          rename(values_yearly=values)
+      ) %>%
+      ungroup() %>%
+      group_by(time, geo) %>%
+      summarise(values_monthly = sum(values_monthly, na.rm=T),
+                values_yearly = sum(values_yearly, na.rm=T)
+      ) %>%
+      gather(key, values, -time, -geo) %>%
+      filter_plot %>%
+      ggplot() +
+      geom_line(aes(time, values, col=key)) +
+      facet_wrap(~geo, scales='free_y') +
+      rcrea::scale_y_zero()
+  }
 
-  # Project til now
-  years <- unique(year(cons_monthly_raw$time))
-  shares_filled <- shares %>%
-    tidyr::complete(year = years, geo, siec) %>%
-    group_by(geo, siec) %>%
-    arrange(year) %>%
-    tidyr::fill(share_transport,
-                .direction = c("updown")
-                ) %>%
+
+  # Assumption 1: Constant share of motor gasoline (that doesn't go to petro industry) goes to road energy use
+
+  # Compute share
+  share_motor_gasoline_road <- cons_yearly_raw %>%
+    filter(siec %in% c("Motor gasoline"),
+           nrg_bal_code %in% c("GID_OBS", "FC_TRA_ROAD_E", "GD_PI")) %>%
+    group_by(geo, time, siec, nrg_bal_code) %>%
+    summarise(values = sum(values, na.rm=T))  %>%
+    spread(nrg_bal_code, values) %>%
+    group_by(geo, time, siec) %>%
+    summarise(share = FC_TRA_ROAD_E / (GID_OBS - GD_PI))
+
+  # Visually validate assumption
+  ggplot(share_motor_gasoline_road %>% filter_plot) +
+    geom_line(aes(time, share)) +
+    facet_wrap(~geo) +
+    rcrea::scale_y_zero()
+
+  # Compute new data
+  monthly_tra_road_e_gasoline <- share_motor_gasoline_road %>%
+    project_shares %>%
+    right_join(
+      cons_monthly_raw %>%
+        filter(siec %in% c("Motor gasoline"),
+               nrg_bal_code %in% c("GID_OBS", "GD_PI")) %>%
+        mutate(factor = case_when(
+          nrg_bal_code == "GD_PI" ~ -1,
+          T ~ 1
+        )) %>%
+        group_by(geo, time, siec) %>%
+        summarise(values=sum(values * factor, na.rm=T)),
+      by=c("geo", "time", "siec")
+    ) %>%
+    mutate(values = values * share,
+           nrg_bal_code = "FC_TRA_ROAD_E"
+    ) %>%
+    select(-c(share)) %>%
     ungroup()
 
 
-  # Fill missing with average
-  # shares_filled <- shares_filled %>%
-  #   group_by(siec, year) %>%
-  #   mutate(share_transport = ifelse(is.na(share_transport), mean(share_transport, na.rm=T), share_transport)) %>%
-  #   ungroup()
+  validate_computation(monthly_tra_road_e_gasoline)
 
-  ggplot(shares_filled) +
-    geom_line(aes(year, share_transport, col = siec)) +
-    facet_wrap(~geo)
 
-  cons_monthly_raw_transport <- cons_monthly_raw %>%
-    filter(nrg_bal %in% c("Gross inland deliveries - observed")) %>%
-    mutate(year = year(time)) %>%
-    inner_join(shares_filled) %>%
-    mutate(
-      nrg_bal = "Final consumption - transport sector - energy use",
-      nrg_bal_code = "FC_TRA_E",
-      values = values * share_transport
+  # Assumption 2: Constant share of road diesel goes to road energy use
+  share_road_diesel_road <- cons_yearly_raw %>%
+    filter_unit %>%
+    filter(siec %in% c("Road diesel"),
+           nrg_bal_code %in% c("GID_OBS", "FC_TRA_ROAD_E")) %>%
+    group_by(geo, time, nrg_bal_code, siec) %>%
+    summarise(values = sum(values, na.rm=T))  %>%
+    spread(nrg_bal_code, values) %>%
+    group_by(geo, time, siec) %>%
+    summarise(share = FC_TRA_ROAD_E / (GID_OBS))
+
+  ggplot(share_road_diesel_road %>% filter_plot) +
+    geom_line(aes(time, share_road)) +
+    facet_wrap(~geo) +
+    rcrea::scale_y_zero()
+
+  # Compute new data
+  monthly_tra_road_e_diesel <- share_road_diesel_road %>%
+    project_shares %>%
+    right_join(
+      cons_monthly_raw %>%
+        filter(siec %in% c("Road diesel"),
+               nrg_bal_code %in% c("GID_OBS")) %>%
+        group_by(geo, time, siec) %>%
+        summarise(values=sum(values, na.rm=T)),
+      by=c("geo", "time", "siec")
     ) %>%
-    select(-c(share_transport, year))
+    mutate(values = values * share,
+           nrg_bal_code = "FC_TRA_ROAD_E"
+    ) %>%
+    select(-c(share)) %>%
+    ungroup()
 
-  return(bind_rows(
-    cons_monthly_raw,
-    cons_monthly_raw_transport
-  ))
+  # Visually validate computation
+  validate_computation(monthly_tra_road_e_diesel)
+
+
+  # TEMP
+  bind_rows(
+    cons_monthly_raw %>% mutate(source='monthly'),
+    cons_yearly_raw %>% mutate(source='yearly')
+  ) %>%
+    filter(siec=="Road diesel",
+           nrg_bal_code=="GID_OBS",
+           grepl("Europe", geo)
+           ) %>%
+    group_by(geo, time=floor_date(time, "year"), source) %>%
+    summarise(values=sum(values, na.rm=T),
+              n=n()) %>% arrange(time) %>%
+    filter_plot %>%
+    ggplot() +
+    geom_line(aes(time, values, col=source)) +
+    rcrea::scale_y_zero()
+
+
+  # Assumption 2bis: Constant share of road diesel goes to transportation energy use
+  share_road_diesel_transport <- cons_yearly_raw %>%
+    filter_unit %>%
+    filter(siec %in% c("Road diesel"),
+           nrg_bal_code %in% c("GID_OBS", "FC_TRA_E")) %>%
+    group_by(geo, time, nrg_bal_code, siec) %>%
+    summarise(values = sum(values, na.rm=T))  %>%
+    spread(nrg_bal_code, values) %>%
+    group_by(geo, time, siec) %>%
+    summarise(share = FC_TRA_E / (GID_OBS))
+
+  ggplot(share_road_diesel_transport %>% filter_plot) +
+    geom_line(aes(time, share)) +
+    facet_wrap(~geo) +
+    rcrea::scale_y_zero()
+
+  # Compute new data
+  monthly_tra_e_diesel <- share_road_diesel_transport %>%
+    project_shares %>%
+    right_join(
+      cons_monthly_raw %>%
+        filter(siec %in% c("Road diesel"),
+               nrg_bal_code %in% c("GID_OBS")) %>%
+        select(geo, time, siec, values),
+      by=c("geo", "time", "siec")
+    ) %>%
+    mutate(values = values * share,
+           nrg_bal_code = "FC_TRA_E"
+    ) %>%
+    select(-c(share)) %>%
+    ungroup()
+
+  # Visually validate computation
+  validate_computation(monthly_tra_e_diesel)
+
+
+  # Assumption 3 ter: Constant share of motor gasoline (that doesn't go to petro industry) goes to transport energy use
+
+  # Compute share
+  share_motor_gasoline_tra <- cons_yearly_raw %>%
+    filter(siec %in% c("Motor gasoline"),
+           nrg_bal_code %in% c("GID_OBS", "FC_TRA_E", "GD_PI")) %>%
+    group_by(geo, time, siec, nrg_bal_code) %>%
+    summarise(values = sum(values, na.rm=T))  %>%
+    spread(nrg_bal_code, values) %>%
+    group_by(geo, time, siec) %>%
+    summarise(share = FC_TRA_E / (GID_OBS - GD_PI))
+
+  # Visually validate assumption
+  ggplot(share_motor_gasoline_tra %>% filter_plot) +
+    geom_line(aes(time, share)) +
+    facet_wrap(~geo) +
+    rcrea::scale_y_zero()
+
+  # Compute new data
+  monthly_tra_e_gasoline <- share_motor_gasoline_tra %>%
+    project_shares %>%
+    right_join(
+      cons_monthly_raw %>%
+        filter(siec %in% c("Motor gasoline"),
+               nrg_bal_code %in% c("GID_OBS", "GD_PI")) %>%
+        mutate(factor = case_when(
+          nrg_bal_code == "GD_PI" ~ -1,
+          T ~ 1
+        )) %>%
+        group_by(geo, time, siec) %>%
+        summarise(values=sum(values * factor, na.rm=T)),
+      by=c("geo", "time", "siec")
+    ) %>%
+    mutate(values = values * share,
+           nrg_bal_code = "FC_TRA_E"
+    ) %>%
+    select(-c(share)) %>%
+    ungroup()
+
+
+  # Visually validate computation
+  validate_computation(monthly_tra_e_gasoline)
+
+
+
+
+
+  # Assumption 3: Road diesel and motor gasoline are the only fuels used in road transportation
+  share_gasoline_diesel_road <- cons_yearly_raw %>%
+    filter(siec %in% c("Oil products", "Road diesel", "Motor gasoline"),
+           nrg_bal_code =="FC_TRA_ROAD_E") %>%
+    group_by(geo, time, siec) %>%
+    summarise(values = sum(values, na.rm=T))  %>%
+    spread(siec, values) %>%
+    group_by(geo, time) %>%
+    summarise(share_road = (`Road diesel` + `Motor gasoline`) / `Oil products`)
+
+  ggplot(share_gasoline_diesel_road %>% filter_plot) +
+    geom_line(aes(time, share_road)) +
+    facet_wrap(~geo) +
+    rcrea::scale_y_zero()
+
+
+  # This one doesn't need any computation
+  # This is more to validate the assumption for computation later on
+
+  # Assumption 4: Share of kerosene going to aviation constant (and close to 1)
+  share_kerosene_aviation <- cons_yearly_raw %>%
+    filter(siec %in% c("Kerosene-type jet fuel (excluding biofuel portion)"),
+           nrg_bal_code %in% c("GID_OBS", "INTAVI_E", "FC_TRA_DAVI_E")) %>%
+    group_by(geo, time, nrg_bal_code, siec) %>%
+    summarise(values = sum(values, na.rm=T))  %>%
+    spread(nrg_bal_code, values) %>%
+    group_by(geo, time, siec) %>%
+    summarise(share = (INTAVI_E + FC_TRA_DAVI_E) / GID_OBS)
+
+  ggplot(share_kerosene_aviation %>% filter_plot) +
+    geom_line(aes(time, share_aviation)) +
+    facet_wrap(~geo) +
+    rcrea::scale_y_zero()
+
+  # Compute new data
+  monthly_tra_aviation <- share_kerosene_aviation %>%
+    project_shares %>%
+    right_join(
+      cons_monthly_raw %>%
+        filter(siec %in% c("Kerosene-type jet fuel (excluding biofuel portion)"),
+               nrg_bal_code %in% c("GID_OBS")) %>%
+        select(geo, time, siec, values)
+        ,
+      by=c("geo", "time", "siec")
+    ) %>%
+    mutate(values = values * share,
+           nrg_bal_code = "INTAVI_E+FC_TRA_DAVI_E"
+    ) %>%
+    select(-c(share)) %>%
+    ungroup()
+
+  # Visually validate computation
+  validate_computation(monthly_tra_aviation)
+
+
+  # Assumption 5: Aviation is only kerosene
+  share_aviation_kerosene <- cons_yearly_raw %>%
+    filter(siec %in% c("Kerosene-type jet fuel (excluding biofuel portion)", "Oil products"),
+           nrg_bal_code =="INTAVI_E") %>%
+    group_by(geo, time, siec) %>%
+    summarise(values = sum(values, na.rm=T))  %>%
+    spread(siec, values) %>%
+    group_by(geo, time) %>%
+    summarise(share_kerosene = `Kerosene-type jet fuel (excluding biofuel portion)`/ `Oil products`)
+
+  ggplot(share_aviation_kerosene %>% filter_plot) +
+    geom_line(aes(time, share_kerosene)) +
+    facet_wrap(~geo) +
+    rcrea::scale_y_zero()
+
+  # This one doesn't need any computation
+  # This is more to validate the assumption for computation later on
+
+
+  # Assumption 6: Motor gasoline, road diesel and kerosene represent most of the transport sector
+  share_transport <- cons_yearly_raw %>%
+    filter(siec %in% c("Motor gasoline", "Road diesel", "Kerosene-type jet fuel (excluding biofuel portion)", "Oil products"),
+           nrg_bal_code =="FC_TRA_E") %>%
+    group_by(geo, time, siec) %>%
+    summarise(values = sum(values, na.rm=T))  %>%
+    spread(siec, values) %>%
+    group_by(geo, time) %>%
+    summarise(share_transport = (`Motor gasoline` + `Road diesel` + `Kerosene-type jet fuel (excluding biofuel portion)`) / `Oil products`)
+
+  ggplot(share_transport %>% filter_plot) +
+    geom_line(aes(time, share_transport)) +
+    facet_wrap(~geo) +
+    rcrea::scale_y_zero()
+
+
+
+
+  # Conclusion:
+  # Transport will be split in Road, Aviation (domestic + international),
+  # International Maritime and Others (domestic navigation, rail, pipeline etc.)
+  # We will use the following shares:
+  # - Road: Motor gasoline + Road diesel
+  # - Aviation: all Kerosene
+  # - International Maritime: using International Bunkers which is also available in monthly data
+  # - Others: the rest based on FC_TRA_E - Road - Aviation - International Maritime
+
+  added <- bind_rows(
+    monthly_tra_road_e_gasoline,
+    monthly_tra_road_e_diesel,
+    monthly_tra_aviation,
+    monthly_tra_e_diesel,
+    monthly_tra_e_gasoline
+  )
+
+  # There are very few common records (though the original ones are wrong)
+  # cons_monthly_raw %>%
+  #   inner_join(added %>% rename(values_added=values)) %>%
+  #   View()
+
+
+  cons_monthly_raw_filled <- bind_rows(
+    cons_monthly_raw %>% anti_join(added %>% distinct(geo, time, siec, nrg_bal_code)),
+    added
+  )
+
+  return(cons_monthly_raw_filled)
 }
 
 
