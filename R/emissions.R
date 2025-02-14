@@ -173,6 +173,12 @@ add_emission_factor <- function(x){
       grepl('Road diesel', siec)~72.1, #EFID=18919
       grepl('Crude oil', siec)~73, #EFID=110603
       siec=='Natural gas'~55.74, #Average of EFID123092-123095
-      siec=='Coke oven coke' ~ 113) #EFID=110624
-    )
+      siec=='Coke oven coke' ~ 113, #EFID=110624,
+      grepl('Gas oil and diesel oil', siec) ~ 72.1, #EFID=18919
+      grepl('Kerosene-type jet fuel', siec) ~ 72.3, #EFID=110606
+    )) %>%
+    {
+      stopifnot(all(!is.na(.$co2_factor_t_per_TJ)))
+      .
+    }
 }
