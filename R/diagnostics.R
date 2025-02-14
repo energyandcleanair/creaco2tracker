@@ -104,7 +104,7 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, c
 
 }
 
-diagnostic_eurostat_cons <- function(eurostat_cons, iso2s, diagnostics_folder="diagnostics"){
+diagnostic_eurostat_cons <- function(eurostat_cons, iso2s=NULL, diagnostics_folder="diagnostics"){
 
   # Plot heatmap of consumption by sector
   if(!is.null(diagnostics_folder)){
@@ -139,20 +139,72 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s, diagnostics_folder="d
 
     # Check data availability
     (eurostat_cons %>%
+        filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
         group_by(iso2, sector, fuel) %>%
         summarise(max_date=max(time)) %>%
         ggplot(aes(max_date, iso2)) +
-        geom_bar(stat='identity', aes(fill=iso2=="EU")) +
+        geom_bar(stat='identity', aes(fill=iso2=="EU"), show.legend = F) +
         geom_text(
           data=function(x) filter(x, iso2=="EU"),
           aes(label=max_date),
           size=3,
         ) +
+        rcrea::scale_fill_crea_d() +
+        rcrea::theme_crea_new() +
+        labs(
+          title='[DIAGNOSTIC] Eurostat fossil-fuel consumption data availability',
+          x=NULL,
+          y=NULL
+        ) +
         scale_x_date(limits=c(as.Date("2020-01-01"), NA), oob = scales::squish) +
         facet_wrap(fuel~sector)) -> plt
 
     plt
-    quicksave(file.path(diagnostics_folder, 'eurostat_data_availability.png'),
+    quicksave(file.path(diagnostics_folder, 'eurostat_cons_availability.png'),
+           width=10, height=8, bg='white', plot=plt, scale=1.5)
+
+  }
+}
+
+diagnostic_eurostat_indprod <- function(eurostat_indprod, iso2s, diagnostics_folder="diagnostics"){
+
+  # Plot heatmap of consumption by sector
+  if(!is.null(diagnostics_folder)){
+
+    create_dir(diagnostics_folder)
+
+    # Check data availability
+    (eurostat_indprod %>%
+        filter(
+          nace_r2_code == "B" |
+            (stringr::str_length(nace_r2_code) == 3 & substr(nace_r2_code, 1, 1) == "C")
+        ) %>%
+        filter(
+          unit=="Index, 2021=100",
+          grepl("Calendar adjusted data", s_adj)
+        ) %>%
+        filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+        group_by(iso2, nace_r2_code) %>%
+        summarise(max_date=max(time)) %>%
+        ggplot(aes(max_date, iso2)) +
+        geom_bar(stat='identity', aes(fill=iso2=="EU"), show.legend = F) +
+        geom_text(
+          data=function(x) filter(x, iso2=="EU"),
+          aes(label=max_date),
+          size=3,
+        ) +
+        rcrea::scale_fill_crea_d() +
+        rcrea::theme_crea_new() +
+        labs(
+          title='[DIAGNOSTIC] Eurostat industrial production data availability',
+          x=NULL,
+          y=NULL
+        ) +
+        scale_x_date(limits=c(as.Date("2020-01-01"), NA), oob = scales::squish) +
+        facet_wrap(~nace_r2_code)) -> plt
+
+    plt
+    quicksave(file.path(diagnostics_folder, 'eurostat_indprod_availability.png'),
            width=10, height=8, bg='white', plot=plt, scale=1.5)
 
   }
