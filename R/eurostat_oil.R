@@ -17,7 +17,8 @@ collect_oil <- function(use_cache = FALSE) {
       "O4671XR5220B", #Gas oil and diesel oil (excluding biofuel portion)
       "O46712", # Heating and other gasoil,
       "O4680", #Fuel oil
-
+      "O4671XR5220B", #Gas oil and diesel oil (excluding biofuel portion)
+      "O4661XR5230B", #Kerosene-type jet fuel (excluding biofuel portion)
       # Biofuels
       "R5210B", # Biogasoline
       "R5220B" # Biodiesel
@@ -51,6 +52,7 @@ collect_oil <- function(use_cache = FALSE) {
 #' @return Processed oil consumption data
 #' @export
 process_oil <- function(x) {
+
   # Gross inland deliveries - energy use' is not available anymore starting from 2023
   # This is the one we need though...
   # we estimate GID_ENERGY = GID - Gross delivery to refinery, it worked pretty well
@@ -62,6 +64,8 @@ process_oil <- function(x) {
   SIEC_GASOLINE <- "Motor gasoline"
   SIEC_BIOGASOLINE <- "Blended biogasoline"
   SIEC_BIODIESEL <- "Blended biodiesels"
+  SIEC_KEROSENE_XBIO <- "Kerosene-type jet fuel (excluding biofuel portion)"
+  SIEC_GASOIL_AND_DIESEL_OIL <- "Gas oil and diesel oil (excluding biofuel portion)"
 
   # Debug
   # x %>%
@@ -80,9 +84,16 @@ process_oil <- function(x) {
     (nrg_bal_code %in% c("GID_OBS", "GD_PI")
     & siec %in% c(SIEC_OIL_PRODUCTS, SIEC_FUEL_OIL, SIEC_HEATING_OIL,
                     SIEC_BIOGASOLINE, SIEC_BIODIESEL)) |
+
       # Oil products: SECTOR_TRANSPORT
       (nrg_bal_code %in% c("FC_TRA_E") # Added in add_oil_transport function
-       & siec %in% c(SIEC_DIESEL, SIEC_GASOLINE))
+       & siec %in% c(SIEC_DIESEL, SIEC_GASOLINE)) |
+      # Kerosene aviation -> SECTOR_TRANSPORT
+      (nrg_bal_code %in% c("INTAVI_E")
+       & siec %in% c(SIEC_KEROSENE_XBIO)) |
+      # International maritime bunkers -> SECTOR_TRANSPORT
+      (nrg_bal_code %in% c("INTMARB")
+       & siec %in% c(SIEC_FUEL_OIL, SIEC_GASOIL_AND_DIESEL_OIL))
   )
 
   # We have separated fuel oil from oil products as it has a significantly higher
@@ -107,7 +118,7 @@ process_oil <- function(x) {
       T ~ 1
     ),
     sector = case_when(
-      grepl("transport", nrg_bal) ~ SECTOR_TRANSPORT,
+      grepl("transport|aviation|maritime", nrg_bal) ~ SECTOR_TRANSPORT,
       T ~ SECTOR_ALL
     )
     ) %>%
@@ -115,7 +126,7 @@ process_oil <- function(x) {
 
   # Need three for all and one or two for transport
   stopifnot("Fix oil"=nrow(mult[mult$sector==SECTOR_ALL,]) == 6,
-            "Fix oil"=nrow(mult[mult$sector==SECTOR_TRANSPORT,]) == 2,
+            "Fix oil"=nrow(mult[mult$sector==SECTOR_TRANSPORT,]) == 5,
             "Fix oil"=base::setequal(mult$factor, c(1,-1)))
 
   x %>%
@@ -231,6 +242,7 @@ add_oil_transport <- function(cons_monthly_raw, cons_yearly_raw) {
 
 
 
+#' NOT USED ANYMORE AS WE'RE RELYING ON GD_PI INSTEAD
 #' Non energy use is not available in monthly data. We derive it from industrial production data
 #' instead
 #'
@@ -307,13 +319,14 @@ fill_oil_non_energy_use <- function(cons_yearly_raw, cons_monthly_raw, eurostat_
     rcrea::scale_y_crea_zero()
 
   # Add to monthly
-  # !!! Model is commensurate to yearly data
-  training_predictors_monthly <-
+  # !!! Model is commensurate to yearly data (i.e. the intercept)
 
-  cons_monthly_raw %>%
-    filter(nrg_bal_code=="GID_NE", siec_code=="O4600") %>%
-    mutate(values = predict(model, newdata=cons_monthly_raw %>% select(-c(values, geo, time, nrg_bal_code, siec_code, nrg_bal, siec, unit, freq)))) %>%
-    select(-c(nrg_bal_code, siec_code)) %>%
-    bind_rows(cons_monthly_raw)
+  # training_predictors_monthly <-
+#
+#   cons_monthly_raw %>%
+#     filter(nrg_bal_code=="GID_NE", siec_code=="O4600") %>%
+#     mutate(values = predict(model, newdata=cons_monthly_raw %>% select(-c(values, geo, time, nrg_bal_code, siec_code, nrg_bal, siec, unit, freq)))) %>%
+#     select(-c(nrg_bal_code, siec_code)) %>%
+#     bind_rows(cons_monthly_raw)
 
 }
