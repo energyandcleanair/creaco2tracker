@@ -5,7 +5,6 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
   eu_members <- get_eu_iso2s()
 
   # load data
-  # co2 <- get_co2_daily()
   co2 <- if(use_co2_in_db){
     download_co2_daily()
   }else{
@@ -63,7 +62,7 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
   #function to fit model for energy demand vs temperature
   fit_model <- function(data,
                         independents='hdd|cdd',
-                        countries=c(eu_members, 'EU'),
+                        countries=get_eu_iso2s(include_eu = T),
                         plot_moving_average_days=7) {
     dd %>%
       select(region_id, date, variable, value) %>%
@@ -87,32 +86,53 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
     m %>% summary()
     predict(m, modeldata) -> data$value_pred
 
-    data %>% mutate(anomaly = value - value_pred,
-                    value_temperature_corrected = mean(value_pred, na.rm=T) + anomaly,
-                    year=year(date), plotdate=date %>% 'year<-'(2022)) %>%
+    data %>%
+      mutate(anomaly = value - value_pred,
+             value_temperature_corrected = mean(value_pred, na.rm=T) + anomaly,
+             year=year(date),
+             plotdate=date %>% 'year<-'(2022)) %>%
       pivot_longer(c(anomaly, value, value_pred, value_temperature_corrected),
                    names_to = 'measure') %>%
       filter(date>='2019-01-01',
              date <= max(dd$date)) ->
       data
 
+    # Timeseries
     data %>%
       group_by(measure) %>%
       mutate(across(value, zoo::rollapplyr, FUN=mean, width=plot_moving_average_days, fill=NA, na.rm=T)) %>%
       ungroup() %>%
       filter(measure=='value_temperature_corrected') %>%
-      ggplot(aes(plotdate, value, col=as.factor(year))) + geom_line(size=1) +
+      ggplot(aes(plotdate, value, col=as.factor(year))) + geom_line(linewidth=1) +
       labs(title=paste('EU temperature corrected', unique(data$name)),
            y=paste0(unique(data$unit), ', ', plot_moving_average_days, '-day mean'),
            x='', col='year') +
-      theme_crea() +
+      theme_crea_new() +
       scale_color_crea_d('change', col.index = c(1:3,5:7)) +
       scale_y_continuous(labels=scales::comma) +
-      scale_x_date(date_labels = '%b') ->
-      p
+      scale_x_date(date_labels = '%b') +
+      rcrea::scale_y_crea_zero() -> p
 
     quicksave(file.path(diagnostics_folder,
-                           paste0('EU temperature corrected ', unique(data$name), '.png')),
+                           paste0('temp_corrected_ts_ ', unique(data$name), '.png')),
+              plot=p)
+
+    # By year
+    data %>%
+      group_by(year) %>%
+      summarise(value=mean(value[measure=="anomaly"], na.rm=T)) %>%
+      ungroup() %>%
+      ggplot(aes(factor(year), value)) +
+      geom_col() +
+      labs(title=paste('EU temperature corrected anomaly', unique(data$name)),
+           y=paste0(unique(data$unit), ', ', plot_moving_average_days, '-day mean'),
+           x='', col='year') +
+      theme_crea_new() +
+      scale_color_crea_d('change', col.index = c(1:3,5:7)) +
+      scale_y_continuous(labels=scales::comma) -> p
+
+    quicksave(file.path(diagnostics_folder,
+                        paste0('temp_corrected_year_ ', unique(data$name), '.png')),
               plot=p)
 
     data %>% group_by(measure) %>%
