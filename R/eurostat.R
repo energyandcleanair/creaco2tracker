@@ -12,9 +12,12 @@
 #' @examples
 get_eurostat_cons <- function(
     pwr_demand,
-    diagnostics_folder = "diagnostics",
+    diagnostics_folder = "diagnostics/eurostat",
     use_cache = F,
     iso2s = NULL) {
+
+  create_dir(diagnostics_folder)
+
 
   # Get monthly and yearly data
   cons_raw_oil <- collect_oil(use_cache = use_cache)
@@ -119,15 +122,16 @@ get_eurostat_cons <- function(
     slice(1) %>%
     ungroup()
 
-  # Visual check
-  diagnostic_eurostat_cons_yearly_monthly(
-    diagnostics_folder = diagnostics_folder,
-    cons_yearly = cons_yearly,
-    cons_monthly = cons_monthly,
-    cons_combined = cons_combined
-  )
+  if(!is.null(diagnostics_folder)){
+    # Visual check
+    diagnostic_eurostat_cons_yearly_monthly(
+      diagnostics_folder = diagnostics_folder,
+      cons_yearly = cons_yearly,
+      cons_monthly = cons_monthly,
+      cons_combined = cons_combined
+    )
+  }
 
-  #
   cons <- cons_combined %>%
     group_by(geo, sector, time, unit, siec, fuel) %>%
     arrange(source) %>%
@@ -149,6 +153,15 @@ get_eurostat_cons <- function(
   # Remove last incomplete month for each region
   cons <- cons %>%
     remove_last_incomplete()
+
+
+  # Other diagnostics
+  if(!is.null(diagnostics_folder)){
+    diagnostic_eurostat_cons(cons,
+                             iso2s=iso2s,
+                             diagnostics_folder = file.path(diagnostics_folder, 'eurostat'))
+  }
+
 
   return(cons)
 }
@@ -189,11 +202,18 @@ remove_last_incomplete <- function(cons) {
 #' @export
 #'
 #' @examples
-get_eurostat_indprod <- function(diagnostics_folder = "diagnostics",
+get_eurostat_indprod <- function(diagnostics_folder = NULL,
                                  use_cache = F,
                                  iso2s = NULL) {
   indprod_raw <- get_eurostat_from_code(code = "sts_inpr_m", use_cache = use_cache) %>%
     add_iso2()
+
+
+  if(!is.null(diagnostics_folder)){
+    diagnostic_eurostat_indprod(indprod_raw,
+                                diagnostics_folder = diagnostics_folder)
+  }
+
   return(indprod_raw)
 }
 
@@ -214,7 +234,7 @@ get_eurostat_from_code <- function(code, iso2s=NULL, use_cache = T, filters = NU
   }
 
   raw <- eurostat::get_eurostat(code, filters = filters, keepFlags=T)
-  keep_code <- intersect(names(raw), c("nrg_bal", "siec", "nace_r2"))
+  keep_code <- intersect(names(raw), c("nrg_bal", "siec", "nace_r2", "prod_nrg"))
   if (length(keep_code) == 0) keep_code <- NULL
   raw %>%
     eurostat::label_eurostat(code = keep_code, fix_duplicated = T) %>% # Keep nrg_bal code as well
