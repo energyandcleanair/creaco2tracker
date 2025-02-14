@@ -25,13 +25,21 @@ get_gas_demand <- function(diagnostics_folder='diagnostics/gas_demand', verbose=
 
   create_dir(diagnostics_folder)
 
+  # Get all ENTSOG data once
+  entsog_data <- creahelpers::api.get("https://api.russiafossiltracker.com/v0/entsogflow",
+                                     date_from=glue("{min(years)}-01-01}"),
+                                     date_to=glue("{max(years)}-12-31}"),
+                                     type='consumption,distribution,storage,crossborder,production',
+                                     split_by='year',
+                                     verbose=verbose)
+
   # Estimate with two different methods
   message('Getting gas demand from Consumption + Distribution ENTSOG points')
-  consdist <- get_gas_demand_consdist(years=years, verbose=verbose)
+  consdist <- get_gas_demand_consdist(entsog_data=entsog_data, years=years, verbose=verbose)
   message('Getting gas demand from storage,crossborder,production')
-  apparent <- get_gas_demand_apparent(years=years, verbose=verbose)
+  apparent <- get_gas_demand_apparent(entsog_data=entsog_data, years=years, verbose=verbose)
   message('Getting gas demand from storage,crossborder,production using AGSI for storage')
-  apparent_w_agsi <- get_gas_demand_apparent(years=years, use_agsi_for_storage=T, verbose=verbose)
+  apparent_w_agsi <- get_gas_demand_apparent(entsog_data=entsog_data, years=years, use_agsi_for_storage=T, verbose=verbose)
 
 
   # Keep the best ones, and only those that match quality criteria
@@ -64,18 +72,10 @@ get_gas_demand <- function(diagnostics_folder='diagnostics/gas_demand', verbose=
 #' @export
 #'
 #' @examples
-get_gas_demand_consdist <- function(years, verbose=F){
+get_gas_demand_consdist <- function(entsog_data, years, verbose=F){
 
-  entsog <- creahelpers::api.get("https://api.russiafossiltracker.com/v0/entsogflow",
-                                 date_from=glue("{min(years)}-01-01}"),
-                                 date_to=glue("{max(years)}-12-31}"),
-                                 type='consumption,distribution',
-                                 split_by='year',
-                                 verbose=verbose
-                                 )
-
-
-
+  entsog <- entsog_data %>%
+    filter(type %in% c('consumption', 'distribution'))
 
   consdist <- entsog %>%
     group_by(iso2=destination_iso2, date) %>%
@@ -109,17 +109,10 @@ get_gas_demand_consdist <- function(years, verbose=F){
 #' @export
 #'
 #' @examples
-get_gas_demand_apparent <- function(years, use_agsi_for_storage=F, verbose=F){
+get_gas_demand_apparent <- function(entsog_data, years, use_agsi_for_storage=F, verbose=F){
 
-
-
-  entsog <- creahelpers::api.get("https://api.russiafossiltracker.com/v0/entsogflow",
-                                 date_from=glue("{min(years)}-01-01}"),
-                                 date_to=glue("{max(years)}-12-31}"),
-                                 type='storage,crossborder,production',
-                                 split_by='year',
-                                 verbose=verbose)
-
+  entsog <- entsog_data %>%
+    filter(type %in% c('storage', 'crossborder', 'production'))
 
   # Fill missing data
   entsog <- entsog %>%
