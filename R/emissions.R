@@ -43,9 +43,16 @@ add_ncv <- function(x, diagnostics_folder=NULL){
         grepl("natural gas", product, ignore.case = TRUE) ~ "Natural gas",
         grepl("coke oven coke", product, ignore.case = TRUE) ~ "Coke oven coke",
         # Oil products both used as Oil products in SECTOR_ALL and more granularily in transport
-        grepl("Gas/diesel oil", product, ignore.case = TRUE) ~ paste(c("Oil products", "Road diesel"), collapse=separator),
+        grepl("Gas/diesel oil", product, ignore.case = TRUE) ~ paste(c("Oil products",
+                                                                       "Road diesel",
+                                                                       "Gas oil and diesel oil (excluding biofuel portion)"),
+                                                                     collapse=separator),
         grepl("Motor gasoline", product, ignore.case = TRUE) ~ paste(c("Oil products", "Motor gasoline"), collapse=separator),
         grepl("^Fuel oil$", product, ignore.case = TRUE) ~ paste(c("Fuel oil", "Heating and other gasoil"), collapse=separator),
+        grepl("^Kerosene", product, ignore.case = TRUE) ~ paste(c("Kerosene",
+                                                                  "Jet kerosene",
+                                                                  "Kerosene-type jet fuel (excluding biofuel portion)"
+                                                                  ), collapse=separator),
         TRUE ~ NA_character_
       )) %>%
       filter(!is.na(siec)) %>%
@@ -137,13 +144,17 @@ add_ncv <- function(x, diagnostics_folder=NULL){
   }
 
   # Add ncv
-  x %>%
+  x_with_ncv <- x %>%
     mutate(year=year(time)) %>%
     add_iso2() %>%
     left_join(conversion_filled) %>%
     group_by(geo, siec) %>%
     arrange(time) %>%
     tidyr::fill(ncv_kjkg, .direction = "downup")
+
+  stopifnot(all(!is.na(x_with_ncv[x_with_ncv$iso2!='ME',]$ncv_kjkg)))
+
+  x_with_ncv
 }
 
 add_emission_factor <- function(x){
