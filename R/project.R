@@ -321,7 +321,7 @@ project_until_now_oil <- function(co2, dts_month, min_r2=0.85) {
 
   # Filter EU data
   co2_eu <- co2 %>%
-    filter(iso2 == 'EU', fuel == 'oil')
+    filter(iso2 == 'EU', fuel == FUEL_OIL)
 
   # Use project_until_now_lm for the actual projection
   new_eu_oil <- project_until_now_lm(
@@ -332,7 +332,7 @@ project_until_now_oil <- function(co2, dts_month, min_r2=0.85) {
   )
 
   bind_rows(
-    co2 %>% filter(fuel != 'oil' | iso2 != 'EU'),
+    co2 %>% filter(fuel != FUEL_OIL | iso2 != 'EU'),
     new_eu_oil
   )
 }
