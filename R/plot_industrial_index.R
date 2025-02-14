@@ -31,13 +31,13 @@ plot_industrial_index <- function(industrial_indexes,
     )
   }
 
-  industrial_indexes %>%
-    distinct(nace_r2_code, nace_r2) %>%
-    mutate(label=shorten_nace(nace_r2)) %>%
-    View()
+  # industrial_indexes %>%
+  #   distinct(nace_r2_code, nace_r2) %>%
+  #   mutate(label=shorten_nace(nace_r2)) %>%
+  #   View()
 
 
-  industrial_indexes %>%
+  plt_data <- industrial_indexes %>%
     filter(iso2=="EU",
            year(date) %in% c(year_f-1, year_f)
     ) %>%
@@ -53,11 +53,14 @@ plot_industrial_index <- function(industrial_indexes,
     group_by(product=stringr::str_to_title(product)) %>%
     filter(abs(central) > quantile(abs(central), 0.3)) %>%
     ungroup() %>%
-    mutate(label=tidytext::reorder_within(label, central, product)) %>%
-    ggplot(aes(label, central, fill=product)) +
+    mutate(label=tidytext::reorder_within(label, central, product))
+
+
+
+  ggplot(plt_data, aes(label, central, fill=product)) +
     # geom_hline(yintercept=0, col="#666666") +
     geom_col(show.legend = F) +
-    geom_errorbar(aes(ymin=lower, ymax=upper), width=0.2, col="#999999") +
+    geom_errorbar(aes(ymin=lower, ymax=upper), linewidth=0.2, width=0.2, col="#999999") +
     facet_wrap(~product, scales='free_x') +
     tidytext::scale_x_reordered() +
     rcrea::theme_crea_new() +
@@ -68,7 +71,8 @@ plot_industrial_index <- function(industrial_indexes,
          x=NULL,
          y=NULL,
          caption=paste0(c(
-           "Note: This assumes constant energy intensity per sector and fuel family. Only sectors with the most significant changes are shown.",
+           "Note: This computation assumes constant energy intensity per sector and fuel family.",
+           "Only sectors with the most significant changes are shown.",
            "Source: CREA analysis based on EUROSTAT."
          ), collapse = "\n")
          ) +
@@ -79,6 +83,9 @@ plot_industrial_index <- function(industrial_indexes,
 
 
   if(!is.null(filepath)){
+    filepath_csv <- creahelpers::change_extension(filepath, "csv")
+    write_csv(plt_data, filepath_csv)
+
     rcrea::quicksave(filepath, width=width, height=height, plot=plt)
   }
 }
