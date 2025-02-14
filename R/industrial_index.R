@@ -1,93 +1,3 @@
-#' Returns a gas-demand-weighted industrial production index
-#' Following: https://www.energypolicy.columbia.edu/publications/anatomy-of-the-european-industrial-gas-demand-drop/
-#'
-#' @return
-#' @export
-#'
-#' @examples
-get_industrial_index_gas <- function(){
-
-  # Energy consumption by NACE
-  index_time <- "2020-01-01"
-  filter_nace <- function(x){filter(x,
-                                    nace_r2_code == "B" |
-                                      # three letter starting with C
-                                      (stringr::str_length(nace_r2_code) == 3 & substr(nace_r2_code, 1, 1) == "C")
-  )}
-
-
-  gas_consumption_per_sector <- get_eurostat_from_code("env_ac_pefasu") %>%
-    filter(prod_nrg_code=="P13",
-           stk_flow=="Emission-relevant use",
-           unit=="Terajoule",
-           ) %>%
-    add_iso2() %>%
-    filter(iso2 %in% get_eu_iso2s(include_eu=T)) %>%
-    filter_nace()
-
-  # Industrial production
-  indprod <- get_eurostat_indprod()
-
-
-  # Be sure not to double count / having overlapping sectors
-  indprod_filtered <- indprod %>%
-    filter_nace() %>%
-    filter(
-      unit=="Index, 2021=100",
-      grepl("Calendar adjusted data", s_adj)
-    )
-
-  # Fill incomplete data
-  gas_consumption_filled <- gas_consumption_per_sector %>%
-    left_join(indprod_filtered %>%
-                group_by(iso2, time=floor_date(time, "year"), nace_r2_code) %>%
-                summarise(values_prod=sum(values, na.rm=T))) %>%
-    mutate(gas_intensity = values / values_prod) %>%
-    # Fill first by interpolation
-    group_by(iso2, nace_r2_code) %>%
-    arrange(time) %>%
-    fill(gas_intensity, .direction="updown")  %>%
-    # Remove inf
-    mutate(gas_intensity=ifelse(gas_intensity==Inf, NA, gas_intensity)) %>%
-    # Then by sectorial mean
-    group_by(nace_r2_code, time) %>%
-    mutate(gas_intensity=coalesce(gas_intensity, mean(gas_intensity, na.rm=T))) %>%
-    ungroup()
-
-
-  # Index production
-  indprod_index <- indprod_filtered %>%
-    filter(iso2=="EU") %>%
-    select(nace_r2_code, nace_r2, time, geo, values, iso2) %>%
-    left_join(
-      gas_consumption_filled %>%
-        filter(time==index_time) %>%
-        select(nace_r2_code, iso2, gas_intensity)
-    ) %>%
-    filter(!is.na(gas_intensity)) %>%
-    group_by(iso2, nace_r2_code) %>%
-    # Normalize by gas consumption
-    mutate(index = values * gas_intensity / values[time==index_time]) %>%
-    # Make it base 100
-    group_by(iso2) %>%
-    mutate(index = index/sum(index[time==index_time], na.rm=T) * 100) %>%
-    rename(date=time) %>%
-    ungroup()
-
-
-  ggplot(indprod_index %>%
-           filter(iso2=="EU",
-                  date>="2010-01-01"
-                  ) %>%
-           group_by(iso2, geo, date) %>%
-           summarise(index=sum(index)) %>%
-           group_by(iso2, geo, date=floor_date(date, "quarter")) %>%
-           summarise(index=mean(index))) +
-    geom_col(aes(date, index, fill=as.factor(geo)), show.legend = F)
-
-  return(indprod_index)
-}
-
 #' Returns a oil/gas/coal-demand-weighted industrial production indexes
 #' Following: https://www.energypolicy.columbia.edu/publications/anatomy-of-the-european-industrial-gas-demand-drop/
 #'
@@ -96,7 +6,7 @@ get_industrial_index_gas <- function(){
 #'
 #' @examples
 get_industrial_indexes <- function(index_date="last",
-                                   frequency="year",
+                                   frequency="month",
                                    project=T
                                    ){
 
@@ -111,9 +21,10 @@ get_industrial_indexes <- function(index_date="last",
 
   product_codes <- list(
     'gas' = 'P13',
-    'oil' = c('P12','P14','P15','P16','P17','P18','P19'),
+    'oil' = c('P12','P14','P15','P16','P17','P18','P19', 'P20', 'P21'),
     'coal' = c('P08','P09','P10','P11')
   )
+
 
   pefasu <- get_eurostat_from_code("env_ac_pefasu")
 
@@ -291,19 +202,22 @@ get_industrial_indexes <- function(index_date="last",
 
 
   # Quick check on manual value: DE, B, 2021: 12863.4TJ
-  expected_value <- 12863.4
+  expected_value_yearly <- 12863.4
+  expected_value_monthly <- 12863.4 * 82.9 / 1193.7
+  expected_value <- case_when(frequency=="year" ~ expected_value_yearly,
+                              frequency=="month" ~ expected_value_monthly)
   filter_tbl <- tibble(iso2="DE", date=index_date, nace_r2_code="B", product="gas", estimate="central", time=index_date)
   stopifnot(
     round(sum(inner_join(industrial_indexes, filter_tbl) %>%
-                pull(energy_tj), na.rm=T), 1) == expected_value
+                pull(energy_tj), na.rm=T), 1) == round(expected_value,1)
   )
   stopifnot(
     round(sum(inner_join(consumption_filled, filter_tbl) %>%
-                pull(energy_tj), na.rm=T), 1) == expected_value
+                pull(energy_tj), na.rm=T), 1) == round(expected_value_yearly,1)
   )
   stopifnot(
     round(sum(inner_join(industrial_indexes, filter_tbl) %>%
-                pull(energy_tj), na.rm=T), 1) == expected_value
+                pull(energy_tj), na.rm=T), 1) == round(expected_value,1)
   )
 
 
