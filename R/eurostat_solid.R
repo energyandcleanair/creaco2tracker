@@ -1,3 +1,8 @@
+SIEC_BROWN_COAL <- "C0200"
+SIEC_HARD_COAL <- "C0100"
+SIEC_COKE_OVEN_COKE <- "C0311"
+SIEC_BROWN_COAL_BRIQUETTES <- "C0330"
+
 #' Collect solid fuel (i.e. coal and coke so far for us) consumption data from EUROSTAT
 #'
 #' @param use_cache Whether to use cached data
@@ -22,13 +27,13 @@ collect_solid <- function(use_cache = FALSE) {
     # to avoid double counting
     # e.g. shouldn't keep both Lignite and Brown coal
     siec_codes <- c(
-      "C0200", # Brown coal
+      SIEC_BROWN_COAL, # Brown coal
       # "C0220", # Lignite
-      "C0100", # Hard coal
+      SIEC_HARD_COAL, # Hard coal
       # "C0129", # Other bituminous coal
       # "C0121", # Coking coal
-      "C0311", # Coke oven coke
-      "C0330" # Brown coal briquettes
+      SIEC_COKE_OVEN_COKE, # Coke oven coke
+      SIEC_BROWN_COAL_BRIQUETTES # Brown coal briquettes
       # "C0110"  # Anthracite
     )
 
@@ -141,20 +146,20 @@ process_solid_monthly <- function(x, pwr_demand) {
   # Greece has started declaring 0 brown coal values for elec starting from 2015-09-01,
   # but apparently 100% of brown coal was used for elec before that
   to_add_greece <- by_sector %>%
-    filter((geo == "Greece" & siec == "Brown coal" & time >= "2015-09-01" & nrg_bal_code==NRG_GID_CALCULATED)) %>%
+    filter((geo == "Greece" & siec_code == SIEC_BROWN_COAL & time >= "2015-09-01" & nrg_bal_code==NRG_GID_CALCULATED)) %>%
     mutate(sector = SECTOR_ELEC)
 
   by_sector_fixed <-
     bind_rows(
       by_sector %>%
-        filter(!(geo == "Greece" & siec == "Brown coal" & time >= "2015-09-01" & sector == SECTOR_ELEC)),
+        filter(!(geo == "Greece" & siec_code == SIEC_BROWN_COAL & time >= "2015-09-01" & sector == SECTOR_ELEC)),
       to_add_greece
     )
 
   # Add the difference to EU
   to_add_to_eu <-  to_add_greece %>%
     mutate(geo = unique(grep("European Union", by_sector$geo, value=T))) %>%
-    select(geo, time, siec, sector, value_to_add=values)
+    select(geo, time, siec, siec_code, sector, value_to_add=values)
 
   by_sector_fixed <- by_sector_fixed %>%
     left_join(to_add_to_eu, relationship = "one-to-one") %>%
@@ -174,14 +179,14 @@ process_solid_monthly <- function(x, pwr_demand) {
   by_sector_fixed <- by_sector_fixed %>%
     tidyr::complete(geo="Slovenia",
                     time,
-                    siec="Hard coal",
+                    siec_code=SIEC_HARD_COAL,
                     unit,
                     nrg_bal_code=NRG_TRANS_ELEC,
                     sector=SECTOR_ELEC,
                     fill=list(values=0)) %>%
     tidyr::complete(geo="Slovenia",
                     time,
-                    siec="Hard coal",
+                    siec_code=SIEC_HARD_COAL,
                     unit,
                     sector=SECTOR_ALL,
                     nrg_bal_code=NRG_TRANS_COKING,
@@ -190,11 +195,11 @@ process_solid_monthly <- function(x, pwr_demand) {
   hard_coal_elec_and_coking_eu_from_countries <- by_sector_fixed %>%
     filter(
       sector == SECTOR_ELEC | nrg_bal_code==NRG_TRANS_COKING,
-      siec == "Hard coal",
+      siec_code == SIEC_HARD_COAL,
     ) %>%
     add_iso2() %>%
     filter(iso2 %in% get_eu_iso2s(include_eu = F)) %>%
-    group_by(sector, siec, nrg_bal_code, time, unit) %>%
+    group_by(sector, siec, siec_code, nrg_bal_code, time, unit) %>%
     summarise(values_sum_countries=sum(values, na.rm=T),
               n=n()) %>%
     filter(n==27)
@@ -202,10 +207,10 @@ process_solid_monthly <- function(x, pwr_demand) {
   hard_coal_elec_and_coking_eu <- by_sector_fixed  %>%
     filter(grepl("European", geo),
            sector == SECTOR_ELEC | nrg_bal_code==NRG_TRANS_COKING,
-           siec == "Hard coal") %>%
+           siec_code == SIEC_HARD_COAL) %>%
     tidyr::complete(geo,
                     nesting(sector, nrg_bal_code),
-                    siec,
+                    nesting(siec, siec_code),
                     time=hard_coal_elec_and_coking_eu_from_countries$time, unit) %>%
     left_join(hard_coal_elec_and_coking_eu_from_countries) %>%
     {
@@ -222,19 +227,24 @@ process_solid_monthly <- function(x, pwr_demand) {
   by_sector_fixed <- bind_rows(
     by_sector_fixed %>%
       anti_join(hard_coal_elec_and_coking_eu,
-                by=c("geo", "time", "sector", "siec", "nrg_bal_code", "unit")),
+                by=c("geo", "time", "sector", "siec", "siec_code", "nrg_bal_code", "unit")),
       hard_coal_elec_and_coking_eu
   ) %>%
-    mutate(fuel = ifelse(siec == "Coke oven coke", FUEL_COKE, FUEL_COAL))
+    mutate(fuel = ifelse(siec_code == SIEC_COKE_OVEN_COKE, FUEL_COKE, FUEL_COAL))
 
 
   # Remove part of the coal that is used to produced coke to avoid double counting
   result <- by_sector_fixed %>%
     mutate(factor = case_when(nrg_bal_code == NRG_TRANS_COKING ~ -1,
                               TRUE ~ 1)) %>%
-    group_by(geo, time, siec, sector, fuel, unit) %>%
+    group_by(geo, time, siec, siec_code, sector, fuel, unit) %>%
     summarise(values = sum(values * factor, na.rm = T)) %>%
     ungroup()
+
+  # Ensure siec is filled throughout
+  result <- result %>%
+    select(-c(siec)) %>%
+    left_join(cons_monthly_raw %>% distinct(siec_code, siec))
 
   return(result)
 
@@ -479,17 +489,17 @@ process_solid_yearly <- function(x) {
                               NRG_ELEC_CHP,
                               NRG_ELEC_ONLY,
                               NRG_TRANS_COKING) |
-            (nrg_bal_code == NRG_FINAL_IRON_STEEL & siec == "Coke oven coke")) %>%
+            (nrg_bal_code == NRG_FINAL_IRON_STEEL & siec_code == SIEC_COKE_OVEN_COKE)) %>%
         mutate(
             sector = ifelse(grepl("electricity", nrg_bal), SECTOR_ELEC, SECTOR_ALL),
-            fuel = ifelse(siec == "Coke oven coke", FUEL_COKE, FUEL_COAL)
+            fuel = ifelse(siec_code == SIEC_COKE_OVEN_COKE, FUEL_COKE, FUEL_COAL)
         ) %>%
     # Remove coal used to produce coke to avoid double counting
     mutate(factor = case_when(
       nrg_bal_code == NRG_TRANS_COKING ~ -1,
       TRUE ~ 1)
       ) %>%
-    group_by(geo, time, siec, sector, fuel, unit) %>%
+    group_by(geo, time, siec, siec_code, sector, fuel, unit) %>%
     summarise(values = sum(values * factor, na.rm = T), .groups = "drop")
 
   # # Debug plot

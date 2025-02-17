@@ -24,11 +24,26 @@ get_eurostat_cons <- function(
   cons_raw_solid <- collect_solid(use_cache = use_cache)
   cons_raw_gas <- collect_gas(use_cache = use_cache)
 
+  # Check siec and siec_code are full and univoqual
+  check_siec_siec_code <- function(x) {
+    y <- distinct(x, siec, siec_code)
+    stopifnot(!any(is.na(y$siec_code)))
+    stopifnot(!any(is.na(y$siec)))
+    stopifnot(!any(duplicated(y$siec_code)))
+    stopifnot(!any(duplicated(y$siec)))
+  }
+  check_siec_siec_code(cons_raw_oil$monthly)
+  check_siec_siec_code(cons_raw_oil$yearly)
+  check_siec_siec_code(cons_raw_solid$monthly)
+  check_siec_siec_code(cons_raw_solid$yearly)
+  check_siec_siec_code(cons_raw_gas$monthly)
+  check_siec_siec_code(cons_raw_gas$yearly)
+
 
   split_elec_others <- function(x) {
     x %>%
       mutate(values = values * ifelse(sector == SECTOR_ELEC, -1, 1)) %>%
-      group_by(geo, time, unit, siec, fuel) %>%
+      group_by(geo, time, unit, siec, siec_code, fuel) %>%
       summarise_at("values", sum, na.rm = T) %>%
       mutate(sector = SECTOR_OTHERS) %>%
       bind_rows(x %>% filter(sector == SECTOR_ELEC))
@@ -36,11 +51,12 @@ get_eurostat_cons <- function(
 
   aggregate <- function(x) {
     x %>%
-        group_by(geo, sector, time, unit, siec, fuel) %>%
+        group_by(geo, sector, time, unit, siec, siec_code, fuel) %>%
         summarise_at("values", sum, na.rm = T) %>%
       ungroup()
   }
-    # Process data
+
+  # Process data
   cons_monthly <- list(
     oil = process_oil_monthly(cons_raw_oil$monthly),
     solid = process_solid_monthly(cons_raw_solid$monthly, pwr_demand=pwr_demand)%>% split_elec_others(),
@@ -59,12 +75,12 @@ get_eurostat_cons <- function(
 
   # Seasonal adjusment
   month_shares <- cons_monthly %>%
-      group_by(sector, siec, unit, geo, fuel, year = lubridate::year(time)) %>%
+      group_by(sector, siec, siec_code, unit, geo, fuel, year = lubridate::year(time)) %>%
       mutate(count = n()) %>%
       filter(count == 12) %>%
-      group_by(sector, siec, unit, geo, fuel, month = lubridate::month(time)) %>%
+      group_by(sector, siec, siec_code, unit, geo, fuel, month = lubridate::month(time)) %>%
       summarise(values = sum(values, na.rm = T), .groups = "drop") %>%
-      group_by(sector, siec, unit, geo, fuel) %>%
+      group_by(sector, siec, siec_code, unit, geo, fuel) %>%
       mutate(month_share = values / sum(values, na.rm = T)) %>%
       mutate(
         month_share = replace_na(month_share, 1 / 12),
@@ -77,7 +93,7 @@ get_eurostat_cons <- function(
 
   # Check ~1
   if (!all(month_shares %>%
-    group_by(sector, siec, unit, geo, fuel) %>%
+    group_by(sector, siec, siec_code, unit, geo, fuel) %>%
     summarise(one = round(sum(month_share), 5), .groups = "drop") %>%
     pull(one) %>%
     unique() == 1)) {
@@ -91,7 +107,7 @@ get_eurostat_cons <- function(
       inner_join(month_shares,
         relationship = "many-to-many"
       ) %>%
-      arrange(sector, siec, unit, geo, fuel, time) %>%
+      arrange(sector, siec, siec_code, unit, geo, fuel, time) %>%
       mutate(
         time = as.Date(sprintf("%s-%0d-01", year, month)),
         values = values * month_share
@@ -101,9 +117,9 @@ get_eurostat_cons <- function(
   # Keep monthly when both are available
   # unless specified otherwise after looking at diagnostic charts
   cutoff_monthly <- tibble(
-    fuel=c("gas", "coke"),
+    siec_code=c(SIEC_NATURAL_GAS, SIEC_COKE_OVEN_COKE, SIEC_KEROSENE_XBIO),
     # sector=c("others", "others"),
-    cutoff_date=c("2020-01-01", "2019-01-01"),
+    cutoff_date=c("2020-01-01", "2019-01-01", "2019-01-01"),
     source="monthly"
   )
 
@@ -117,7 +133,7 @@ get_eurostat_cons <- function(
       is.na(cutoff_date) | time >= cutoff_date
     ) %>%
     select(-c(cutoff_date)) %>%
-    group_by(geo, sector, time, unit, siec, fuel) %>%
+    group_by(geo, sector, time, unit, siec, siec_code, fuel) %>%
     arrange(source) %>% # monthly < yearly
     slice(1) %>%
     ungroup()
@@ -159,7 +175,7 @@ get_eurostat_cons <- function(
   if(!is.null(diagnostics_folder)){
     diagnostic_eurostat_cons(cons,
                              iso2s=iso2s,
-                             diagnostics_folder = file.path(diagnostics_folder, 'eurostat'))
+                             diagnostics_folder = diagnostics_folder)
   }
 
 

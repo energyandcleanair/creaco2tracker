@@ -1,4 +1,5 @@
-get_co2_from_eurostat_cons <- function(eurostat_cons, diagnostics_folder="diagnostics", keep_siec=F){
+get_co2_from_eurostat_cons <- function(eurostat_cons, diagnostics_folder="diagnostics",
+                                       keep_siec=F){
 
   group_by_cols <- c("iso2", "geo", "date"="time", "fuel", "sector", "unit")
   if(keep_siec){
@@ -47,7 +48,7 @@ add_ncv <- function(x, diagnostics_folder=NULL){
                                                                        "Road diesel",
                                                                        "Gas oil and diesel oil (excluding biofuel portion)"),
                                                                      collapse=separator),
-        grepl("Motor gasoline", product, ignore.case = TRUE) ~ paste(c("Oil products", "Motor gasoline"), collapse=separator),
+        grepl("Motor gasoline", product, ignore.case = TRUE) ~ paste(c("Oil products", "Motor gasoline", "Aviation gasoline"), collapse=separator),
         grepl("^Fuel oil$", product, ignore.case = TRUE) ~ paste(c("Fuel oil", "Heating and other gasoil"), collapse=separator),
         grepl("^Kerosene", product, ignore.case = TRUE) ~ paste(c("Kerosene",
                                                                   "Jet kerosene",
@@ -175,7 +176,8 @@ add_emission_factor <- function(x){
       siec=='Natural gas'~55.74, #Average of EFID123092-123095
       siec=='Coke oven coke' ~ 113, #EFID=110624,
       grepl('Gas oil and diesel oil', siec) ~ 72.1, #EFID=18919
-      grepl('Kerosene-type jet fuel', siec) ~ 72.3, #EFID=110606
+      grepl('Kerosene-type jet fuel', siec) ~ 72.69, # Taken from EEA: https://sdi.eea.europa.eu/catalogue/srv/eng/catalog.search#/metadata/f6e68f73-b494-4f8c-8c73-8a153a53f64a
+      grepl('Aviation gasoline', siec) ~ 70.55, # Taken from EEA: https://sdi.eea.europa.eu/catalogue/srv/eng/catalog.search#/metadata/f6e68f73-b494-4f8c-8c73-8a153a53f64a
     )) %>%
     {
       stopifnot(all(!is.na(.$co2_factor_t_per_TJ)))

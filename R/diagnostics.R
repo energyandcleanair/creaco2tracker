@@ -59,9 +59,13 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, c
         filter(siec %in% .[.$source=='monthly',]$siec) %>%
         group_by(iso2, year=lubridate::year(time), siec, source, fuel, sector) %>%
         summarise(values=sum(values)) %>%
+        # Scale by iso2, siec for chart to be readable
+        group_by(iso2, siec) %>%
+        mutate(values=values/max(values)) %>%
         ggplot(aes(year, values, col=sector, linetype=source)) +
         geom_line() +
-        facet_grid(iso2_to_name(iso2) ~ siec, scales='free') +
+        facet_grid(iso2_to_name(iso2) ~ siec,
+                   scales='free') +
         theme(legend.position = 'bottom') +
         rcrea::scale_y_crea_zero()
 

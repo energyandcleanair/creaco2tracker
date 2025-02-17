@@ -1,3 +1,5 @@
+SIEC_NATURAL_GAS <- "G3000"
+
 #' Collect gas consumption data from EUROSTAT
 #'
 #' @param use_cache Whether to use cached data
@@ -57,7 +59,7 @@ collect_gas <- function(use_cache = FALSE) {
           "Final consumption - non-energy use"
         ),
         grepl("Terajoule", unit),
-        siec == "Natural gas"
+        siec_code == SIEC_NATURAL_GAS
       ) %>%
       group_by(across(-c(nrg_bal, nrg_bal_code, values))) %>%
       summarise(
@@ -96,7 +98,7 @@ collect_gas <- function(use_cache = FALSE) {
             "Transformation input - electricity and heat generation - main activity producer combined heat and power - energy use"
           )),
         grepl("Terajoule", unit),
-        siec == "Natural gas"
+        siec_code == SIEC_NATURAL_GAS
       ) %>%
       mutate(
         sector = SECTOR_ELEC,
@@ -147,14 +149,14 @@ add_gas_non_energy <- function(cons_monthly_raw, cons_yearly_raw) {
 
   shares <- cons_yearly_raw %>%
     filter(time >= "1990-01-01") %>%
-    filter(siec == "Natural gas") %>%
+    filter(siec_code == SIEC_NATURAL_GAS) %>%
     filter(grepl("Terajoule", unit)) %>%
     filter(nrg_bal %in% c(
       "Inland consumption - observed",
       "Final consumption - non-energy use"
     )) %>%
     mutate(year = year(time)) %>%
-    select(nrg_bal_code, siec, geo, year, values) %>%
+    select(nrg_bal_code, siec, siec_code, geo, year, values) %>%
     tidyr::spread(nrg_bal_code, values) %>%
     mutate(share_non_energy = tidyr::replace_na(FC_NE / IC_OBS, 0)) %>%
     select(-c(FC_NE, IC_OBS))
@@ -168,7 +170,7 @@ add_gas_non_energy <- function(cons_monthly_raw, cons_yearly_raw) {
   # Project til now
   years <- unique(year(cons_monthly_raw$time))
   shares_filled <- shares %>%
-    tidyr::complete(year = years, geo, siec) %>%
+    tidyr::complete(year = years, geo, siec, siec_code) %>%
     group_by(geo, siec) %>%
     arrange(year) %>%
     tidyr::fill(share_non_energy) %>%
@@ -177,7 +179,7 @@ add_gas_non_energy <- function(cons_monthly_raw, cons_yearly_raw) {
 
   cons_monthly_raw_non_energy <- cons_monthly_raw %>%
     filter(nrg_bal %in% c("Inland consumption - observed")) %>%
-    filter(siec == "Natural gas") %>%
+    filter(siec_code == SIEC_NATURAL_GAS) %>%
     mutate(year = year(time)) %>%
     inner_join(shares_filled) %>%
     mutate(
@@ -229,7 +231,7 @@ fill_ng_elec_eu27 <- function(cons_monthly_raw) {
     group_by(unit) %>%
     tidyr::complete(
       tidyr::nesting(time = seq.Date(min(time), max(time), by = "month")),
-      tidyr::nesting(nrg_bal_code, nrg_bal, siec, freq),
+      tidyr::nesting(nrg_bal_code, nrg_bal, siec, siec_code,freq),
       tidyr::nesting(geo, iso2)
     ) %>%
     left_join(eu27_ng_elec_new %>%

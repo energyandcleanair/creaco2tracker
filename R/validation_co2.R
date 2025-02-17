@@ -521,15 +521,43 @@ validate_co2_transport <- function(co2_daily,
 
   dir.create(folder, showWarnings = FALSE, recursive = T)
 
-  validation_data_transport <- load_climatewatch_csv("climatewatch-transport") %>%
+  climatewatch <- load_climatewatch_csv("climatewatch-transport") %>%
     mutate(source="Climate Watch")
+
+  eea_filepath <- get_data_filepath("greenhouse_gas emissions from transport in europe.csv")
+  eea <- read_csv(eea_filepath, skip=10) %>%
+    `names<-`(c('value', 'value_proj1', 'value_proj2', 'year', 'x', 'y')) %>%
+    select(year, value) %>%
+    filter(!is.na(year),
+           year>2010) %>%
+    mutate(iso2="EU",
+           source="EEA")
+
+  url <- "https://sdi.eea.europa.eu/webdav/datastore/public/eea_t_national-emissions-reported_p_2024_v01_r00/CSV/UNFCCC_v27.csv"
+  filepath <- file.path("data", basename(url))
+  if(!file.exists(filepath)){
+    dir.create(dirname(filepath), showWarnings = FALSE, recursive = T)
+    download.file(url, filepath)
+  }
+  eea_w_international <- read_csv(filepath) %>%
+    filter(Country_code=="EUA") %>%
+    filter(Sector_code %in% c(
+      "1.A.3", # Transport
+      "1.D.1" # International bunkers
+    )) %>%
+    filter(Pollutant_name=="CO2",
+           Unit=="Gg") %>%
+    group_by(year=as.numeric(Year), iso2="EU") %>%
+    summarise(value=sum(emissions)/1e3) %>%
+    mutate(source="UNFCCC (w. international aviation and shipping)")
+
 
   iso2s <- unique(co2_daily$iso2)
 
   lapply(iso2s, function(iso2){
 
     # Load CREA data
-    co2_crea <-co2_daily %>%
+    co2_crea <- co2_daily %>%
       filter(
              iso2 == !!iso2,
              sector == SECTOR_TRANSPORT,
@@ -543,8 +571,9 @@ validate_co2_transport <- function(co2_daily,
       filter(year < 2025)
 
     # Load validation data
-    co2_validate <- validation_data_transport %>%
+    co2_validate <- bind_rows(climatewatch, eea, eea_w_international) %>%
       filter(iso2 %in% unique(co2_crea$iso2))
+
 
     plot_data <- bind_rows(
       co2_crea %>% filter(year >= 1990),
@@ -582,9 +611,9 @@ validate_co2_transport <- function(co2_daily,
            linetype=NULL,
            alpha="Source",
            color="Source",
-           caption="Source: CREA analysis based on EUROSTAT and IPCC. Only refers to road transporation.") -> plt
+           caption="Source: CREA analysis based on EUROSTAT and IPCC.") -> plt
 
-
+    plt
     quicksave(file.path(folder, glue("validation_co2_transport_{tolower(iso2)}.jpg")),
               plot=plt,
               preview = F)
