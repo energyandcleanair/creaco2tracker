@@ -119,7 +119,7 @@ process_oil <- function(x) {
 
   # Need three for all and one or two for transport
   stopifnot("Fix oil"=nrow(mult[mult$sector==SECTOR_ALL,]) == 6,
-            "Fix oil"=nrow(mult[mult$sector==SECTOR_TRANSPORT,]) == 6,
+            "Fix oil"=nrow(mult[mult$sector==SECTOR_TRANSPORT,]) == 8,
             "Fix oil"=base::setequal(mult$factor, c(1,-1)))
 
   x %>%
