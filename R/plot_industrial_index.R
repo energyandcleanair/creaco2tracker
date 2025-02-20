@@ -1,13 +1,13 @@
 plot_industrial_index <- function(industrial_indexes,
-                                          year_f=year(today())-1,
-                                          filepath=NULL,
-                                          width=10,
-                                          height=6){
+                                  by_fuel=T,
+                                  year_f=year(today())-1,
+                                  filepath=NULL,
+                                  width=10,
+                                  height=6){
 
 
   shorten_nace <- function(x){
     case_when(
-
       grepl("mining", x, ignore.case = T) ~ "Mining",
       grepl("food", x, ignore.case = T) ~ "Food & Beverages",
       grepl("textiles", x, ignore.case = T) ~ "Textiles",
@@ -36,12 +36,17 @@ plot_industrial_index <- function(industrial_indexes,
   #   mutate(label=shorten_nace(nace_r2)) %>%
   #   View()
 
+  colors <- get_colors()
 
   plt_data <- industrial_indexes %>%
     filter(iso2=="EU",
            year(date) %in% c(year_f-1, year_f)
     ) %>%
-    group_by(iso2, geo, estimate, nace_r2, product, nace_r2_code, year=year(date)) %>%
+    # Set product to "All" if by_fuel is FALSE
+    mutate(product = if(!by_fuel) "Total" else product) %>%
+    group_by(iso2, geo, estimate, nace_r2,
+             product,  # Now we can always include product
+             nace_r2_code, year=year(date)) %>%
     summarise(energy_tj=sum(energy_tj)) %>%
     arrange(year) %>%
     mutate(diff_tj= energy_tj - lag(energy_tj)) %>%
@@ -57,28 +62,29 @@ plot_industrial_index <- function(industrial_indexes,
 
 
 
-  ggplot(plt_data, aes(label, central, fill=product)) +
-    # geom_hline(yintercept=0, col="#666666") +
+  plt <- ggplot(plt_data, aes(label, central, fill=product)) +
     geom_col(show.legend = F) +
     geom_errorbar(aes(ymin=lower, ymax=upper), linewidth=0.2, width=0.2, col="#999999") +
-    facet_wrap(~product, scales='free_x') +
+    # Only use faceting if by_fuel is TRUE and there's more than one product
+    {if(by_fuel && n_distinct(plt_data$product) > 1)
+      facet_wrap(~product, scales='free_x')
+    } +
     tidytext::scale_x_reordered() +
     rcrea::theme_crea_new() +
     scale_fill_manual(values=get_colors()) +
     scale_y_continuous(labels=function(x) paste0(ifelse(x>0,"+",""),scales::comma(x))) +
-    labs(title="EU Change in energy consumption per sector and fuel family",
+    labs(title=paste("EU Change in energy consumption per industrial sector",
+                    if(by_fuel) "and fuel family" else ""),
          subtitle="2024 vs 2023 in TeraJoule",
          x=NULL,
          y=NULL,
          caption=paste0(c(
-           "Note: This computation assumes constant energy intensity per sector and fuel family.",
+           glue("Note: This chart assumes no change in energy intensity per sector{ifelse(by_fuel, 'and fuel','')}."),
            "Only sectors with the most significant changes are shown.",
            "Source: CREA analysis based on EUROSTAT."
          ), collapse = "\n")
-         ) +
-    # Reduce x labels size
-    # slant x axis
-    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7)) -> plt
+    ) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7))
 
 
 
