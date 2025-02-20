@@ -135,10 +135,29 @@ process_solid_monthly <- function(x, pwr_demand) {
 
   by_sector <- x %>%
     filter(nrg_bal_code %in% c(NRG_GID_CALCULATED, NRG_TRANS_ELEC, NRG_TRANS_COKING)) %>%
-    mutate(sector = if_else(grepl("electricity", nrg_bal), SECTOR_ELEC, SECTOR_ALL)) %>%
+    mutate(sector = if_else(nrg_bal_code==NRG_TRANS_ELEC, SECTOR_ELEC, SECTOR_ALL)) %>%
     # Date valid only from 2014
     filter(time >= "2014-01-01")
 
+
+  view_gaps <- function(x, sector, siec_code){
+    times <- unique(x$time)
+    x %>%
+      add_iso2() %>%
+      filter(sector==!!sector, siec_code==!!siec_code) %>%
+      filter(iso2 %in% get_eu_iso2s(include_eu = F)) %>%
+      ungroup() %>%
+      arrange(desc(time)) %>%
+      tidyr::complete(
+        nesting(geo, iso2),
+        nesting(nrg_bal, nrg_bal_code, siec_code, unit, sector),
+        time=times,
+        fill=list(values=NA)
+      )   %>%
+      select(iso2, time, values) %>%
+      spread(iso2, values) %>%
+      arrange(desc(time))
+  }
 
   #############################
   # Apply manual fixes
@@ -159,7 +178,7 @@ process_solid_monthly <- function(x, pwr_demand) {
   # Add the difference to EU
   to_add_to_eu <-  to_add_greece %>%
     mutate(geo = unique(grep("European Union", by_sector$geo, value=T))) %>%
-    select(geo, time, siec, siec_code, sector, value_to_add=values)
+    select(geo, time, siec_code, sector, value_to_add=values)
 
   by_sector_fixed <- by_sector_fixed %>%
     left_join(to_add_to_eu, relationship = "one-to-one") %>%
@@ -176,22 +195,34 @@ process_solid_monthly <- function(x, pwr_demand) {
   # We rebuild EU Hard coal elec as the sum of all countries (when there are enough that is)
   # By the same token, we also update coking as it will be used later on
   ##########################
-  by_sector_fixed <- by_sector_fixed %>%
-    tidyr::complete(geo="Slovenia",
-                    time,
-                    siec_code=SIEC_HARD_COAL,
-                    unit,
-                    nrg_bal_code=NRG_TRANS_ELEC,
-                    sector=SECTOR_ELEC,
-                    fill=list(values=0)) %>%
-    tidyr::complete(geo="Slovenia",
-                    time,
-                    siec_code=SIEC_HARD_COAL,
-                    unit,
-                    sector=SECTOR_ALL,
-                    nrg_bal_code=NRG_TRANS_COKING,
-                    fill=list(values=0))
+  # If 0 for a while, subsequent NAs are considered to be 0s
+  # This happens in Slovenia for hard coal elec
+  fill_na_with_zero_when_suitable <- function(x) {
+    n <- length(x)
+    for (i in seq_len(n)) {
+      if (is.na(x[i])) {
+        # Check if at least 3 previous values exist and are all 0
+        if (i > 3 && all(x[(i - 3):(i - 1)] < quantile(x, 0.05, na.rm=T), na.rm = T)) {
+          x[i] <- 0
+        }
+      }
+    }
+    return(x)
+  }
 
+  # In Finland, coking for instance
+  fill_gaps_with_interp_when_suitable <- function(x){
+    cv <- sd(x, na.rm=T)/mean(x, na.rm=T)
+    if(!is.na(cv) & cv < 0.1){
+      message("Filing with interpolation")
+      return(zoo::na.approx(x, maxgap=3, na.rm=F))
+    }else{
+      return(x)
+    }
+  }
+
+  # We take hard coal from all countries.
+  times <- unique(by_sector_fixed$time)
   hard_coal_elec_and_coking_eu_from_countries <- by_sector_fixed %>%
     filter(
       sector == SECTOR_ELEC | nrg_bal_code==NRG_TRANS_COKING,
@@ -199,10 +230,31 @@ process_solid_monthly <- function(x, pwr_demand) {
     ) %>%
     add_iso2() %>%
     filter(iso2 %in% get_eu_iso2s(include_eu = F)) %>%
-    group_by(sector, siec, siec_code, nrg_bal_code, time, unit) %>%
+    ungroup() %>%
+    arrange(desc(time)) %>%
+    tidyr::complete(
+      nesting(geo, iso2),
+      nesting(nrg_bal, nrg_bal_code, siec_code, unit, sector),
+      time=times,
+      fill=list(values=NA)
+    )  %>%
+    # We replace NAs with 0s when useful
+    group_by(iso2, geo, nrg_bal, nrg_bal_code, siec_code, unit, sector) %>%
+    arrange(time) %>%
+    mutate(values = fill_na_with_zero_when_suitable(values)) %>%
+    mutate(values = fill_gaps_with_interp_when_suitable(values)) %>%
+    # Fill France gaps
+    # France has some gaps in Hard coal electricity that are annoying to get EU27 total
+    # We fill them with 0 after checking some dates in ENTSOE and confirming there was no coal gen
+    mutate(values = case_when(
+      sector == SECTOR_ELEC & iso2 == "FR" & siec_code == SIEC_HARD_COAL & is.na(values) ~ 0,
+      TRUE ~ values
+    )) %>%
+    group_by(sector, siec_code, nrg_bal_code, time, unit) %>%
     summarise(values_sum_countries=sum(values, na.rm=T),
-              n=n()) %>%
-    filter(n==27)
+              n=sum(!is.na(values))) %>%
+    filter(n>=25) %>%
+    arrange(desc(time))
 
   hard_coal_elec_and_coking_eu <- by_sector_fixed  %>%
     filter(grepl("European", geo),
@@ -210,24 +262,34 @@ process_solid_monthly <- function(x, pwr_demand) {
            siec_code == SIEC_HARD_COAL) %>%
     tidyr::complete(geo,
                     nesting(sector, nrg_bal_code),
-                    nesting(siec, siec_code),
+                    siec_code,
                     time=hard_coal_elec_and_coking_eu_from_countries$time, unit) %>%
     left_join(hard_coal_elec_and_coking_eu_from_countries) %>%
     {
       # Check that when both values exist they're similar
-      comparison <- filter(., !is.na(values), !is.na(values_sum_countries))
+      comparison <- filter(., !is.na(values), !is.na(values_sum_countries),
+                           (time != "2019-01-01" | sector != SECTOR_ELEC) # There's a small exception that day
+                           )
       stopifnot(all(abs(comparison$values - comparison$values_sum_countries) < 1))
       .
     } %>%
-    mutate(values = coalesce(values, values_sum_countries))
+    mutate(values = coalesce(values, values_sum_countries)) %>%
+    arrange(desc(time))
 
+
+  # Only keep contiguous values
+  hard_coal_elec_and_coking_eu <- hard_coal_elec_and_coking_eu %>%
+    group_by(sector, siec_code) %>%
+    arrange(time) %>%
+    mutate(invalid=cumsum(diff(c(time[1], time))>31)) %>%
+    filter(invalid==0)
 
 
    # Replace
   by_sector_fixed <- bind_rows(
     by_sector_fixed %>%
       anti_join(hard_coal_elec_and_coking_eu,
-                by=c("geo", "time", "sector", "siec", "siec_code", "nrg_bal_code", "unit")),
+                by=c("geo", "time", "sector", "siec_code", "nrg_bal_code", "unit")),
       hard_coal_elec_and_coking_eu
   ) %>%
     mutate(fuel = ifelse(siec_code == SIEC_COKE_OVEN_COKE, FUEL_COKE, FUEL_COAL))
@@ -237,14 +299,22 @@ process_solid_monthly <- function(x, pwr_demand) {
   result <- by_sector_fixed %>%
     mutate(factor = case_when(nrg_bal_code == NRG_TRANS_COKING ~ -1,
                               TRUE ~ 1)) %>%
-    group_by(geo, time, siec, siec_code, sector, fuel, unit) %>%
-    summarise(values = sum(values * factor, na.rm = T)) %>%
-    ungroup()
+    group_by(geo, siec_code, sector, fuel, unit, time) %>%
+    summarise(values = sum(values * factor, na.rm = T),
+              n = n()) %>%
+    # Cut last dates with only one nrg_bal when there are two typically
+    filter(n==max(n)) %>%
+    # Cut last dates with not the same amount of siec by sector
+    group_by(geo, sector, time) %>%
+    mutate(n_siec=n_distinct(siec_code)) %>%
+    group_by(geo, sector) %>%
+    filter(n_siec==max(n_siec))
 
-  # Ensure siec is filled throughout
+
+  # Add siec
+  stopifnot(!"siec" %in% colnames(result))
   result <- result %>%
-    select(-c(siec)) %>%
-    left_join(cons_monthly_raw %>% distinct(siec_code, siec))
+    left_join(x %>% distinct(siec_code, siec))
 
   return(result)
 

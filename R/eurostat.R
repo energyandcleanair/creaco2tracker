@@ -44,7 +44,9 @@ get_eurostat_cons <- function(
     x %>%
       mutate(values = values * ifelse(sector == SECTOR_ELEC, -1, 1)) %>%
       group_by(geo, time, unit, siec, siec_code, fuel) %>%
-      summarise_at("values", sum, na.rm = T) %>%
+      summarise(values=sum(values, na.rm = T),
+                   n=sum(!is.na(values))
+                   ) %>%
       mutate(sector = SECTOR_OTHERS) %>%
       bind_rows(x %>% filter(sector == SECTOR_ELEC))
   }
@@ -59,14 +61,14 @@ get_eurostat_cons <- function(
   # Process data
   cons_monthly <- list(
     oil = process_oil_monthly(cons_raw_oil$monthly),
-    solid = process_solid_monthly(cons_raw_solid$monthly, pwr_demand=pwr_demand)%>% split_elec_others(),
+    solid = process_solid_monthly(cons_raw_solid$monthly, pwr_demand=pwr_demand), # %>% split_elec_others(),
     gas = process_gas_monthly(cons_raw_gas$monthly, pwr_demand=pwr_demand) %>% split_elec_others()
   ) %>%
     bind_rows() %>%
     aggregate()
 
   cons_yearly <- list(
-    solid = process_solid_yearly(cons_raw_solid$yearly) %>% split_elec_others(),
+    solid = process_solid_yearly(cons_raw_solid$yearly), # %>% split_elec_others(),
     oil = process_oil_yearly(cons_raw_oil$yearly),
     gas = process_gas_yearly(cons_raw_gas$yearly, pwr_demand=pwr_demand) %>% split_elec_others()
   ) %>%

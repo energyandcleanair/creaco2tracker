@@ -21,6 +21,7 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
   # Collect necessary data
   gas_demand <- download_gas_demand(iso2=NULL, use_cache = use_cache)
   pwr_demand <- download_pwr_demand(use_cache = use_cache)
+
   eurostat_cons <- get_eurostat_cons(
     diagnostics_folder = file.path(diagnostics_folder, "eurostat"),
     pwr_demand = pwr_demand,
@@ -52,10 +53,13 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
 
 
   if(!is.null(diagnostics_folder)){
-    diagnose_eu_vs_countries(co2_filled = co2_filled,
-                             pwr_demand = pwr_demand,
-                             eurostat_cons = eurostat_cons,
-                             diagnostics_folder = file.path(diagnostics_folder, 'eu_vs_countries'))
+    diagnose_eu_vs_countries(
+      co2 = co2,
+      co2_filled = co2_filled,
+      pwr_demand = pwr_demand,
+      eurostat_cons = eurostat_cons %>% filter(time < "2025-01-01"),
+      diagnostics_folder = file.path(diagnostics_folder, 'eu_vs_countries')
+      )
   }
 
 
