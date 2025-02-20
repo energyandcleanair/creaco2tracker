@@ -12,6 +12,7 @@ SIEC_BIOGASOLINE <- "R5210B"
 SIEC_BIODIESEL <- "R5220B"
 
 
+
 #' Collect oil consumption data from EUROSTAT
 #'
 #' @param use_cache Whether to use cached data
@@ -59,6 +60,8 @@ collect_oil <- function(use_cache = FALSE) {
   )
 }
 
+
+
 #' Process oil data from EUROSTAT
 #'
 #' @param x Raw EUROSTAT data
@@ -79,7 +82,7 @@ process_oil <- function(x) {
      & siec_code %in% c(SIEC_ROAD_DIESEL, SIEC_MOTOR_GASOLINE)) |
 
     # SECTOR_TRANSPORT: Kerosene
-    (nrg_bal_code %in% c("FC_TRA_DAVI_E", "INTAVI_E", "INTAVI_E+FC_TRA_DAVI_E") # Added in add_oil_transport function
+    (nrg_bal_code %in% c("FC_TRA_DAVI_E", "INTAVI_E") # Added in add_oil_transport function
      & siec_code %in% c(SIEC_KEROSENE_XBIO, SIEC_AVIATION_GASOLINE)) |
 
     # SECTOR_TRANSPORT: International maritime bunkers
@@ -111,7 +114,9 @@ process_oil <- function(x) {
       T ~ 1
     ),
     sector = case_when(
-      grepl("INTMARB|AVI_E|FC_TRA_E", nrg_bal_code) ~ SECTOR_TRANSPORT,
+      nrg_bal_code %in% c("FC_TRA_E", "FC_TRA_DAVI_E") ~ SECTOR_TRANSPORT_DOMESTIC,
+      nrg_bal_code %in% c("INTAVI_E") ~ SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,
+      nrg_bal_code %in% c("INTMARB") ~ SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING,
       T ~ SECTOR_ALL
     )
     ) %>%
@@ -119,7 +124,9 @@ process_oil <- function(x) {
 
   # Need three for all and one or two for transport
   stopifnot("Fix oil"=nrow(mult[mult$sector==SECTOR_ALL,]) == 6,
-            "Fix oil"=nrow(mult[mult$sector==SECTOR_TRANSPORT,]) == 8,
+            "Fix oil"=nrow(mult[mult$sector==SECTOR_TRANSPORT_DOMESTIC,]) == 4,
+            "Fix oil"=nrow(mult[mult$sector==SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,]) == 2,
+            "Fix oil"=nrow(mult[mult$sector==SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING,]) == 2,
             "Fix oil"=base::setequal(mult$factor, c(1,-1)))
 
   x %>%
