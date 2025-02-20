@@ -59,6 +59,35 @@ collect_oil <- function(use_cache = FALSE) {
   )
 }
 
+investigate_oil <- function(cons_monthly_raw){
+
+
+  # International shipping EU vs countries
+  cons_monthly_raw %>%
+    filter(nrg_bal_code %in% c("INTMARB")
+           & siec_code %in% c(SIEC_FUEL_OIL, SIEC_GASOIL_DIESEL_XBIO)) %>%
+    add_iso2() %>%
+    filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+    mutate(is_eu=iso2=="EU") %>%
+    group_by(is_eu, time, siec_code) %>%
+    summarise(values=sum(values, na.rm=T), n=n())  %>%
+    arrange(desc(time)) %>%
+    ggplot() +
+    geom_line(aes(time, values, col=is_eu)) +
+    facet_wrap(~siec_code)
+
+  cons_monthly_raw %>%
+    filter(nrg_bal_code %in% c("INTMARB")
+           & siec_code %in% c(SIEC_FUEL_OIL)) %>%
+    add_iso2() %>%
+    filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+    select(iso2, time, values) %>%
+    spread(iso2, values) %>%
+    arrange(desc(time)) %>%
+    View()
+
+}
+
 #' Process oil data from EUROSTAT
 #'
 #' @param x Raw EUROSTAT data

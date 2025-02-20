@@ -16,7 +16,7 @@ project_until_now <- function(co2, pwr_demand, gas_demand, eurostat_indprod){
     split_gas_to_elec_all() %>%
     project_until_now_elec(pwr_demand=pwr_demand, dts_month=dts_month) %>%
     project_until_now_gas(gas_demand=gas_demand, dts_month=dts_month) %>%
-    project_until_now_oil(dts_month=dts_month) %>%
+    project_eu_from_countries(dts_month=dts_month) %>%
 
     # Before we apply ETS projection (which has large attached uncertainty)
     # We give a chance to other = total - sum(other sectors)
@@ -273,73 +273,6 @@ project_until_now_coal_others <- function(co2, eurostat_indprod, dts_month, min_
 }
 
 
-#' Complete latest months of EU Oil using European countries latest data
-#'
-#' @param co2
-#' @param dts_month
-#' @param last_years
-#' @param min_r2
-#'
-#' @return
-#' @export
-#'
-#' @examples
-project_until_now_oil <- function(co2, dts_month, min_r2=0.85) {
-
-  # Prepare proxy data from other countries
-  proxy <- co2 %>%
-    filter(fuel == 'oil') %>%
-    complete(
-      date,
-      iso2,
-      fuel,
-      sector
-    ) %>%
-    # Split into EU and others
-    mutate(is_eu = iso2 == 'EU') %>%
-    filter(iso2 %in% get_eu_iso2s()) %>%
-    arrange(desc(date)) %>%
-    # Get the last month with good coverage for non-EU countries
-    group_by(date, fuel, sector) %>%
-    mutate(coverage = mean(!is.na(value[!is_eu]))) %>%
-    group_by(fuel, sector) %>%
-    # Exclude date tails with low coverage
-    filter(date <= max(date[coverage >= 0.8])) %>%
-    filter(date >= min(date[coverage >= 0.8])) %>%
-    filter(!is_eu) %>%
-    # Fill missing country-level data through interpolation
-    arrange(date) %>%
-    group_by(fuel, sector) %>%
-    mutate(
-      value = zoo::na.approx(value, na.rm = F)
-    ) %>%
-    # Sum all EU countries
-    group_by(date, fuel, sector) %>%
-    summarise(
-      value_proxy = sum(value, na.rm = T),
-      .groups = 'drop'
-    ) %>%
-    mutate(iso2="EU")
-
-  # Filter EU data
-  co2_eu <- co2 %>%
-    filter(iso2 == 'EU', fuel == FUEL_OIL)
-
-  # Use project_until_now_lm for the actual projection
-  new_eu_oil <- project_until_now_lm(
-    co2_eu,
-    proxy,
-    dts_month = dts_month,
-    min_r2 = min_r2
-  )
-
-  bind_rows(
-    co2 %>% filter(fuel != FUEL_OIL | iso2 != 'EU'),
-    new_eu_oil
-  )
-}
-
-
 project_until_now_forecast <- function(co2, dts_month, last_years=10, conf_level=0.90){
 
   res <- co2 %>%
@@ -416,6 +349,107 @@ fill_lower_upper <- function(df) {
       value_lower = coalesce(value_lower, value_central),
       value_upper = coalesce(value_upper, value_central)
     )
+}
+
+#' Project EU emissions using available country data
+#'
+#' @param co2 CO2 emissions dataframe
+#' @param dts_month Sequence of months to project
+#' @param min_countries Minimum number of countries required for projection (default 25)
+#' @param sectors Optional vector of sectors to project (default NULL for all sectors)
+#' @param fuels Optional vector of fuels to project (default NULL for all fuels)
+#'
+#' @return Updated CO2 emissions dataframe with projected EU values
+#' @export
+project_eu_from_countries <- function(co2, dts_month, min_countries = 20,
+                                    sectors = NULL, fuels = NULL) {
+
+  # Apply sector and fuel filters if provided
+  co2_filtered <- co2
+  if (!is.null(sectors)) {
+    co2_filtered <- co2_filtered %>% filter(sector %in% sectors)
+  }
+  if (!is.null(fuels)) {
+    co2_filtered <- co2_filtered %>% filter(fuel %in% fuels)
+  }
+
+  # Split EU and country data
+  co2_eu <- co2_filtered %>% filter(iso2 == "EU")
+  co2_countries <- co2_filtered %>%
+    filter(iso2 %in% get_eu_iso2s(), iso2 != "EU")
+
+  # Get latest date with EU data for each fuel/sector combination
+  latest_eu_dates <- co2_eu %>%
+    filter(!is.na(value)) %>%
+    group_by(fuel, sector) %>%
+    summarise(latest_eu_date = max(date), .groups = "drop")
+
+  # For each month after latest EU data, get country availability info
+  countries_availability <- co2_countries %>%
+    left_join(latest_eu_dates, by = c("fuel", "sector")) %>%
+    filter(date > latest_eu_date) %>%
+    group_by(date, fuel, sector) %>%
+    summarise(
+      available_countries = list(iso2[!is.na(value)]),
+      n_countries = length(available_countries[[1]]),
+      .groups = "drop"
+    ) %>%
+    filter(n_countries >= min_countries)
+
+  # Get distinct country sets
+  country_sets <- countries_availability %>%
+    distinct(available_countries, n_countries) %>%
+    arrange(desc(n_countries))
+
+  if(nrow(country_sets) == 0){
+    return(co2)
+  }
+
+  # Initialize results list
+  projected_results <- list()
+
+  # Loop through each distinct set of countries
+  for (i in 1:nrow(country_sets)) {
+    current_countries <- country_sets$available_countries[[i]]
+
+    # Prepare proxy data using only these countries
+    proxy <- co2_countries %>%
+      filter(iso2 %in% current_countries) %>%
+      left_join(latest_eu_dates, by = c("fuel", "sector")) %>%
+      # Get dates where we have all countries in the set
+      group_by(date, fuel, sector) %>%
+      filter(n_distinct(iso2[!is.na(value)]) == length(current_countries)) %>%
+      summarise(
+        value_proxy = sum(value, na.rm = TRUE),
+        .groups = "drop"
+      ) %>%
+      mutate(iso2 = "EU")
+
+    # Project using this specific set of countries
+    current_projection <- project_until_now_lm(
+      co2_eu,
+      proxy,
+      dts_month = dts_month,
+      min_r2 = 0.95
+    ) %>%
+      mutate(order = i)  # Add order based on country set size (1 = largest set)
+
+    projected_results[[i]] <- current_projection
+  }
+
+  # Combine all projections and take first available value for each combination
+  final_projection <- bind_rows(projected_results) %>%
+    group_by(iso2, date, fuel, sector) %>%
+    filter(!is.na(value)) %>%
+    slice_min(order, n = 1) %>%  # Take row with smallest order number
+    ungroup() %>%
+    select(-order)  # Remove the order column
+
+  # Combine projected EU data with original data
+  bind_rows(
+    co2 %>% anti_join(final_projection, by = c("iso2", "date", "fuel", "sector")),
+    final_projection
+  )
 }
 
 

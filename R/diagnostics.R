@@ -308,11 +308,6 @@ diagnose_eu_vs_countries <- function(
     # Eurostat --------------------------------------------------
     plt_data <- eurostat_cons %>%
       filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
-      {
-        n_countries <- n_distinct(.$iso2)
-        stopifnot('Expected 27 EU countries + EU'= n_countries == 28)
-        .
-      } %>%
       mutate(is_eu=case_when(iso2=="EU" ~ "EU", TRUE ~ "EU member states")) %>%
       filter(time < "2025-01-01") %>%
       filter(time >= "2015-01-01") %>%
@@ -322,7 +317,7 @@ diagnose_eu_vs_countries <- function(
         time,
         is_eu) %>%
       summarise(value=sum(values, na.rm=T),
-                n=n_distinct(iso2)) %>%
+                n_iso2=n_distinct(iso2)) %>%
       arrange(desc(time))
 
     plt_data %>%
@@ -366,25 +361,26 @@ diagnose_eu_vs_countries <- function(
 
     # CO2 filled ---------------------------------------------------
     plt_data <- co2_filled %>%
-      # filter(estimate=="central") %>%
       detotalise_co2() %>%
       filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
-      {
-        n_countries <- n_distinct(.$iso2)
-        print(n_countries)
-        stopifnot('Expected 27 EU countries + EU'= n_countries == 28)
-        .
-      } %>%
       mutate(is_eu=case_when(iso2=="EU" ~ "EU", TRUE ~ "EU member states")) %>%
       filter(date < "2025-01-01") %>%
-      filter(date >= "2010-01-01") %>%
+      filter(date >= "2015-01-01") %>%
       group_by(
         fuel,
         sector,
         date=floor_date(date, "month"),
-        is_eu) %>%
-      summarise(value=sum(value, na.rm=T)/1e9) %>%
-      arrange(desc(date))
+        is_eu,
+        estimate
+        ) %>%
+      summarise(value=sum(value, na.rm=T)/1e9,
+                n_iso2=n_distinct(iso2)) %>%
+      arrange(desc(date)) %>%
+      filter(is_eu=="EU" | n_iso2==27) %>%
+      # Remove the projected part
+      spread(estimate, value) %>%
+      mutate(is_projected=upper!=lower) %>%
+      rename(value=central)
 
     # Add total
     plt_data <- bind_rows(
@@ -393,27 +389,40 @@ diagnose_eu_vs_countries <- function(
         group_by(is_eu, date) %>%
         summarise(value=sum(value, na.rm=T),
                   fuel="total",
-                  sector="all")
+                  sector="all",
+                  is_projected=any(is_projected)
+                  )
     )
+
+    # Add point to have lines
+    plt_data %>%
+      group_by(sector, fuel, is_eu) %>%
+      arrange(date) %>%
+      filter(!is_projected & lead(is_projected)) %>%
+      mutate(is_projected=T) %>%
+      bind_rows(plt_data) -> plt_data
+
+
 
     # Check EU vs countries
     plt_data %>%
       group_by(fuel) %>%
-      ggplot(aes(date, value, col=is_eu)) +
-      geom_line(show.legend = F) +
-      ggrepel::geom_text_repel(
-        data = . %>% filter(date==max(date)),
-        aes(label=is_eu), nudge_x = 0.5, nudge_y = 0.5,
-        show.legend = F,
-        # hide segment
-        segment.color = NA,
-        # vertically aligned
-        direction = 'x',
-        hjust = 0,
-        # bold
-        fontface = 'bold',
-
-        ) +
+      ggplot(aes(date, value, col=is_eu, linetype=is_projected)) +
+      geom_line(show.legend = T) +
+      # ggrepel::geom_text_repel(
+      #   data = . %>% filter(date==max(date)),
+      #   aes(label=is_eu),
+      #   # nudge_x = 0.5, nudge_y = 0.5,
+      #   show.legend = F,
+      #   # hide segment
+      #   segment.color = NA,
+      #   # vertically aligned
+      #   direction = 'x',
+      #   hjust = 0,
+      #   # bold
+      #   fontface = 'bold',
+      #
+      #   ) +
       facet_wrap(sector~fuel) +
       # scale_x_continuous(expand = expansion(add = c(0, 3)),
       #                    breaks = seq(2015, 2025, 1)
@@ -426,17 +435,19 @@ diagnose_eu_vs_countries <- function(
         subtitle='AFTER filling missing data - Gap is theoretically NOT OK',
         y='Gt CO2 per year',
         x=''
+      ) +
+      guides(
+        # Hide linetype legend
+        linetype = "none",
+        color = guide_legend(title = NULL)
       ) -> plt
-
-     plt
      quicksave(file.path(diagnostics_folder, 'eu_vs_countries_co2_filled.png'),
               plot=plt,
-           width=10, height=8, bg='white', scale=1.5, preview=F)
+           width=10, height=8, bg='white', scale=1.8, preview=F)
 
 
      # CO2 before filling ---------------------------------------------------
      plt_data <- co2 %>%
-       # filter(estimate=="central") %>%
        detotalise_co2() %>%
        filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
        {
