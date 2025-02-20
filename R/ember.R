@@ -1,3 +1,4 @@
+
 ember.get_eu_generation <- function(frequency='yearly'){
 
     readRenviron(".Renviron")

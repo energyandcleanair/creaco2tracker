@@ -603,7 +603,7 @@ validate_co2_transport <- function(co2_daily,
           facet_wrap(~iso2, scales='free_y')
         }
       } +
-      labs(title=glue("{iso2_to_name(iso2)} CO2 emissions in transport sector"),
+      labs(title=glue("[DIAGNOSTICS] {iso2_to_name(iso2)} CO2 emissions in transport sector"),
            subtitle="Projection of historical sources using CREA CO2 tracker, in billion tonne CO2 per year",
            y=NULL,
            x=NULL,
@@ -616,7 +616,9 @@ validate_co2_transport <- function(co2_daily,
     plt
     quicksave(file.path(folder, glue("validation_co2_transport_{tolower(iso2)}.jpg")),
               plot=plt,
-              preview = F)
+              preview = F,
+              width=8,
+              height=5)
   })
 
 }

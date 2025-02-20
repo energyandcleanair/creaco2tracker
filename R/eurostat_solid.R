@@ -310,7 +310,6 @@ process_solid_monthly <- function(x, pwr_demand) {
     group_by(geo, sector) %>%
     filter(n_siec==max(n_siec))
 
-
   # Add siec
   stopifnot(!"siec" %in% colnames(result))
   result <- result %>%
