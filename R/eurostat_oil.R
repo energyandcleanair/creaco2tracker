@@ -152,7 +152,6 @@ investigate_oil <- function(cons_monthly_raw, cons_monthly_filled, cons_yearly){
 }
 
 
-
 #' Process oil data from EUROSTAT
 #'
 #' @param x Raw EUROSTAT data
