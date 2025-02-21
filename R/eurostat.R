@@ -222,6 +222,7 @@ remove_last_incomplete <- function(cons) {
 get_eurostat_indprod <- function(diagnostics_folder = NULL,
                                  use_cache = F,
                                  iso2s = NULL) {
+
   indprod_raw <- get_eurostat_from_code(code = "sts_inpr_m", use_cache = use_cache) %>%
     add_iso2()
 
