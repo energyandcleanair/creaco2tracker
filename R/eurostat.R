@@ -118,15 +118,26 @@ get_eurostat_cons <- function(
   # Keep monthly when both are available
   # unless specified otherwise after looking at diagnostic charts
   cutoff_monthly <- tibble(
-    siec_code=c(SIEC_NATURAL_GAS, SIEC_COKE_OVEN_COKE, SIEC_KEROSENE_XBIO),
+    siec_code=c(SIEC_NATURAL_GAS,
+                SIEC_COKE_OVEN_COKE,
+                SIEC_KEROSENE_XBIO,
+                SIEC_HARD_COAL
+                ),
     # sector=c("others", "others"),
-    cutoff_date=c("2020-01-01", "2019-01-01", "2019-01-01"),
+    cutoff_date=c("2020-01-01", "2019-01-01", "2019-01-01", "2020-01-01"),
     source="monthly"
-  )
+  ) %>%
+    # Add default cutoff date
+    tidyr::complete(siec_code=unique(cons_yearly_monthly$siec_code),
+                    source,
+                    fill=list(cutoff_date="2020-01-01")
+                    )
+
+
 
   cons_combined <- bind_rows(
     cons_yearly_monthly %>% mutate(source = "yearly"),
-    cons_monthly %>% mutate(source = "monthly"),
+    cons_monthly %>% mutate(source = "monthly") %>% filter(),
   ) %>%
     # Cut off monthly that didn't look good on charts
     left_join(cutoff_monthly) %>%
