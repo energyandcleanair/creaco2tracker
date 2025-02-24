@@ -119,6 +119,40 @@ investigate_solid <- function(monthly, yearly){
     ggplot() +
     geom_line(aes(time, values, color=type))
     # facet_wrap(~type, scales='free_y')
+
+
+
+  # Investigating coking gas
+  yearly %>%
+    filter(nrg_bal_code=="TI_CO_E") %>%
+    add_iso2() %>%
+    filter(iso2=="IT", siec=="Hard coal") %>%
+    ggplot() + geom_line(aes(time, values)) + rcrea::scale_y_zero()
+
+
+  yearly %>%
+    filter(nrg_bal_code=="TI_CO_E") %>%
+    add_iso2() %>%
+    filter(iso2=="IT", siec=="Hard coal") %>%
+    ggplot() + geom_line(aes(time, values)) + rcrea::scale_y_zero()
+
+  yearly_gas <- get_eurostat_from_code(
+    code = "nrg_cb_gas",
+    use_cache = F,
+    filters = list(nrg_bal = c("IPRD", "IC_CAL", "NRG_CO_E", "NRG_E", "FC", "FC_E"))
+  )
+
+  yearly_gas %>%
+    filter(siec_code==SIEC_COKE_OVEN_GAS) %>%
+    add_iso2() %>%
+    filter(iso2=="IT", !is.na(values)) %>%
+    filter(grepl("Terajoule", unit)) %>%
+    ggplot() + geom_line(aes(time, values, col=nrg_bal_code)) +
+    rcrea::scale_y_zero()
+
+
+
+
 }
 
 
@@ -553,11 +587,12 @@ process_solid_yearly <- function(x) {
   NRG_FINAL_IRON_STEEL <- "FC_IND"
 
   result <- x %>%
-        filter(nrg_bal_code %in% c(NRG_FINAL_ENERGY,
-                              NRG_TRANS_ENERGY,
-                              NRG_ELEC_CHP,
-                              NRG_ELEC_ONLY,
-                              NRG_TRANS_COKING) |
+        filter(nrg_bal_code %in% c(
+          NRG_FINAL_ENERGY,
+          NRG_TRANS_ENERGY,
+          NRG_ELEC_CHP,
+          NRG_ELEC_ONLY,
+          NRG_TRANS_COKING) |
             (nrg_bal_code == NRG_FINAL_IRON_STEEL & siec_code == SIEC_COKE_OVEN_COKE)) %>%
         mutate(
             sector = ifelse(grepl("electricity", nrg_bal), SECTOR_ELEC, SECTOR_ALL),
@@ -571,17 +606,37 @@ process_solid_yearly <- function(x) {
     group_by(geo, time, siec, siec_code, sector, fuel, unit) %>%
     summarise(values = sum(values * factor, na.rm = T), .groups = "drop")
 
-  # # Debug plot
+  # Debug plot
+  # x %>%
+  #   filter(nrg_bal_code %in% c(
+  #     NRG_FINAL_ENERGY,
+  #     NRG_TRANS_ENERGY,
+  #     NRG_ELEC_CHP,
+  #     NRG_ELEC_ONLY,
+  #     NRG_TRANS_COKING) |
+  #       (nrg_bal_code == NRG_FINAL_IRON_STEEL & siec_code == SIEC_COKE_OVEN_COKE)) %>%
+  #   add_iso2() %>%
+  #   # filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+  #   filter(iso2=="IT") %>%
+  #   filter(time < "2025-01-01") %>%
+  #   filter(time >= "2015-01-01") %>%
+  #   ggplot() +
+  #   geom_line(aes(time, values, color=nrg_bal_code)) +
+  #   facet_wrap(~siec)
+  #
+  # plt_data %>%
+  #   ggplot() +
+  #   geom_line(aes(time, value, color=is_eu, linetype=is_eu)) +
+  #   facet_wrap(siec~sector, scales="free_y") +
+  #   theme_minimal() +
+  #   theme(
+  #     legend.position = "none"
+  #   )
+  #
   # plt_data <- result %>%
   #   add_iso2() %>%
-  #   filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
-  #   {
-  #     n_countries <- n_distinct(.$iso2)
-  #     print(n_countries)
-  #     stopifnot('Expected 27 EU countries + EU'= n_countries == 28)
-  #     .
-  #   } %>%
-  #   mutate(is_eu=case_when(iso2=="EU" ~ "EU", TRUE ~ "EU member states")) %>%
+  #   # filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+  #   filter(iso2=="IT") %>%
   #   filter(time < "2025-01-01") %>%
   #   filter(time >= "2015-01-01") %>%
   #   group_by(
