@@ -42,7 +42,6 @@ validate_co2_historical <- function(co2_daily = NULL,
                                   date_from = "1990-01-01") {
 
 
-
   # Remove the get_validation_data() call since data is passed in
   # Rest of function remains the same
   dir.create(folder, F, T)
@@ -52,16 +51,17 @@ validate_co2_historical <- function(co2_daily = NULL,
     iso2s <- unique(co2_daily$iso2)
   }
 
+
   lapply(iso2s, function(iso2){
 
 
     ##############################
-    # Plot 1: FUEL_TOTAL
+    # Plot 1: ALL FUELS + SECTORS
     ##############################
     # Load CREA data
     co2_crea <- co2_daily %>%
-      filter(sector == SECTOR_ALL,
-             fuel == FUEL_TOTAL,
+      filter(fuel == FUEL_TOTAL,
+             sector == SECTOR_ALL,
              iso2 %in% c(!!iso2),
              estimate == "central"
              ) %>%
@@ -129,6 +129,26 @@ validate_co2_historical <- function(co2_daily = NULL,
     ##############################
     # Plot 2: BY FUEL
     ##############################
+    # # Validation by fuel data doesn't include international aviation/maritime
+    # co2_wo_international <- co2_daily %>%
+    #   group_by(iso2) %>%
+    #   # Because transport data is only available after a certain date
+    #   # We cut it so that time series is consistent
+    #   filter(
+    #     any(sector %in% c(SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING,
+    #                       SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,
+    #                       SECTOR_TRANSPORT_DOMESTIC
+    #     ) & !is.na(value)),
+    #     date >= min(date[sector %in% c(SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING,
+    #                                    SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,
+    #                                    SECTOR_TRANSPORT_DOMESTIC
+    #     ) & !is.na(value)]),
+    #     ! sector %in% c(SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING,
+    #                     SECTOR_TRANSPORT_INTERNATIONAL_AVIATION)
+    #   ) %>%
+    #   ungroup()
+
+
     # Load CREA data
     co2_crea <- co2_daily %>%
       combine_coke_coal() %>%
@@ -178,7 +198,7 @@ validate_co2_historical <- function(co2_daily = NULL,
       scale_alpha_manual(values=alphas) +
       scale_linewidth_manual(values=linewidths) +
       scale_color_manual(values=colors) +
-      rcrea::theme_crea_new() +
+      # rcrea::theme_crea_new() +
       rcrea::scale_y_crea_zero() +
       facet_wrap(~stringr::str_to_title(fuel), scales='free_y') +
       labs(title=glue("{iso2_to_name(iso2)} CO2 emissions from fossil fuels"),

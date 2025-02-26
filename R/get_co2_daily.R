@@ -32,7 +32,6 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
     diagnostics_folder = file.path(diagnostics_folder, 'eurostat')
     )
 
-
   # Quick sanity checks
   if(!is.null(diagnostics_folder)){
     diagnostic_pwr(pwr_demand,
