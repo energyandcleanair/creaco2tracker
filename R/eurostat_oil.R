@@ -97,7 +97,6 @@ investigate_oil <- function(cons_monthly_raw, cons_monthly_filled, cons_yearly){
     View()
 
 
-
   # Discrepancy monthly - yearly
   bind_rows(
     # cons_monthly_raw,
@@ -152,6 +151,7 @@ investigate_oil <- function(cons_monthly_raw, cons_monthly_filled, cons_yearly){
 }
 
 
+
 #' Process oil data from EUROSTAT
 #'
 #' @param x Raw EUROSTAT data
@@ -179,8 +179,6 @@ process_oil <- function(x) {
     (nrg_bal_code %in% c("INTMARB")
      & siec_code %in% c(SIEC_FUEL_OIL, SIEC_GASOIL_DIESEL_XBIO))
   )
-
-
 
   # We have separated fuel oil from oil products as it has a significantly higher
   # emission factor. To avoid double counting, we substract fuel oil from oil products.
