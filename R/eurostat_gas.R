@@ -1,4 +1,6 @@
 SIEC_NATURAL_GAS <- "G3000"
+SIEC_COKE_OVEN_GAS <- "C0350"
+
 
 #' Collect gas consumption data from EUROSTAT
 #'
