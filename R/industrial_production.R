@@ -1,6 +1,57 @@
 ### THIS IS DIFFERENT FROM INDPROD
 # This one is used to compare trade with production to have a % comparable with change in production from indprod
-get_industrial_production <- function(){
+get_industrial_prodtrade<- function(){
+
+
+  # The first 4 digits of a Prodcom code refer to the statistical classification of economic activities (NACE)
+  url <- "https://ec.europa.eu/eurostat/api/comext/dissemination/sdmx/3.0/data/dataflow/ESTAT/ds-056121/1.0/*.*.*.*?c[freq]=A&c[decl]=2027&c[indicators]=PRODQNT&c[TIME_PERIOD]=2014,2015,2016,2017,2018,2019,2020,2021,2022,2023&compress=false&format=csvdata&formatVersion=2.0&lang=en&labels=name"
+  url <- "https://ec.europa.eu/eurostat/api/comext/dissemination/sdmx/3.0/data/dataflow/ESTAT/ds-056120/1.0/*.*.*.*?c[freq]=A&c[decl]=2027&c[indicators]=PRODQNT,IMPQNT,EXPQNT&c[TIME_PERIOD]=2012,2013,2014,2015,2016,2017,2018,2019,2020,2021,2022,2023&compress=false&format=csvdata&formatVersion=2.0&lang=en&labels=name"
+  raw <- read_csv(url)
+
+  prodtrade <- raw %>% select(year=TIME_PERIOD...12,
+                               prccode,
+                               PRCCODE,
+                               indicator=indicators,
+                               value=OBS_VALUE,
+
+  ) %>%
+    mutate(nace_r2_code=glue("C{substr(prccode, 1, 2)}")) %>%
+    filter(
+      # Only keep manufacturing
+      as.numeric(substr(prccode, 1, 2)) %in% 10:33
+    ) %>%
+    group_by(iso2="EU", year, nace_r2_code, indicator) %>%
+    summarise(value=sum(value),
+              unit="kg")
+
+
+  # Group some of them to match indprod
+  nace_groupings <- list(
+    "C10-C12" = c("C10", "C11", "C12"),
+    "C13-C15" = c("C13", "C14", "C15"),
+    "C31_C32" = c("C31", "C32")
+  ) %>%
+    enframe(name="nace_group", value="nace_r2_code") %>%
+    unnest(cols=nace_r2_code)
+
+  prodtrade <- production %>%
+    left_join(nace_groupings, by="nace_r2_code") %>%
+    group_by(iso2, year, nace_group=coalesce(nace_group, nace_r2_code), indicator) %>%
+    summarise(value=sum(value),
+              unit="kg") %>%
+    ungroup() %>%
+    mutate(nace_r2_code=nace_group) %>%
+    select(-nace_group) %>%
+    mutate(indicator=recode(indicator, `PRODQNT`="production", `IMPQNT`="import", `EXPQNT`="export"))
+
+
+  return(prodtrade)
+
+
+}
+
+
+get_industrial_production_old <- function(){
 
 
   # The first 4 digits of a Prodcom code refer to the statistical classification of economic activities (NACE)

@@ -40,24 +40,25 @@ get_validation_data <- function(region="EU", source_name = NULL, ...) {
 
 load_gcb <- function(source_name, region, ...) {
 
-  filepath <- get_data_filepath("GCB2023.csv")
-  gcb <- read_csv(filepath)
-  gcb %>%
-    pivot_longer(-c(Year,Country),
+  filepath <- get_data_filepath("GCB2024v17_MtCO2_flat.csv")
+  raw <- read_csv(filepath)
+  gcb <- raw %>%
+    select(iso3=`ISO 3166-1 alpha-3`, Year, Total, Coal, Oil, Gas, Cement, Flaring, Other) %>%
+    pivot_longer(-c(Year,iso3),
                  names_prefix='Fuels_',
                  names_to='fuel'
                  ) %>%
     filter(fuel %in% c('Coal', 'Oil', 'Gas')) %>%
-    mutate(iso2 = countrycode(Country, "iso3c", "iso2c", custom_match = c("EU27"="EU")),
+    mutate(iso2 = countrycode(iso3, "iso3c", "iso2c"),
       fuel=tolower(fuel),
-      source='GCB2023',
+      source='GCB2024',
       sector=SECTOR_ALL,
       unit='mt',
-      value = value * 44/12, #C to CO2
-      country=countrycode(iso2, "iso2c", "country.name", custom_match = c("EU"="EU"))
+      # value = value * 44/12, #C to CO2
+      country=countrycode(iso2, "iso2c", "country.name")
     ) %>%
     rename(year=Year) %>%
-    select(-c(Country)) %>%
+    select(-c(iso3)) %>%
     # Add total
     bind_rows(
       .,
@@ -66,6 +67,20 @@ load_gcb <- function(source_name, region, ...) {
                   fuel = FUEL_TOTAL,
                   .groups="drop")
     )
+
+  # Add EU
+  gcb <- bind_rows(
+    gcb,
+    gcb %>%
+      filter(iso2 %in% get_eu_iso2s()) %>%
+      group_by(year, sector, fuel) %>%
+      summarise(value=sum(value, na.rm=TRUE), .groups="drop") %>%
+      mutate(iso2="EU")
+  )
+
+  # Lower case fuel
+  gcb$fuel <- tolower(gcb$fuel)
+  return(gcb)
 }
 
 # Load Carbon Monitor data
