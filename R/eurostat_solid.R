@@ -3,6 +3,8 @@ SIEC_HARD_COAL <- "C0100"
 SIEC_COKE_OVEN_COKE <- "C0311"
 SIEC_BROWN_COAL_BRIQUETTES <- "C0330"
 
+HARDCOAL_COKING_RATE_FACTOR <- 0.08 # See investigate_coking_emissions
+
 #' Collect solid fuel (i.e. coal and coke so far for us) consumption data from EUROSTAT
 #'
 #' @param use_cache Whether to use cached data
@@ -120,21 +122,19 @@ investigate_solid <- function(monthly, yearly){
     geom_line(aes(time, values, color=type))
     # facet_wrap(~type, scales='free_y')
 
+}
 
+investigate_coking_emissions <- function(yearly){
 
   # Investigating coking gas
-  yearly %>%
+  hardcoal_coking <- yearly %>%
     filter(nrg_bal_code=="TI_CO_E") %>%
     add_iso2() %>%
-    filter(iso2=="IT", siec=="Hard coal") %>%
-    ggplot() + geom_line(aes(time, values)) + rcrea::scale_y_zero()
+    filter(siec=="Hard coal")
 
 
-  yearly %>%
-    filter(nrg_bal_code=="TI_CO_E") %>%
-    add_iso2() %>%
-    filter(iso2=="IT", siec=="Hard coal") %>%
-    ggplot() + geom_line(aes(time, values)) + rcrea::scale_y_zero()
+  ggplot(hardcoal_coking) + geom_line(aes(time, values)) + rcrea::scale_y_zero()
+
 
   yearly_gas <- get_eurostat_from_code(
     code = "nrg_cb_gas",
@@ -145,12 +145,40 @@ investigate_solid <- function(monthly, yearly){
   yearly_gas %>%
     filter(siec_code==SIEC_COKE_OVEN_GAS) %>%
     add_iso2() %>%
-    filter(iso2=="IT", !is.na(values)) %>%
+    filter(iso2=="EU", !is.na(values)) %>%
     filter(grepl("Terajoule", unit)) %>%
     ggplot() + geom_line(aes(time, values, col=nrg_bal_code)) +
     rcrea::scale_y_zero()
 
+  coke_gas <- yearly_gas %>% filter(siec_code==SIEC_COKE_OVEN_GAS, nrg_bal_code=="IPRD", grepl("Terajoule", unit))
 
+  # Compute the ratio of hard coal emissions that should be accounted for
+  # to account for coke oven gas (which is not available in monthly data)
+  hardcoal_coking_emissions <- get_co2_from_eurostat_cons(hardcoal_coking %>% mutate(fuel=FUEL_COAL, sector=SECTOR_ALL))
+  coke_gas_emissions <- get_co2_from_eurostat_cons(coke_gas %>% mutate(fuel=FUEL_GAS, sector=SECTOR_ALL))
+
+  bind_rows(
+    hardcoal_coking_emissions,
+    coke_gas_emissions
+  ) %>%
+    filter(iso2 %in% c("DE", "IT", "FR", "EU")) %>%
+    select(fuel, iso2, date, value) %>%
+    spread(fuel, value) %>%
+    mutate(ratio=gas/coal) %>%
+    filter(ratio != 0) %>%
+    ggplot() + geom_line(aes(date, ratio, col=iso2)) + rcrea::scale_y_zero()
+
+  bind_rows(
+    hardcoal_coking_emissions,
+    coke_gas_emissions
+  ) %>%
+    filter(iso2 %in% c("DE", "IT", "FR", "EU")) %>%
+    select(fuel, iso2, date, value) %>%
+    spread(fuel, value) %>%
+    mutate(ratio=gas/coal) %>%
+    filter(ratio != 0) %>%
+    group_by(iso2) %>%
+    summarise(ratio=mean(ratio, na.rm=T))
 
 
 }
@@ -330,8 +358,9 @@ process_solid_monthly <- function(x, pwr_demand) {
 
 
   # Remove part of the coal that is used to produced coke to avoid double counting
+  # Though keeping a share to represent coke oven gas emissions (see in process_solid_yearly)
   result <- by_sector_fixed %>%
-    mutate(factor = case_when(nrg_bal_code == NRG_TRANS_COKING ~ -1,
+    mutate(factor = case_when(nrg_bal_code == NRG_TRANS_COKING ~ -1 + HARDCOAL_COKING_RATE_FACTOR,
                               TRUE ~ 1)) %>%
     group_by(geo, siec_code, sector, fuel, unit, time) %>%
     summarise(values = sum(values * factor, na.rm = T),
@@ -598,9 +627,13 @@ process_solid_yearly <- function(x) {
             sector = ifelse(grepl("electricity", nrg_bal), SECTOR_ELEC, SECTOR_ALL),
             fuel = ifelse(siec_code == SIEC_COKE_OVEN_COKE, FUEL_COKE, FUEL_COAL)
         ) %>%
-    # Remove coal used to produce coke to avoid double counting
+    # Remove MOST OF coal used to produce coke to avoid double counting
+    # We find in investigate_coking_emissions that we can approximate that
+    # coke oven gas emissions represent roughly 8% of the equivalent
+    # of hard coal emissions. So we keep some of it to account for it
+    # (coke oven gas will then be under Coal category)
     mutate(factor = case_when(
-      nrg_bal_code == NRG_TRANS_COKING ~ -1,
+      nrg_bal_code == NRG_TRANS_COKING ~ -1 + HARDCOAL_COKING_RATE_FACTOR,
       TRUE ~ 1)
       ) %>%
     group_by(geo, time, siec, siec_code, sector, fuel, unit) %>%

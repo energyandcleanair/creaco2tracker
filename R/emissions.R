@@ -11,7 +11,7 @@ get_co2_from_eurostat_cons <- function(eurostat_cons, diagnostics_folder="diagno
     add_emission_factor() %>%
     mutate(value_co2_tonne=
              case_when(unit=='Thousand tonnes' ~ values * ncv_kjkg / 1000 * co2_factor_t_per_TJ,
-                       unit=='Terajoule (gross calorific value - GCV)' & siec == "Natural gas" ~ values * ncv_gcv_gas * co2_factor_t_per_TJ
+                       unit=='Terajoule (gross calorific value - GCV)' & fuel==FUEL_GAS ~ values * ncv_gcv_gas * co2_factor_t_per_TJ
              )) %>%
     group_by_at(group_by_cols) %>%
     summarise(value = sum(value_co2_tonne, na.rm=T),
@@ -121,8 +121,11 @@ add_ncv <- function(x, diagnostics_folder=NULL){
     tidyr::complete(
       iso2=unique(add_iso2(x)$iso2),
       siec,
-      year
+      year=seq(min(year(x$time)), max(year(x$time)), by=1)
     ) %>%
+    # Fill time wise
+    group_by(iso2, siec) %>%
+    fill(ncv_kjkg, .direction = "downup") %>%
     left_join(conversion_wmean) %>%
     mutate(ncv_kjkg=coalesce(ncv_kjkg, ncv_kjkg_wmean)) %>%
     select(-c(ncv_kjkg_wmean)) %>%
@@ -153,7 +156,12 @@ add_ncv <- function(x, diagnostics_folder=NULL){
     arrange(time) %>%
     tidyr::fill(ncv_kjkg, .direction = "downup")
 
-  stopifnot(all(!is.na(x_with_ncv[x_with_ncv$iso2!='ME',]$ncv_kjkg)))
+  stopifnot(all(!is.na(x_with_ncv %>% filter(iso2!='ME', !grepl("Terajoule", unit)) %>% pull(ncv_kjkg))))
+
+  # NEW: Make it time insensitive, as it introduces weird patterns
+  x_with_ncv <- x_with_ncv %>%
+    group_by(geo, siec) %>%
+    mutate(ncv_kjkg=mean(ncv_kjkg, na.rm=T))
 
   x_with_ncv
 }
@@ -174,6 +182,7 @@ add_emission_factor <- function(x){
       grepl('Road diesel', siec)~72.1, #EFID=18919
       grepl('Crude oil', siec)~73, #EFID=110603
       siec=='Natural gas'~55.74, #Average of EFID123092-123095
+      siec=="Coke oven gas" ~ 41.2, #EFID=122159
       siec=='Coke oven coke' ~ 113, #EFID=110624,
       grepl('Gas oil and diesel oil', siec) ~ 72.1, #EFID=18919
       grepl('Kerosene-type jet fuel', siec) ~ 72.69, # Taken from EEA: https://sdi.eea.europa.eu/catalogue/srv/eng/catalog.search#/metadata/f6e68f73-b494-4f8c-8c73-8a153a53f64a
