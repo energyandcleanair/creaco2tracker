@@ -69,7 +69,9 @@ collect_oil <- function(use_cache = FALSE) {
 }
 
 
+
 investigate_oil <- function(cons_monthly_raw, cons_monthly_filled, cons_yearly){
+
 
 
   # International shipping EU vs countries
@@ -95,6 +97,7 @@ investigate_oil <- function(cons_monthly_raw, cons_monthly_filled, cons_yearly){
     spread(iso2, values) %>%
     arrange(desc(time)) %>%
     View()
+
 
 
 
@@ -150,8 +153,6 @@ investigate_oil <- function(cons_monthly_raw, cons_monthly_filled, cons_yearly){
     rcrea::scale_y_zero()
 
 }
-
-
 
 
 #' Process oil data from EUROSTAT
