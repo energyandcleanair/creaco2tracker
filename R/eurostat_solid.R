@@ -276,7 +276,7 @@ process_solid_monthly <- function(x, pwr_demand) {
   fill_gaps_with_interp_when_suitable <- function(x){
     cv <- sd(x, na.rm=T)/mean(x, na.rm=T)
     if(!is.na(cv) & cv < 0.1){
-      message("Filing with interpolation")
+      message("Filling with interpolation")
       return(zoo::na.approx(x, maxgap=3, na.rm=F))
     }else{
       return(x)
