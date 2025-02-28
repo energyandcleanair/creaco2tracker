@@ -6,9 +6,9 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
 
   # load data
   co2 <- if(use_co2_in_db){
-    download_co2_daily()
+    download_co2()
   }else{
-    get_co2_daily(diagnostics_folder=diagnostics_folder)
+    get_co2(diagnostics_folder=diagnostics_folder, downscale_daily=T)
   }
 
 

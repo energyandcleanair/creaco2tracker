@@ -5,7 +5,7 @@ check_recent_enough <- function(days=10){
   gas_demand <- download_gas_demand(iso2="EU", date_from=date_from)
   if(is.null(gas_demand) || nrow(gas_demand)==0) stop("Missing recent gas demand")
 
-  co2 <- download_co2_daily(date_from=date_from, iso2s="EU")
+  co2 <- download_co2(date_from=date_from, iso2s="EU")
   if(is.null(co2) || nrow(co2)==0) stop("Missing recent CO2")
 
   corrected <- download_corrected_demand(date_from=date_from, region_id="EU")

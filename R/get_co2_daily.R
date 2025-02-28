@@ -10,7 +10,8 @@
 #' @export
 #'
 #' @examples
-get_co2_daily <- function(diagnostics_folder='diagnostics',
+get_co2 <- function(diagnostics_folder='diagnostics',
+                    downscale_daily=T,
                           use_cache=F,
                           iso2s = get_eu_iso2s(include_eu = T),
                           min_year = NULL
@@ -40,21 +41,21 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
 
 
   # Compute emissions from EUROSTAT first
-  co2 <- get_co2_from_eurostat_cons(eurostat_cons)
+  co2_unprojected <- get_co2_from_eurostat_cons(eurostat_cons)
 
 
   # Project data til now
   # Need to be after filter since we're using all countries to fill missing EU data
-  co2_filled <- project_until_now(co2,
-                                  pwr_demand=pwr_demand,
-                                  gas_demand=gas_demand,
-                                  eurostat_indprod=eurostat_indprod)
+  co2 <- project_until_now(co2_unprojected,
+                           pwr_demand=pwr_demand,
+                           gas_demand=gas_demand,
+                           eurostat_indprod=eurostat_indprod)
 
 
   if(!is.null(diagnostics_folder)){
     diagnose_eu_vs_countries(
+      co2_unprojected = co2_unprojected,
       co2 = co2,
-      co2_filled = co2_filled,
       pwr_demand = pwr_demand,
       eurostat_cons = eurostat_cons %>% filter(time < "2025-01-01"),
       diagnostics_folder = file.path(diagnostics_folder, 'eu_vs_countries')
@@ -65,23 +66,23 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
   # Filter regions
   # Note: this need to be done after co2 estimates,
   # as all EU countries will be used to estimate weighted average NCVs
-  co2_filled <- co2_filled %>%
+  co2 <- co2 %>%
     filter(iso2 %in% iso2s)
 
   # Downscale to daily data
-  co2_daily <- downscale_daily(co2 = co2_filled, pwr_demand = pwr_demand, gas_demand = gas_demand)
+  co2 <- downscale_daily(co2 = co2, pwr_demand = pwr_demand, gas_demand = gas_demand)
 
   # Resplit gas
-  co2_daily <- split_gas_to_elec_others(co2_daily)
+  co2 <- split_gas_to_elec_others(co2)
 
   # Add total
-  co2_daily <- add_total_co2(co2_daily)
+  co2 <- add_total_co2(co2)
 
   # Validation
-  validate_co2(co2_daily, diagnostics_folder=diagnostics_folder)
+  validate_co2(co2, diagnostics_folder=diagnostics_folder)
 
    # Final tweaks
-  co2_daily <- co2_daily %>%
+  co2 <- co2 %>%
     rename(region=geo) %>%
     mutate(unit='t/day') %>%
     filter(!is.na(date)) %>%
@@ -93,5 +94,5 @@ get_co2_daily <- function(diagnostics_folder='diagnostics',
       }
     }
 
-  return(co2_daily)
+  return(co2)
 }

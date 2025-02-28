@@ -238,7 +238,7 @@ diagnostic_eurostat_indprod <- function(eurostat_indprod, iso2s, diagnostics_fol
 
 #' How close are EU estimates to the sum of EU countries
 #'
-#' @param co2_filled
+#' @param co2
 #' @param diagnostics_folder
 #'
 #' @return
@@ -246,8 +246,8 @@ diagnostic_eurostat_indprod <- function(eurostat_indprod, iso2s, diagnostics_fol
 #'
 #' @examples
 diagnose_eu_vs_countries <- function(
+  co2_unprojected,
   co2,
-  co2_filled,
   eurostat_cons,
   pwr_demand,
   diagnostics_folder="diagnostics"){
@@ -360,7 +360,7 @@ diagnose_eu_vs_countries <- function(
 
 
     # CO2 filled ---------------------------------------------------
-    plt_data <- co2_filled %>%
+    plt_data <- co2 %>%
       detotalise_co2() %>%
       filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
       mutate(is_eu=case_when(iso2=="EU" ~ "EU", TRUE ~ "EU member states")) %>%
@@ -446,8 +446,8 @@ diagnose_eu_vs_countries <- function(
            width=10, height=8, bg='white', scale=1.8, preview=F)
 
 
-     # CO2 before filling ---------------------------------------------------
-     plt_data <- co2 %>%
+     # CO2 before projection ---------------------------------------------------
+     plt_data <- co2_unprojected %>%
        detotalise_co2() %>%
        filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
        {
