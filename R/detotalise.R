@@ -1,4 +1,4 @@
-#' This function fills SECTOR_OTHER from SECTOR_TOTAL, SECTOR_TRANSPORT and SECTOR_ELEC
+#' This function fills SECTOR_OTHER from SECTOR_TOTAL, SECTOR_TRANSPORT, SECTOR_ELEC etc.
 #' when SECTOR_OTHER is missing.
 #'
 #' This is different from the split total elec:
@@ -23,13 +23,12 @@ detotalise_co2 <- function(x){
     filter(sector != SECTOR_OTHERS) %>%
     mutate(factor = ifelse(sector==SECTOR_ALL, 1, -1)) %>%
     group_by_at(group_by_cols) %>%
+    filter(any(sector==SECTOR_ALL),
+           !any(sector==SECTOR_OTHERS)) %>%
     summarise(value_deducted = sum(value * factor),
-              n=n(),
-              sector=SECTOR_OTHERS,
+              sector = SECTOR_OTHERS,
               .groups = "drop") %>%
-    arrange(desc(date)) %>%
-    filter(n==2) %>%
-    select(-n)
+    arrange(desc(date))
 
   y <- x %>%
     full_join(filler) %>%

@@ -178,6 +178,18 @@ combine_coke_coal <- function(co2){
     ungroup()
 }
 
+
+combine_transport <- function(x){
+  x %>%
+    mutate(sector = case_when(
+      sector %in% c(SECTOR_TRANSPORT_DOMESTIC,
+                   SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,
+                   SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING) ~ SECTOR_TRANSPORT,
+      TRUE ~ sector
+    ))
+}
+
+
 format_co2_for_db <- function(co2_daily, cut_tail_days=3){
 
   co2_daily %>%

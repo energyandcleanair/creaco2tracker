@@ -12,6 +12,7 @@ SIEC_BIOGASOLINE <- "R5210B"
 SIEC_BIODIESEL <- "R5220B"
 
 
+
 #' Collect oil consumption data from EUROSTAT
 #'
 #' @param use_cache Whether to use cached data
@@ -67,7 +68,10 @@ collect_oil <- function(use_cache = FALSE) {
   )
 }
 
+
+
 investigate_oil <- function(cons_monthly_raw, cons_monthly_filled, cons_yearly){
+
 
 
   # International shipping EU vs countries
@@ -93,7 +97,6 @@ investigate_oil <- function(cons_monthly_raw, cons_monthly_filled, cons_yearly){
     spread(iso2, values) %>%
     arrange(desc(time)) %>%
     View()
-
 
 
   # Discrepancy monthly - yearly
@@ -133,11 +136,11 @@ investigate_oil <- function(cons_monthly_raw, cons_monthly_filled, cons_yearly){
 
         # SECTOR_TRANSPORT: Kerosene
         (nrg_bal_code %in% c("FC_TRA_DAVI_E", "INTAVI_E", "INTAVI_E+FC_TRA_DAVI_E") # Added in add_oil_transport function
-         & siec_code %in% c(SIEC_KEROSENE_XBIO, SIEC_AVIATION_GASOLINE)) |
+         & siec_code %in% c(SIEC_KEROSENE_XBIO, SIEC_AVIATION_GASOLINE))
 
         # SECTOR_TRANSPORT: International maritime bunkers
-        (nrg_bal_code %in% c("INTMARB")
-         & siec_code %in% c(SIEC_FUEL_OIL, SIEC_GASOIL_DIESEL_XBIO))
+        # (nrg_bal_code %in% c("INTMARB")
+        #  & siec_code %in% c(SIEC_FUEL_OIL, SIEC_GASOIL_DIESEL_XBIO))
     ) %>%
 
     ggplot() +
@@ -171,15 +174,13 @@ process_oil <- function(x) {
      & siec_code %in% c(SIEC_ROAD_DIESEL, SIEC_MOTOR_GASOLINE)) |
 
     # SECTOR_TRANSPORT: Kerosene
-    (nrg_bal_code %in% c("FC_TRA_DAVI_E", "INTAVI_E", "INTAVI_E+FC_TRA_DAVI_E") # Added in add_oil_transport function
-     & siec_code %in% c(SIEC_KEROSENE_XBIO, SIEC_AVIATION_GASOLINE)) |
+    (nrg_bal_code %in% c("FC_TRA_DAVI_E", "INTAVI_E") # Added in add_oil_transport function
+     & siec_code %in% c(SIEC_KEROSENE_XBIO, SIEC_AVIATION_GASOLINE))
 
     # SECTOR_TRANSPORT: International maritime bunkers
-    (nrg_bal_code %in% c("INTMARB")
-     & siec_code %in% c(SIEC_FUEL_OIL, SIEC_GASOIL_DIESEL_XBIO))
+    # (nrg_bal_code %in% c("INTMARB")
+    #  & siec_code %in% c(SIEC_FUEL_OIL, SIEC_GASOIL_DIESEL_XBIO))
   )
-
-
 
   # We have separated fuel oil from oil products as it has a significantly higher
   # emission factor. To avoid double counting, we substract fuel oil from oil products.
@@ -205,7 +206,9 @@ process_oil <- function(x) {
       T ~ 1
     ),
     sector = case_when(
-      grepl("INTMARB|AVI_E|FC_TRA_E", nrg_bal_code) ~ SECTOR_TRANSPORT,
+      nrg_bal_code %in% c("FC_TRA_E", "FC_TRA_DAVI_E") ~ SECTOR_TRANSPORT_DOMESTIC,
+      nrg_bal_code %in% c("INTAVI_E") ~ SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,
+      nrg_bal_code %in% c("INTMARB") ~ SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING,
       T ~ SECTOR_ALL
     )
     ) %>%
@@ -213,7 +216,9 @@ process_oil <- function(x) {
 
   # Need three for all and one or two for transport
   stopifnot("Fix oil"=nrow(mult[mult$sector==SECTOR_ALL,]) == 6,
-            "Fix oil"=nrow(mult[mult$sector==SECTOR_TRANSPORT,]) == 8,
+            "Fix oil"=nrow(mult[mult$sector==SECTOR_TRANSPORT_DOMESTIC,]) == 4,
+            "Fix oil"=nrow(mult[mult$sector==SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,]) == 2,
+            "Fix oil"=nrow(mult[mult$sector==SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING,]) == 0,
             "Fix oil"=base::setequal(mult$factor, c(1,-1)))
 
   x %>%
