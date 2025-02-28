@@ -134,11 +134,11 @@ investigate_oil <- function(cons_monthly_raw, cons_monthly_filled, cons_yearly){
 
         # SECTOR_TRANSPORT: Kerosene
         (nrg_bal_code %in% c("FC_TRA_DAVI_E", "INTAVI_E", "INTAVI_E+FC_TRA_DAVI_E") # Added in add_oil_transport function
-         & siec_code %in% c(SIEC_KEROSENE_XBIO, SIEC_AVIATION_GASOLINE)) |
+         & siec_code %in% c(SIEC_KEROSENE_XBIO, SIEC_AVIATION_GASOLINE))
 
         # SECTOR_TRANSPORT: International maritime bunkers
-        (nrg_bal_code %in% c("INTMARB")
-         & siec_code %in% c(SIEC_FUEL_OIL, SIEC_GASOIL_DIESEL_XBIO))
+        # (nrg_bal_code %in% c("INTMARB")
+        #  & siec_code %in% c(SIEC_FUEL_OIL, SIEC_GASOIL_DIESEL_XBIO))
     ) %>%
 
     ggplot() +
@@ -173,11 +173,11 @@ process_oil <- function(x) {
 
     # SECTOR_TRANSPORT: Kerosene
     (nrg_bal_code %in% c("FC_TRA_DAVI_E", "INTAVI_E") # Added in add_oil_transport function
-     & siec_code %in% c(SIEC_KEROSENE_XBIO, SIEC_AVIATION_GASOLINE)) |
+     & siec_code %in% c(SIEC_KEROSENE_XBIO, SIEC_AVIATION_GASOLINE))
 
     # SECTOR_TRANSPORT: International maritime bunkers
-    (nrg_bal_code %in% c("INTMARB")
-     & siec_code %in% c(SIEC_FUEL_OIL, SIEC_GASOIL_DIESEL_XBIO))
+    # (nrg_bal_code %in% c("INTMARB")
+    #  & siec_code %in% c(SIEC_FUEL_OIL, SIEC_GASOIL_DIESEL_XBIO))
   )
 
   # We have separated fuel oil from oil products as it has a significantly higher
@@ -216,7 +216,7 @@ process_oil <- function(x) {
   stopifnot("Fix oil"=nrow(mult[mult$sector==SECTOR_ALL,]) == 6,
             "Fix oil"=nrow(mult[mult$sector==SECTOR_TRANSPORT_DOMESTIC,]) == 4,
             "Fix oil"=nrow(mult[mult$sector==SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,]) == 2,
-            "Fix oil"=nrow(mult[mult$sector==SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING,]) == 2,
+            "Fix oil"=nrow(mult[mult$sector==SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING,]) == 0,
             "Fix oil"=base::setequal(mult$factor, c(1,-1)))
 
   x %>%

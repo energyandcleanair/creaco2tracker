@@ -198,7 +198,7 @@ validate_co2_historical <- function(co2_daily = NULL,
       scale_alpha_manual(values=alphas) +
       scale_linewidth_manual(values=linewidths) +
       scale_color_manual(values=colors) +
-      # rcrea::theme_crea_new() +
+      rcrea::theme_crea_new() +
       rcrea::scale_y_crea_zero() +
       facet_wrap(~stringr::str_to_title(fuel), scales='free_y') +
       labs(title=glue("{iso2_to_name(iso2)} CO2 emissions from fossil fuels"),
@@ -577,10 +577,12 @@ validate_co2_transport <- function(co2_daily,
   lapply(iso2s, function(iso2){
 
     # Load CREA data
-    co2_crea <- co2_daily %>%
+    co2_crea_all <- co2_daily %>%
       filter(
              iso2 == !!iso2,
-             sector == SECTOR_TRANSPORT,
+             sector %in% c(SECTOR_TRANSPORT_DOMESTIC,
+                           SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,
+                           SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING),
              fuel == FUEL_OIL,
              estimate == "central"
       ) %>%
@@ -590,36 +592,50 @@ validate_co2_transport <- function(co2_daily,
                 source = 'CREA') %>%
       filter(year < 2025)
 
+    co2_crea_domestic <- co2_daily %>%
+      filter(
+        iso2 == !!iso2,
+        sector %in% c(SECTOR_TRANSPORT_DOMESTIC),
+        fuel == FUEL_OIL,
+        estimate == "central"
+      ) %>%
+      group_by(iso2, year = year(date)) %>%
+      summarise(value = sum(value)/1e6,
+                unit = "mt",
+                source = 'CREA (domestic only)') %>%
+      filter(year < 2025)
+
     # Load validation data
     co2_validate <- bind_rows(climatewatch, eea, eea_w_international) %>%
-      filter(iso2 %in% unique(co2_crea$iso2))
+      filter(iso2 == !!iso2)
 
 
     plot_data <- bind_rows(
-      co2_crea %>% filter(year >= 1990),
+      co2_crea_all %>% filter(year >= 1990),
+      co2_crea_domestic %>% filter(year >= 1990),
       co2_validate
     ) %>%
       # write_csv(file.path(folder, "validation_transport.csv")) %>%
       # filter(type=="estimated") %>%
       mutate(
-        source=factor(source, levels=c("CREA", unique(co2_validate$source)))
+        source=factor(source, levels=c("CREA", "CREA (domestic only)", unique(co2_validate$source)))
       )
 
     n_sources <- n_distinct(plot_data$source)
-    alphas <- c(0.9, rep(1, n_sources-1))
-    linewidths <- c(1.6, rep(0.5, n_sources-1))
+    alphas <- c(0.9, 0.9, rep(1, n_sources-2))
+    linewidths <- c(1.6, 1.6, rep(0.5, n_sources-2))
     colors <- unname(rcrea::pal_crea[c("Blue", "Dark.red", "Dark.blue", "Orange", "Red", "Yellow", "Dark.violet", "Turquoise")])
 
     ggplot(plot_data) +
       geom_line(aes(year, value/1e3, col=source, linewidth=source, alpha=source)) +
-      scale_x_continuous(limits=c(min(co2_crea$year), NA)) +
+      scale_x_continuous(limits=c(min(co2_crea_all$year), NA)) +
       scale_alpha_manual(values=alphas) +
       scale_linewidth_manual(values=linewidths) +
       scale_color_manual(values=colors) +
       rcrea::theme_crea_new() +
       rcrea::scale_y_crea_zero() +
       {
-        if(length(unique(co2_crea$iso2)) > 1){
+        if(length(unique(plot_data$iso2)) > 1){
           facet_wrap(~iso2, scales='free_y')
         }
       } +

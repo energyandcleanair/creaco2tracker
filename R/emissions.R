@@ -167,7 +167,9 @@ add_ncv <- function(x, diagnostics_folder=NULL){
 }
 
 add_emission_factor <- function(x){
+
   # Taken from https://www.ipcc-nggip.iges.or.jp/EFDB/find_ef.php
+  # Emission factors are in tCO2/TJ
   x %>%
     mutate(co2_factor_t_per_TJ = case_when(
       siec=='Hard coal'~92.8, #EFID=110620
