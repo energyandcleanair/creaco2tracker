@@ -46,42 +46,6 @@ download_gas_demand <- function(iso2=NULL,
 
 }
 
-download_pwr_demand <- function(date_from="2015-01-01", region="EU", use_cache=T, refresh_cache=!use_cache, use_local=F) {
-
-  base_url <- ifelse(use_local, "http://localhost:8080", "https://api.energyandcleanair.org")
-  pwr <- creahelpers::api.get(glue('{base_url}/power/generation'),
-                              date_from=date_from,
-                              aggregate_by='country,source,date',
-                              region=region,
-                              data_source='entsoe',
-                              split_by = 'year',
-                              use_cache = use_cache,
-                              refresh_cache = refresh_cache,
-                              cache_folder = "cache",
-                              verbose = T)
-
-  #add total generation
-  pwr <- pwr %>%
-    filter(source!='Total') %>%
-    group_by(iso2, region, country, date) %>%
-    dplyr::summarise_at(c("value_mw", "value_mwh"), sum, na.rm=T) %>%
-    mutate(source='Total') %>%
-    bind_rows(pwr %>% filter(source!='Total'))
-
-  #add EU total
-  pwr <- pwr %>%
-    filter(country!='EU total') %>%
-    group_by(date, source) %>%
-    filter(region=='EU') %>%
-    dplyr::summarise_at(c("value_mw", "value_mwh"), sum, na.rm=T) %>%
-    mutate(country='EU total',
-           iso2='EU') %>%
-    bind_rows(pwr %>% filter(country!='EU total')) %>%
-    ungroup()
-
-  return(pwr)
-}
-
 
 download_corrected_demand <- function(region_id=NULL,
                                       sector='total',

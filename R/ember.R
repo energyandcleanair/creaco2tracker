@@ -1,5 +1,5 @@
 
-ember.get_eu_generation <- function(frequency='yearly', iso2s="EU"){
+ember.get_power_generation <- function(frequency='yearly', iso2s="EU"){
 
     readRenviron(".Renviron")
     key <- Sys.getenv("EMBER_KEY")

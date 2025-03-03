@@ -21,7 +21,7 @@ get_co2 <- function(diagnostics_folder='diagnostics',
 
   # Collect necessary data
   gas_demand <- download_gas_demand(iso2=NULL, use_cache = use_cache)
-  pwr_demand <- download_pwr_demand(use_cache = use_cache)
+  pwr_demand <- entsoe.get_pwr_generation(use_cache = use_cache)
 
   eurostat_cons <- get_eurostat_cons(
     diagnostics_folder = file.path(diagnostics_folder, "eurostat"),

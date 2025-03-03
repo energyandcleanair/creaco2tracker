@@ -3,9 +3,9 @@
 
 
 
-validate_power <- function(pwr_demand=download_pwr_demand(), folder="validation"){
+validate_power <- function(pwr_demand=entsoe.get_pwr_generation(), folder="validation"){
 
-  ember_explorer <- ember.get_eu_generation()
+  ember_explorer <- ember.get_power_generation(iso2s=="EU")
   ember_1 <- ember_explorer %>%
     mutate(source=recode(source,
                          Gas='Fossil Gas',
