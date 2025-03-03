@@ -1,4 +1,4 @@
-validate_co2 <- function(co2_daily,
+validate_co2 <- function(co2,
                          diagnostics_folder="diagnostics",
                          date_from="1990-01-01") {
 
@@ -10,32 +10,32 @@ validate_co2 <- function(co2_daily,
   create_dir(diagnostics_folder)
 
   # Get validation data once
-  validation_data <- get_validation_data(region=unique(co2_daily$iso2))
+  validation_data <- get_validation_data(region=unique(co2$iso2))
 
   # Run all validations with shared validation data
-  validate_co2_historical(co2_daily,
+  validate_co2_historical(co2,
                           validation_data,
                           folder = file.path(diagnostics_folder, "co2_historical"),
                           date_from = date_from)
 
 
 
-  validate_co2_timeseries(co2_daily,
+  validate_co2_timeseries(co2,
                           folder = file.path(diagnostics_folder, "co2_timeseries")
                           )
 
-  validate_co2_monthly(co2_daily,
+  validate_co2_monthly(co2,
                        folder = file.path(diagnostics_folder, "co2_monthly")
                        )
 
-  validate_co2_transport(co2_daily,
+  validate_co2_transport(co2,
                          folder = file.path(diagnostics_folder, "co2_transport")
                          )
 }
 
 
 # Update the historical validation function signature
-validate_co2_historical <- function(co2_daily = NULL,
+validate_co2_historical <- function(co2 = NULL,
                                     validation_data,
                                   iso2s = NULL,
                                   folder = "diagnostics",
@@ -48,7 +48,7 @@ validate_co2_historical <- function(co2_daily = NULL,
 
 
   if(is.null(iso2s)){
-    iso2s <- unique(co2_daily$iso2)
+    iso2s <- unique(co2$iso2)
   }
 
 
@@ -59,7 +59,7 @@ validate_co2_historical <- function(co2_daily = NULL,
     # Plot 1: ALL FUELS + SECTORS
     ##############################
     # Load CREA data
-    co2_crea <- co2_daily %>%
+    co2_crea <- co2 %>%
       filter(fuel == FUEL_TOTAL,
              sector == SECTOR_ALL,
              iso2 %in% c(!!iso2),
@@ -130,7 +130,7 @@ validate_co2_historical <- function(co2_daily = NULL,
     # Plot 2: BY FUEL
     ##############################
     # # Validation by fuel data doesn't include international aviation/maritime
-    # co2_wo_international <- co2_daily %>%
+    # co2_wo_international <- co2 %>%
     #   group_by(iso2) %>%
     #   # Because transport data is only available after a certain date
     #   # We cut it so that time series is consistent
@@ -150,7 +150,7 @@ validate_co2_historical <- function(co2_daily = NULL,
 
 
     # Load CREA data
-    co2_crea <- co2_daily %>%
+    co2_crea <- co2 %>%
       combine_coke_coal() %>%
       filter(
         # sector == SECTOR_ALL,
@@ -291,7 +291,7 @@ validate_co2_historical <- function(co2_daily = NULL,
   })
 
   # Check fuel --------------------------------------------------------------
-  # co2_yearly <- co2_daily %>%
+  # co2_yearly <- co2 %>%
   #   filter(fuel!=FUEL_TOTAL) %>%
   #   group_by(iso2, year=year(date), fuel) %>%
   #   summarise(value=sum(value)/1e6,
@@ -319,7 +319,7 @@ validate_co2_historical <- function(co2_daily = NULL,
   #   }
   #
 #
-#   co2_monthly <- co2_daily %>%
+#   co2_monthly <- co2 %>%
 #     filter(fuel!='Total',
 #            region=='EU') %>%
 #     group_by(date=floor_date(date, 'month'), fuel) %>%
@@ -363,16 +363,16 @@ validate_co2_historical <- function(co2_daily = NULL,
 
 
 
-validate_co2_timeseries <- function(co2_daily, folder="diagnostics"){
+validate_co2_timeseries <- function(co2, folder="diagnostics"){
 
   if(!is.null(folder)){
     dir.create(folder, showWarnings = FALSE)
 
-    iso2s <- unique(co2_daily$iso2)
+    iso2s <- unique(co2$iso2)
 
     lapply(iso2s, function(iso2){
       country <- countrycode::countrycode(iso2, "iso2c", "country.name", custom_match = c("EU"="European Union"))
-      plt_data <- co2_daily %>%
+      plt_data <- co2 %>%
         filter(iso2==!!iso2) %>%
         mutate(across(c(fuel, sector), tolower)) %>%
         group_by(sector, fuel, estimate) %>%
@@ -425,11 +425,11 @@ validate_co2_timeseries <- function(co2_daily, folder="diagnostics"){
 }
 
 
-validate_co2_monthly <- function(co2_daily, folder="diagnostics"){
+validate_co2_monthly <- function(co2, folder="diagnostics"){
 
   dir.create(folder, showWarnings = FALSE, recursive = T)
 
-  co2_crea <- co2_daily %>%
+  co2_crea <- co2 %>%
     filter(fuel!='total', estimate=="central") %>%
     group_by(iso2, geo, month=floor_date(date, 'month')) %>%
     summarise(value=sum(value)/1e6/(as.integer(difftime(max(date),min(date)))+1),
@@ -534,7 +534,7 @@ validate_co2_monthly <- function(co2_daily, folder="diagnostics"){
 }
 
 
-validate_co2_transport <- function(co2_daily,
+validate_co2_transport <- function(co2,
                                    folder="diagnostics",
                                    date_from = "1990-01-01"){
 
@@ -572,12 +572,12 @@ validate_co2_transport <- function(co2_daily,
     mutate(source="UNFCCC (w. international aviation and shipping)")
 
 
-  iso2s <- unique(co2_daily$iso2)
+  iso2s <- unique(co2$iso2)
 
   lapply(iso2s, function(iso2){
 
     # Load CREA data
-    co2_crea_all <- co2_daily %>%
+    co2_crea_all <- co2 %>%
       filter(
              iso2 == !!iso2,
              sector %in% c(SECTOR_TRANSPORT_DOMESTIC,
@@ -592,7 +592,7 @@ validate_co2_transport <- function(co2_daily,
                 source = 'CREA') %>%
       filter(year < 2025)
 
-    co2_crea_domestic <- co2_daily %>%
+    co2_crea_domestic <- co2 %>%
       filter(
         iso2 == !!iso2,
         sector %in% c(SECTOR_TRANSPORT_DOMESTIC),
@@ -671,7 +671,7 @@ validate_co2_transport <- function(co2_daily,
 compare_co2_versions <- function(iso2s="EU", versions=c("0.2", "0.3"), diagnostics_folder="diagnostics"){
 
   # Read the data
-  co2 <- lapply(versions, function(version) download_co2_daily(iso2s=iso2s, version=version)) %>%
+  co2 <- lapply(versions, function(version) download_co2(iso2s=iso2s, version=version)) %>%
     bind_rows()
 
   co2 %>%

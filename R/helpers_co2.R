@@ -190,9 +190,9 @@ combine_transport <- function(x){
 }
 
 
-format_co2_for_db <- function(co2_daily, cut_tail_days=3){
+format_co2_for_db <- function(co2, cut_tail_days=3){
 
-  co2_daily %>%
+  co2 %>%
     ungroup() %>%
     # Combine coal and coke
     combine_coke_coal() %>%

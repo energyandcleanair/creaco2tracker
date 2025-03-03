@@ -12,6 +12,7 @@
 #'
 #' @examples
 plot_industrial_index_bar_yoy <- function(industrial_indexes,
+                                          iso2="EU",
                                   by_fuel=T,
                                   year_f=year(today())-1,
                                   filepath=NULL,
@@ -26,7 +27,7 @@ plot_industrial_index_bar_yoy <- function(industrial_indexes,
   colors <- get_colors()
 
   plt_data <- industrial_indexes %>%
-    filter(iso2=="EU",
+    filter(iso2==!!iso2,
            year(date) %in% c(year_f-1, year_f)
     ) %>%
     # Set product to "All" if by_fuel is FALSE
@@ -60,7 +61,7 @@ plot_industrial_index_bar_yoy <- function(industrial_indexes,
     rcrea::theme_crea_new() +
     scale_fill_manual(values=get_colors()) +
     scale_y_continuous(labels=function(x) paste0(ifelse(x>0,"+",""),scales::comma(x))) +
-    labs(title=paste("EU Change in energy consumption per industrial sector",
+    labs(title=paste(glue("{iso2_to_name(iso2)}) Change in energy consumption per industrial sector"),
                     if(by_fuel) "and fuel family" else ""),
          subtitle="2024 vs 2023 in TeraJoule",
          x=NULL,
