@@ -1,20 +1,20 @@
 #' Project CO2 emissions until today using various proxies
 #'
 #' @param co2
-#' @param pwr_demand
+#' @param pwr_generation
 #' @param gas_demand
 #'
 #' @return
 #' @export
 #'
 #' @examples
-project_until_now <- function(co2, pwr_demand, gas_demand, eurostat_indprod){
+project_until_now <- function(co2, pwr_generation, gas_demand, eurostat_indprod){
 
   dts_month <- seq.Date(min(co2$date), today() %>% 'day<-'(1), by='month')
 
   co2 %>%
     split_gas_to_elec_all() %>%
-    project_until_now_elec(pwr_demand=pwr_demand, dts_month=dts_month) %>%
+    project_until_now_elec(pwr_generation=pwr_generation, dts_month=dts_month) %>%
     project_until_now_gas(gas_demand=gas_demand, dts_month=dts_month) %>%
     project_eu_from_countries(dts_month=dts_month) %>%
 
@@ -187,9 +187,9 @@ project_until_now_yoy <- function(co2, dts_month, last_years=3, last_months=3){
     ungroup()
 }
 
-project_until_now_elec <- function(co2, pwr_demand, dts_month, min_r2=0.85){
+project_until_now_elec <- function(co2, pwr_generation, dts_month, min_r2=0.85){
 
-  proxy <- pwr_demand %>%
+  proxy <- pwr_generation %>%
     filter(iso2 %in% co2$iso2) %>%
     ungroup() %>%
     mutate(fuel=case_when(

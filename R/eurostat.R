@@ -11,7 +11,7 @@
 #'
 #' @examples
 get_eurostat_cons <- function(
-    pwr_demand,
+    pwr_generation,
     diagnostics_folder = "diagnostics/eurostat",
     use_cache = F,
     iso2s = NULL) {
@@ -60,8 +60,8 @@ get_eurostat_cons <- function(
   # Process data
   cons_monthly <- list(
     oil = process_oil_monthly(cons_raw_oil$monthly),
-    solid = process_solid_monthly(cons_raw_solid$monthly, pwr_demand=pwr_demand) %>% split_elec_others(),
-    gas = process_gas_monthly(cons_raw_gas$monthly, pwr_demand=pwr_demand) %>% split_elec_others()
+    solid = process_solid_monthly(cons_raw_solid$monthly, pwr_generation=pwr_generation) %>% split_elec_others(),
+    gas = process_gas_monthly(cons_raw_gas$monthly, pwr_generation=pwr_generation) %>% split_elec_others()
   ) %>%
     bind_rows() %>%
     aggregate()
@@ -69,7 +69,7 @@ get_eurostat_cons <- function(
   cons_yearly <- list(
     solid = process_solid_yearly(cons_raw_solid$yearly) %>% split_elec_others(),
     oil = process_oil_yearly(cons_raw_oil$yearly),
-    gas = process_gas_yearly(cons_raw_gas$yearly, pwr_demand=pwr_demand) %>% split_elec_others()
+    gas = process_gas_yearly(cons_raw_gas$yearly, pwr_generation=pwr_generation) %>% split_elec_others()
   ) %>%
     bind_rows() %>%
     aggregate()

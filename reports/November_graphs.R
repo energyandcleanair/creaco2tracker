@@ -124,19 +124,19 @@ read_csv("https://api.energyandcleanair.org/v1/weather?variable=HDD,CDD&format=c
 
 dd %<>% mutate(across(variable, tolower))
 
-pwr_demand <- pwr %>% filter(country=='EU total', source=='Total') %>% 
+pwr_generation <- pwr %>% filter(country=='EU total', source=='Total') %>% 
   mutate(region_id = countrycode(country, 'country.name.en', 'iso2c', 
                                  custom_match=c('EU total'='EU')))
 
 dd %>% select(region_id, date, variable, value) %>% 
-  spread(variable, value) %>% left_join(pwr_demand, .) -> pwr_demand
+  spread(variable, value) %>% left_join(pwr_generation, .) -> pwr_generation
 
-pwr_demand %>% lm(value_mw ~ hdd + cdd + as.factor(wday(date)), data=.) -> m_pwr
+pwr_generation %>% lm(value_mw ~ hdd + cdd + as.factor(wday(date)), data=.) -> m_pwr
 
 m_pwr %>% summary()
-predict(m_pwr, pwr_demand) -> pwr_demand$value_mw_pred
+predict(m_pwr, pwr_generation) -> pwr_generation$value_mw_pred
 
-pwr_demand %>% mutate(anomaly = value_mw - value_mw_pred,
+pwr_generation %>% mutate(anomaly = value_mw - value_mw_pred,
                       value_mw_temperature_corrected = mean(value_mw_pred, na.rm=T) + anomaly) %>% 
   pivot_longer(c(anomaly, value_mw, value_mw_pred, value_mw_temperature_corrected)) %>% 
   group_by(name) %>% 

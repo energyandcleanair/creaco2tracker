@@ -29,9 +29,9 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
   #   mutate(value_TWh = value / 55 / 3.6 / 1000) %>%
   #   select(date, value_TWh)
 
-  pwr <- entsoe.get_pwr_generation(use_cache = F)
+  pwr <- entsoe.get_power_generation(use_cache = F)
 
-  pwr_demand <- pwr %>%
+  pwr_generation <- pwr %>%
     filter(region=='EU', source=='Total') %>%
     group_by(source, region, date) %>%
     dplyr::summarise(across(value_mw, sum, na.rm=T)) %>%
@@ -147,7 +147,7 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
   }
 
   #fit models
-  pwr_demand %>%
+  pwr_generation %>%
     rename(value=value_mw) %>%
     mutate(value=value/1e3, name='electricity demand', unit='GW') %>%
     mutate(date=as.Date(date)) %>%

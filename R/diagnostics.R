@@ -1,11 +1,11 @@
-diagnostic_pwr <- function(pwr_demand, diagnostics_folder="diagnostics"){
+diagnostic_pwr <- function(pwr_generation, diagnostics_folder="diagnostics"){
 
   #plot by source
   if(!is.null(diagnostics_folder)){
     create_dir(diagnostics_folder)
 
     #add rolling mean
-    plt_data <- pwr_demand %>%
+    plt_data <- pwr_generation %>%
       filter(iso2=="EU") %>%
       group_by(region, country, source) %>%
       arrange(date) %>%
@@ -249,14 +249,14 @@ diagnose_eu_vs_countries <- function(
   co2_unprojected,
   co2,
   eurostat_cons,
-  pwr_demand,
+  pwr_generation,
   diagnostics_folder="diagnostics"){
 
   if(!is.null(diagnostics_folder)){
     create_dir(diagnostics_folder)
 
     # Power demand --------------------------------------------------
-    plt_data <- pwr_demand %>%
+    plt_data <- pwr_generation %>%
       filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
       mutate(is_eu=case_when(iso2=="EU" ~ "EU", TRUE ~ "EU member states")) %>%
       filter(date < "2025-01-01") %>%

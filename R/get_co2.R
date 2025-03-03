@@ -21,11 +21,11 @@ get_co2 <- function(diagnostics_folder='diagnostics',
 
   # Collect necessary data
   gas_demand <- download_gas_demand(iso2=NULL, use_cache = use_cache)
-  pwr_demand <- entsoe.get_pwr_generation(use_cache = use_cache)
+  pwr_generation <- entsoe.get_power_generation(use_cache = use_cache)
 
   eurostat_cons <- get_eurostat_cons(
     diagnostics_folder = file.path(diagnostics_folder, "eurostat"),
-    pwr_demand = pwr_demand,
+    pwr_generation = pwr_generation,
     use_cache = use_cache)
 
   eurostat_indprod <- get_eurostat_indprod(
@@ -35,7 +35,7 @@ get_co2 <- function(diagnostics_folder='diagnostics',
 
   # Quick sanity checks
   if(!is.null(diagnostics_folder)){
-    diagnostic_pwr(pwr_demand,
+    diagnostic_pwr(pwr_generation,
                    diagnostics_folder = file.path(diagnostics_folder, "pwr"))
   }
 
@@ -47,7 +47,7 @@ get_co2 <- function(diagnostics_folder='diagnostics',
   # Project data til now
   # Need to be after filter since we're using all countries to fill missing EU data
   co2 <- project_until_now(co2_unprojected,
-                           pwr_demand=pwr_demand,
+                           pwr_generation=pwr_generation,
                            gas_demand=gas_demand,
                            eurostat_indprod=eurostat_indprod)
 
@@ -56,7 +56,7 @@ get_co2 <- function(diagnostics_folder='diagnostics',
     diagnose_eu_vs_countries(
       co2_unprojected = co2_unprojected,
       co2 = co2,
-      pwr_demand = pwr_demand,
+      pwr_generation = pwr_generation,
       eurostat_cons = eurostat_cons %>% filter(time < "2025-01-01"),
       diagnostics_folder = file.path(diagnostics_folder, 'eu_vs_countries')
       )
@@ -70,7 +70,7 @@ get_co2 <- function(diagnostics_folder='diagnostics',
     filter(iso2 %in% iso2s)
 
   # Downscale to daily data
-  co2 <- downscale_daily(co2 = co2, pwr_demand = pwr_demand, gas_demand = gas_demand)
+  co2 <- downscale_daily(co2 = co2, pwr_generation = pwr_generation, gas_demand = gas_demand)
 
   # Resplit gas
   co2 <- split_gas_to_elec_others(co2)

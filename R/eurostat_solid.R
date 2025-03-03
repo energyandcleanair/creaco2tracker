@@ -53,7 +53,7 @@ investigate_solid <- function(monthly, yearly){
 
   solid <- collect_solid(T)
 
-  result_monthly <- process_solid_monthly(solid$monthly, pwr_demand)
+  result_monthly <- process_solid_monthly(solid$monthly, pwr_generation)
   result_yearly <- process_solid_yearly(solid$yearly)
 
   bind_rows(
@@ -106,7 +106,7 @@ investigate_solid <- function(monthly, yearly){
   # and consider EU is sum of all countries
   # as the power is closely matching
   bind_rows(
-    pwr_demand %>%
+    pwr_generation %>%
       filter(source=="Coal", iso2=="SI") %>%
       group_by(time=floor_date(date, "month"), type="coal power") %>%
       summarise(values=sum(value_mwh, na.rm=T)),
@@ -184,7 +184,7 @@ investigate_coking_emissions <- function(yearly){
 }
 
 
-process_solid_monthly <- function(x, pwr_demand) {
+process_solid_monthly <- function(x, pwr_generation) {
 
 
   # This one is a bit tricky: for certain months/regions,
@@ -383,7 +383,7 @@ process_solid_monthly <- function(x, pwr_demand) {
 }
 
 
-# process_solid_monthly_old <- function(x, pwr_demand) {
+# process_solid_monthly_old <- function(x, pwr_generation) {
 #
 #
 #     # This one is a bit tricky: for certain months/regions,
@@ -457,7 +457,7 @@ process_solid_monthly <- function(x, pwr_demand) {
 #
 #
 #     # Get months without coal power generation to prevent excluding false positive
-#     has_coal_generation <- pwr_demand %>%
+#     has_coal_generation <- pwr_generation %>%
 #         filter(source == "Coal") %>%
 #         group_by(iso2, time = floor_date(date, "month")) %>%
 #         summarise(value_mwh = sum(value_mwh, na.rm = T)) %>%

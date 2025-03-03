@@ -48,7 +48,7 @@ collect_gas <- function(use_cache = FALSE) {
 }
 
 
- process_gas <- function(x, pwr_demand) {
+ process_gas <- function(x, pwr_generation) {
     # Monthly data only valid from 2014, way too low before
     x <- x %>%
       filter(freq != "Monthly" | time >= "2015-01-01")
@@ -78,7 +78,7 @@ collect_gas <- function(use_cache = FALSE) {
 
     # Get months with fossil gas generation
     # to remove EUROSTAT saying 0 while it is not (e.g. monthly Ireland in 2014)
-    has_gas_generation <- pwr_demand %>%
+    has_gas_generation <- pwr_generation %>%
       filter(source == "Fossil Gas") %>%
       group_by(iso2, time = floor_date(date, "month")) %>%
       summarise(value_mwh = sum(value_mwh, na.rm = T)) %>%
@@ -121,12 +121,12 @@ collect_gas <- function(use_cache = FALSE) {
     )
   }
 
-  process_gas_monthly <- function(x, pwr_demand) {
-    process_gas(x, pwr_demand)
+  process_gas_monthly <- function(x, pwr_generation) {
+    process_gas(x, pwr_generation)
   }
 
-  process_gas_yearly <- function(x, pwr_demand) {
-    process_gas(x, pwr_demand)
+  process_gas_yearly <- function(x, pwr_generation) {
+    process_gas(x, pwr_generation)
   }
 
 

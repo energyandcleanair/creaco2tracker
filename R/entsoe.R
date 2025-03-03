@@ -1,4 +1,4 @@
-entsoe.get_pwr_generation <- function(date_from="2015-01-01", region="EU", use_cache=T, refresh_cache=!use_cache, use_local=F) {
+entsoe.get_power_generation <- function(date_from="2015-01-01", region="EU", use_cache=T, refresh_cache=!use_cache, use_local=F) {
 
   base_url <- ifelse(use_local, "http://localhost:8080", "https://api.energyandcleanair.org")
   pwr <- creahelpers::api.get(glue('{base_url}/power/generation'),

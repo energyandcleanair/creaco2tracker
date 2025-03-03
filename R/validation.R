@@ -3,7 +3,7 @@
 
 
 
-validate_power <- function(pwr_demand=entsoe.get_pwr_generation(), folder="validation"){
+validate_power <- function(pwr_generation=entsoe.get_power_generation(), folder="validation"){
 
   ember_explorer <- ember.get_power_generation(iso2s=="EU")
   ember_1 <- ember_explorer %>%
@@ -58,7 +58,7 @@ validate_power <- function(pwr_demand=entsoe.get_pwr_generation(), folder="valid
 
 
 
-  pwr_demand %>%
+  pwr_generation %>%
     filter(country=="EU total", date < "2024-01-01") %>%
     group_by(year=year(date), source) %>%
     summarise(value_twh=sum(value_mwh, na.rm=T) / 1e6,
@@ -86,7 +86,7 @@ validate_power <- function(pwr_demand=entsoe.get_pwr_generation(), folder="valid
            source='Fossil Gas',
            year=Year) %>%
     select(iso2, source, year, value_ember=Value) %>%
-    left_join(pwr_demand %>%
+    left_join(pwr_generation %>%
                 group_by(iso2, year=year(date), source) %>%
                 summarise(value_crea=sum(value_mwh, na.rm=T) / 1e6)
     ) %>%
