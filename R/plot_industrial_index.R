@@ -42,9 +42,9 @@ plot_industrial_index_bar_yoy <- function(industrial_indexes,
     mutate(label=shorten_nace(nace_r2)) %>%
     filter(year==max(year)) %>%
     spread(estimate, diff_tj)  %>%
-    # Keep most significant ones only
+    # Keep top ten changes in abs terms
     group_by(product=stringr::str_to_title(product)) %>%
-    filter(abs(central) > quantile(abs(central), 0.3)) %>%
+    top_n(12, abs(central)) %>%
     ungroup() %>%
     mutate(label=tidytext::reorder_within(label, central, product))
 

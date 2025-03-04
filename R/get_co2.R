@@ -70,7 +70,9 @@ get_co2 <- function(diagnostics_folder='diagnostics',
     filter(iso2 %in% iso2s)
 
   # Downscale to daily data
-  co2 <- downscale_daily(co2 = co2, pwr_generation = pwr_generation, gas_demand = gas_demand)
+  if(downscale_daily){
+    co2 <- downscale_daily(co2 = co2, pwr_generation = pwr_generation, gas_demand = gas_demand)
+  }
 
   # Resplit gas
   co2 <- split_gas_to_elec_others(co2)
