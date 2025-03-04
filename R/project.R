@@ -76,14 +76,26 @@ project_until_now_lm <- function(co2, proxy, dts_month, min_r2=0.9, force_overwr
                   by=c('date'))
 
       get_trained_model <- function(data, n_year){
+
         data_training <- data %>%
           filter(value>0,
-                 date >= max(date) - lubridate::years(n_year)) %>%
-          # only positive values in value_proxy_cols
-          filter_at(value_proxy_cols, all_vars(.>0))
+                 date >= max(date) - lubridate::years(n_year))
+
+        if(nrow(data_training)==0){
+          return(NULL)
+        }
+
+        data_training <- data_training %>%
+          # Only columns with at least a non-na value
+          select_if(~any(!is.na(.))) %>%
+
+          # Only rows with non nas
+          filter_all(all_vars(!is.na(.))) %>%
+          # Only positive values
+          filter_all(~all(.>0))
 
         # If all value_proxy_cols are NA, stop
-        if(data_training %>% select_at(value_proxy_cols) %>% filter_all(any_vars(!is.na(.))) %>% nrow == 0){
+        if(length(intersect(value_proxy_cols, colnames(data_training)))==0){
           # message(glue("{iso2} - {fuel}: Missing proxy data. Leaving as such"))
           return(NULL)
         }
@@ -92,8 +104,9 @@ project_until_now_lm <- function(co2, proxy, dts_month, min_r2=0.9, force_overwr
           return(NULL)
         }
 
-        if(data_training %>% select_at(value_proxy_cols) %>% filter_all(any_vars(!is.na(.))) %>% nrow > 0){
-          lm(data=data_training, formula= paste0('value ~ 0+', paste0(value_proxy_cols, collapse=' + ')))
+        formula_cols <- grep('value_proxy', colnames(data_training), value=T)
+        if(data_training %>% select_at(formula_cols) %>% filter_all(any_vars(!is.na(.))) %>% nrow > 0){
+          lm(data=data_training, formula= paste0('value ~ 0+', paste0(formula_cols, collapse=' + ')))
         }else{
           NULL
         }
@@ -223,26 +236,41 @@ project_until_now_gas <- function(co2, gas_demand, dts_month, min_r2=0.85){
   project_until_now_lm(co2, proxy, dts_month=dts_month, min_r2=min_r2)
 }
 
+
 project_until_now_coal_others <- function(co2, eurostat_indprod, dts_month, min_r2=0.85){
 
   # Cement, Steel, Glass, Coke
   products_ind <-
-    list(
-      "C191"="coke",
-      "C192"="refined",
-      "C2013"="x",
-      "C221"="rubber",
-      "C235"="cement",
-      "C241"="iron",
-      "C231"="glass"
+    c(
+      # Two digits
+      "C19",
+      "C20",
+      "C21",
+      "C22",
+      "C23",
+      "C24",
+
+      # Three digits
+      "C191", #"coke",
+      "C192", #"refined",
+      "C2013", #"x",
+      "C221", #"rubber",
+      "C235", #"cement",
+      "C241", #"iron",
+      "C231" #"glass"
     )
 
 
   indprod <- eurostat_indprod %>%
-    filter(nace_r2_code %in% names(products_ind)) %>%
-    filter(unit=="Index, 2021=100",
-           grepl("Calendar adjusted ", s_adj))
-
+    filter(nace_r2_code %in% products_ind) %>%
+    filter(unit == "Index, 2021=100",
+           grepl("Calendar adjusted ", s_adj)) %>%
+    filter(!is.na(values)) %>%
+    group_by(iso2) %>%
+    mutate(nace_2digits=substring(nace_r2_code, 1, 3)) %>%
+    mutate(n_digits=nchar(nace_r2_code)) %>%
+    group_by(iso2, nace_2digits) %>%
+    filter(n_digits==max(n_digits))
 
   # See if model works for EU first
   proxy <- indprod %>%
