@@ -295,7 +295,7 @@ keep_best<- function(consumption,
     # Sometimes apparent strictly equivalent to apparent_asgi
     distinct(iso2, .keep_all = T)
 
-  if(!is.null(diagnostics_folder)){
+  if(!is_null_or_empty(diagnostics_folder)){
 
     plt_data <- best %>%
       ungroup() %>%

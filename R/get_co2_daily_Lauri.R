@@ -11,7 +11,7 @@
 #     implied_cons
 #
 #   # Plot
-#   if(!is.null(diagnostics_folder)){
+#   if(!is_null_or_empty(diagnostics_folder)){
 #     saveRDS(implied_cons_all, file.path(diagnostics_folder, 'implied_cons.RDS'))
 #
 #     plt <- implied_cons %>%
@@ -47,7 +47,7 @@
 #
 #
 #   #plot by source
-#   if(!is.null(diagnostics_folder)){
+#   if(!is_null_or_empty(diagnostics_folder)){
 #     library(rcrea)
 #
 #     pwr %>% saveRDS(file.path(diagnostics_folder, 'pwr.RDS'))
@@ -197,7 +197,7 @@
 #     bind_rows(co2_daily %>% filter(fuel!='total'))
 #
 #   #plot
-#   if(!is.null(diagnostics_folder)){
+#   if(!is_null_or_empty(diagnostics_folder)){
 #     plt <- co2_daily %>% filter(year(date)>=2017) %>%
 #       mutate(across(c(fuel, sector), tolower)) %>%
 #       group_by(sector, fuel) %>%
@@ -329,7 +329,7 @@
 #
 #   # Visual check that we kept the right sectors for each fuel
 #
-#   if(!is.null(diagnostics_folder)){
+#   if(!is_null_or_empty(diagnostics_folder)){
 #     library(rcrea)
 #
 #     plt <- bind_rows(
@@ -399,7 +399,7 @@
 #     ungroup()
 #
 #   # Visual check
-#   if(!is.null(diagnostics_folder)){
+#   if(!is_null_or_empty(diagnostics_folder)){
 #     plt <- cons_combined %>%
 #       # group_by(geo, sector, time, unit, siec, fuel) %>%
 #       # arrange(source) %>%

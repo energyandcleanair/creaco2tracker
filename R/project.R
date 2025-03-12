@@ -200,7 +200,7 @@ project_until_now_yoy <- function(co2, dts_month, last_years=3, last_months=3){
     ungroup()
 }
 
-project_until_now_elec <- function(co2, pwr_generation, dts_month, min_r2=0.85){
+project_until_now_elec <- function(co2, pwr_generation, dts_month, min_r2=0.85, force_overwrite=F){
 
   proxy <- pwr_generation %>%
     filter(iso2 %in% co2$iso2) %>%
@@ -212,12 +212,12 @@ project_until_now_elec <- function(co2, pwr_generation, dts_month, min_r2=0.85){
       T ~ NA_character_
     )) %>%
     filter(!is.na(fuel)) %>%
-    group_by(iso2, sector=SECTOR_ELEC, fuel, date=floor_date(date, 'month')) %>%
+    group_by(iso2, sector=SECTOR_ELEC, fuel, date=floor_date(as.Date(date), 'month')) %>%
     summarise(value_proxy=sum(value_mwh), .groups = 'drop') %>%
     arrange(desc(date))
 
 
-  project_until_now_lm(co2, proxy, dts_month=dts_month, min_r2=min_r2)
+  project_until_now_lm(co2, proxy, dts_month=dts_month, min_r2=min_r2, force_overwrite=force_overwrite)
 
 }
 

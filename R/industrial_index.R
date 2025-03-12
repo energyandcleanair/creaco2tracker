@@ -7,16 +7,10 @@
 #' @examples
 get_industrial_indexes <- function(index_date="last",
                                    frequency="month",
-                                   project=T
+                                   project=T,
+                                   diagnostics_folder="diagnostics/industrial_index"
                                    ){
 
-  # Energy consumption by NACE
-  filter_nace <- function(x){
-    filter(x,
-    nace_r2_code == "B" |
-    # three letter starting with C
-    (stringr::str_length(nace_r2_code) %in% c(3,7)) & (substr(nace_r2_code, 1, 1) == "C"))
-  }
 
 
   product_codes <- list(
@@ -27,7 +21,6 @@ get_industrial_indexes <- function(index_date="last",
 
 
   pefasu <- get_eurostat_from_code("env_ac_pefasu")
-
 
   consumption_per_sector <- lapply(names(product_codes), function(product){
     pefasu %>%
@@ -54,6 +47,34 @@ get_industrial_indexes <- function(index_date="last",
 
   # Industrial production
   indprod <- get_eurostat_indprod()
+
+  # Look for countries that produce only coke C191 and others only C192
+  cs <- indprod %>%
+    filter(
+      unit=="Index, 2021=100",
+      grepl("Calendar adjusted data", s_adj),
+      iso2 %in% get_eu_iso2s(include_eu=T)
+    ) %>%
+    filter(
+      nace_r2_code %in% c("C191", "C192")
+    ) %>%
+    group_by(
+      nace_r2_code,
+      year=year(time),
+      iso2) %>%
+    summarise(value=sum(values, na.rm=T))
+
+  cs %>%
+    spread(
+      nace_r2_code,
+      value
+    ) %>%
+    filter(
+      (is.na(C191) | C191==0) & C192 > 0 |
+        (is.na(C192) | C192==0) & C191 > 0
+    ) %>%
+    arrange(desc(year))
+
 
   # Be sure not to double count / having overlapping sectors
   indprod_filtered <- indprod %>%
@@ -225,3 +246,96 @@ get_industrial_indexes <- function(index_date="last",
   return(industrial_indexes)
 }
 
+
+# Keep NACE that are in both / avoid double counting
+filter_nace <- function(x){
+  filter(x,
+         nace_r2_code == "B" |
+           # three letter starting with C
+           (stringr::str_length(nace_r2_code) %in% c(3,7)) & (substr(nace_r2_code, 1, 1) == "C"))
+}
+
+
+#' Looking at ways to split coke and refined petroleum products
+#'
+#' @return
+#' @export
+#'
+#' @examples
+investigate_c19 <- function(pefasu, indprod, product_codes){
+
+
+  c19_energy <- lapply(names(product_codes), function(fuel){
+    pefasu %>%
+      filter(nace_r2_code == "C19",
+             prod_nrg_code %in% product_codes[[fuel]],
+             stk_flow=="Emission-relevant use",
+             unit=="Terajoule") %>%
+      mutate(fuel=fuel)
+  }) %>%
+    bind_rows() %>%
+    add_iso2() %>%
+    select(iso2, time, values, prod_nrg_code, prod_nrg, fuel)
+
+
+  c19_prod <- indprod %>%
+    filter(unit=="Index, 2021=100",
+           grepl("Calendar adjusted data", s_adj)) %>%
+    filter(nace_r2_code %in% c("C191", "C192")) %>%
+    add_iso2() %>%
+    filter(iso2 %in% get_eu_iso2s(include_eu=T)) %>%
+    select(nace_r2_code, time, values, iso2) %>%
+    spread(nace_r2_code, values)
+
+
+  products <-  c19_energy %>%
+    distinct()
+
+  prod_nrg_code <- "P09"
+
+  training_data <- c19_energy %>%
+    filter(prod_nrg_code == !!prod_nrg_code) %>%
+    left_join(c19_prod, by=c("iso2", "time")) %>%
+    filter(iso2=="FR")
+
+  model <- lm(values ~ C191 + C192, data=training_data)
+  summary(model)
+
+    mutate(energy_tj = values * values) %>%
+    group_by(iso2, time, fuel) %>%
+    summarise(energy_tj=sum(energy_tj, na.rm=T))
+
+
+  pefasu %>%
+    filter(nace_r2_code == "C19",
+           prod_nrg_code %in% product_codes[[product]],
+           stk_flow=="Emission-relevant use",
+           unit=="Terajoule")
+
+
+    product_codes <- list(
+      'gas' = 'P13',
+      'oil' = c('P12','P14','P15','P16','P17','P18','P19', 'P20', 'P21'),
+      'coal' = c('P08','P09','P10','P11')
+    )
+
+
+    pefasu <- get_eurostat_from_code("env_ac_pefasu")
+
+
+    consumption_per_sector <- lapply(names(product_codes), function(product){
+      pefasu %>%
+        filter(
+        ) %>%
+        add_iso2() %>%
+        filter(iso2 %in% get_eu_iso2s(include_eu=T)) %>%
+        filter_nace() %>%
+        mutate(product=product)
+    }) %>%
+      bind_rows() %>%
+      group_by(iso2, geo, time, nace_r2_code, nace_r2, product) %>%
+      summarise(energy_tj=sum(values, na.rm=T))
+
+
+
+}

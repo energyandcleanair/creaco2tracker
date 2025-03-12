@@ -3,3 +3,7 @@ create_dir <- function(folder){
     dir.create(folder, showWarnings = F, recursive = T)
   }
 }
+
+is_null_or_empty <- function(x){
+  is.null(x) | (length(x)==0)
+}

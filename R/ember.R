@@ -29,7 +29,8 @@ ember.get_power_generation <- function(frequency='yearly', iso2s="EU"){
           mutate(date=case_when(
             frequency=='yearly' ~ paste0(date, "-01-01"),
             T ~ date
-          ))
+          )) %>%
+          mutate(date=as.Date(date))
       }, error=function(e){
         message("Error for ", iso2, ": ", e$message)
         return(NULL)

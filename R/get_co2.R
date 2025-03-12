@@ -34,7 +34,7 @@ get_co2 <- function(diagnostics_folder='diagnostics',
     )
 
   # Quick sanity checks
-  if(!is.null(diagnostics_folder)){
+  if(!is_null_or_empty(diagnostics_folder)){
     diagnostic_pwr(pwr_generation,
                    diagnostics_folder = file.path(diagnostics_folder, "pwr"))
   }
@@ -52,7 +52,7 @@ get_co2 <- function(diagnostics_folder='diagnostics',
                            eurostat_indprod=eurostat_indprod)
 
 
-  if(!is.null(diagnostics_folder)){
+  if(!is_null_or_empty(diagnostics_folder)){
     diagnose_eu_vs_countries(
       co2_unprojected = co2_unprojected,
       co2 = co2,

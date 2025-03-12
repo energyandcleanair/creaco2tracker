@@ -1,7 +1,7 @@
 diagnostic_pwr <- function(pwr_generation, diagnostics_folder="diagnostics"){
 
   #plot by source
-  if(!is.null(diagnostics_folder)){
+  if(!is_null_or_empty(diagnostics_folder)){
     create_dir(diagnostics_folder)
 
     #add rolling mean
@@ -49,7 +49,7 @@ diagnostic_pwr <- function(pwr_generation, diagnostics_folder="diagnostics"){
 
 diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, cons_combined, diagnostics_folder="diagnostics"){
 
-  if(!is.null(diagnostics_folder)){
+  if(!is_null_or_empty(diagnostics_folder)){
 
     create_dir(diagnostics_folder)
 
@@ -75,7 +75,7 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, c
         theme(legend.position = 'bottom') +
         rcrea::scale_y_crea_zero()
 
-    ggsave(file.path(diagnostics_folder,'eurostat_annual_vs_monthly_yearly.png'),
+    ggsave(filename=file.path(diagnostics_folder,'eurostat_annual_vs_monthly_yearly.png'),
            plot=plt,
            width=12,
            height=18,
@@ -92,7 +92,7 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, c
       theme(legend.position = 'bottom') +
       rcrea::scale_y_crea_zero()
 
-    ggsave(file.path(diagnostics_folder,'eurostat_annual_vs_monthly_yearly_eu.png'),
+    ggsave(filename=file.path(diagnostics_folder,'eurostat_annual_vs_monthly_yearly_eu.png'),
            plot=plt,
            width=10,
            height=8,
@@ -107,7 +107,11 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, c
       theme(legend.position='bottom')+
       rcrea::scale_y_crea_zero())
 
-    ggsave(file.path(diagnostics_folder,'eurostat_annual_vs_monthly_monthly.png'), plot=plt, width=8, height=6, bg='white')
+    ggsave(filename=file.path(diagnostics_folder,'eurostat_annual_vs_monthly_monthly.png'),
+           plot=plt,
+           width=8,
+           height=6,
+           bg='white')
 
     (plt <- cons_combined %>%
       filter(grepl('European union', geo, T)) %>%
@@ -125,7 +129,11 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, c
       theme(legend.position='bottom')+
       rcrea::scale_y_crea_zero())
 
-    ggsave(file.path(diagnostics_folder,'eurostat_combined.png'), plot=plt, width=8, height=6, bg='white')
+    ggsave(filename=file.path(diagnostics_folder,'eurostat_combined.png'),
+           plot=plt,
+           width=8,
+           height=6,
+           bg='white')
   }
 
 }
@@ -133,7 +141,7 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, c
 diagnostic_eurostat_cons <- function(eurostat_cons, iso2s=NULL, diagnostics_folder="diagnostics"){
 
   # Plot heatmap of consumption by sector
-  if(!is.null(diagnostics_folder)){
+  if(!is_null_or_empty(diagnostics_folder)){
 
     create_dir(diagnostics_folder)
     plt_data <- eurostat_cons %>%
@@ -158,8 +166,12 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s=NULL, diagnostics_fold
               panel.grid.major.x = element_line(color="grey90"),
               ) -> plt)
 
-    ggsave(file.path(diagnostics_folder, 'eurostat_cons.png'),
-           width=10, height=min(30, max(6, 1.5*n_distinct(plt_data$iso2))), bg='white', plot=plt, scale=1.5)
+    ggsave(filename=file.path(diagnostics_folder, 'eurostat_cons.png'),
+           width=10,
+           height=min(30, max(6, 1.5*n_distinct(plt_data$iso2))),
+           bg='white',
+           plot=plt,
+           scale=1.5)
 
 
 
@@ -186,8 +198,12 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s=NULL, diagnostics_fold
         facet_wrap(fuel~sector)) -> plt
 
     plt
-    quicksave(file.path(diagnostics_folder, 'eurostat_cons_availability.png'),
-           width=10, height=8, bg='white', plot=plt, scale=1.5)
+    quicksave(file=file.path(diagnostics_folder, 'eurostat_cons_availability.png'),
+           width=10,
+           height=8,
+           bg='white',
+           plot=plt,
+           scale=1.5)
 
   }
 }
@@ -195,7 +211,7 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s=NULL, diagnostics_fold
 diagnostic_eurostat_indprod <- function(eurostat_indprod, iso2s, diagnostics_folder="diagnostics"){
 
   # Plot heatmap of consumption by sector
-  if(!is.null(diagnostics_folder)){
+  if(!is_null_or_empty(diagnostics_folder)){
 
     create_dir(diagnostics_folder)
 
@@ -252,7 +268,7 @@ diagnose_eu_vs_countries <- function(
   pwr_generation,
   diagnostics_folder="diagnostics"){
 
-  if(!is.null(diagnostics_folder)){
+  if(!is_null_or_empty(diagnostics_folder)){
     create_dir(diagnostics_folder)
 
     # Power demand --------------------------------------------------
@@ -458,7 +474,7 @@ diagnose_eu_vs_countries <- function(
        } %>%
        mutate(is_eu=case_when(iso2=="EU" ~ "EU", TRUE ~ "EU member states")) %>%
        filter(date < "2025-01-01") %>%
-       filter(date >= "2010-01-01") %>%
+       filter(date >= "2020-01-01") %>%
        group_by(
          fuel,
          sector,
@@ -480,7 +496,7 @@ diagnose_eu_vs_countries <- function(
      # Check EU vs countries
      plt_data %>%
        group_by(fuel) %>%
-       ggplot(aes(date, value, col=is_eu)) +
+       ggplot(aes(date, value, col=is_eu, linewidth=is_eu, alpha=is_eu)) +
        geom_line(show.legend = F) +
        ggrepel::geom_text_repel(
          data = . %>% filter(date==max(date)),
@@ -496,12 +512,21 @@ diagnose_eu_vs_countries <- function(
 
        ) +
        facet_wrap(sector~fuel) +
+       scale_x_date(date_minor_breaks = "3 month",
+                    date_breaks =  "1 year"
+                    ) +
        # scale_x_continuous(expand = expansion(add = c(0, 3)),
        #                    breaks = seq(2015, 2025, 1)
        #                    ) +
        rcrea::scale_color_crea_d() +
        rcrea::theme_crea_new() +
+       theme(
+         panel.grid.minor.x = element_line(color="grey98"),
+         panel.grid.major.x = element_line(color="grey90"),
+       ) +
        rcrea::scale_y_crea_zero() +
+       scale_alpha_manual(values=c(1, 0.8)) +
+       scale_linewidth_manual(values=c(1.2, 0.7)) +
        labs(
          title='[DIAGNOSTIC] CO2 emissions EU vs sum of EU countries',
          subtitle='BEFORE filling missing data - Gap is theoretically OK',

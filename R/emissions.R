@@ -1,4 +1,5 @@
-get_co2_from_eurostat_cons <- function(eurostat_cons, diagnostics_folder="diagnostics",
+get_co2_from_eurostat_cons <- function(eurostat_cons,
+                                       diagnostics_folder="diagnostics",
                                        keep_siec=F){
 
   group_by_cols <- c("iso2", "geo", "date"="time", "fuel", "sector", "unit")
@@ -13,11 +14,15 @@ get_co2_from_eurostat_cons <- function(eurostat_cons, diagnostics_folder="diagno
              case_when(unit=='Thousand tonnes' ~ values * ncv_kjkg / 1000 * co2_factor_t_per_TJ,
                        unit=='Terajoule (gross calorific value - GCV)' & fuel==FUEL_GAS ~ values * ncv_gcv_gas * co2_factor_t_per_TJ
              )) %>%
+    filter(!is.na(value_co2_tonne)) %>%
     group_by_at(group_by_cols) %>%
     summarise(value = sum(value_co2_tonne, na.rm=T),
+              n_siec=n_distinct(siec),
               unit='t',
               .groups="drop"
     ) %>%
+    # Remove those with only partial data
+
     ungroup()
 }
 
@@ -133,7 +138,7 @@ add_ncv <- function(x, diagnostics_folder=NULL){
     mutate(source=coalesce(source, "IEA (weighted averaged)"))
 
   # Check dispersion (NCVs shouldn't be too far apart, otherwise need to manually check ratios)
-  if(!is.null(diagnostics_folder)){
+  if(!is_null_or_empty(diagnostics_folder)){
     conversion_filled %>%
       group_by(iso2, siec) %>%
       summarise(

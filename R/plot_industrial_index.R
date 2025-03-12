@@ -51,7 +51,7 @@ plot_industrial_index_bar_yoy <- function(industrial_indexes,
 
 
   plt <- ggplot(plt_data, aes(label, central, fill=product)) +
-    geom_col(show.legend = F) +
+    geom_col(show.legend = F, width=0.6) +
     geom_errorbar(aes(ymin=lower, ymax=upper), linewidth=0.2, width=0.2, col="#999999") +
     # Only use faceting if by_fuel is TRUE and there's more than one product
     {if(by_fuel && n_distinct(plt_data$product) > 1)
@@ -61,7 +61,7 @@ plot_industrial_index_bar_yoy <- function(industrial_indexes,
     rcrea::theme_crea_new() +
     scale_fill_manual(values=get_colors()) +
     scale_y_continuous(labels=function(x) paste0(ifelse(x>0,"+",""),scales::comma(x))) +
-    labs(title=paste(glue("{iso2_to_name(iso2)}) Change in energy consumption per industrial sector"),
+    labs(title=paste(glue("{iso2_to_name(iso2)} Change in energy consumption per industrial sector"),
                     if(by_fuel) "and fuel family" else ""),
          subtitle="2024 vs 2023 in TeraJoule",
          x=NULL,

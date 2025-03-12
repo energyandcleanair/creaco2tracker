@@ -150,7 +150,7 @@ get_eurostat_cons <- function(
     slice(1) %>%
     ungroup()
 
-  if(!is.null(diagnostics_folder)){
+  if(!is_null_or_empty(diagnostics_folder)){
     # Visual check
     diagnostic_eurostat_cons_yearly_monthly(
       diagnostics_folder = diagnostics_folder,
@@ -184,7 +184,7 @@ get_eurostat_cons <- function(
 
 
   # Other diagnostics
-  if(!is.null(diagnostics_folder)){
+  if(!is_null_or_empty(diagnostics_folder)){
     diagnostic_eurostat_cons(cons,
                              iso2s=iso2s,
                              diagnostics_folder = diagnostics_folder)
@@ -238,7 +238,7 @@ get_eurostat_indprod <- function(diagnostics_folder = NULL,
     add_iso2()
 
 
-  if(!is.null(diagnostics_folder)){
+  if(!is_null_or_empty(diagnostics_folder)){
     diagnostic_eurostat_indprod(indprod_raw,
                                 diagnostics_folder = diagnostics_folder)
   }
