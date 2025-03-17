@@ -6,9 +6,9 @@ get_validation_data <- function(region="EU", source_name = NULL, ...) {
     # External validation sources
     "Climate Watch" = load_climatewatch_csv,
     "UNFCCC" = load_climatewatch_csv,
-    "GCP" = load_climatewatch_csv,
+    # "GCP" = load_climatewatch_csv,
     "PIK" = load_climatewatch_csv,
-    "GCP2" = load_gcb,
+    "Global Carbon Budget 2024" = load_gcb,
 
     # Diagnostic sources
     "Carbon Monitor" = load_carbonmonitor,

@@ -5,6 +5,9 @@
 #' @param use_cache whether to use cache for EUROSTAT, power and gas data.
 #' Save time for development. Should be Falsein production.
 #' @param iso2s
+#' @param downscale_daily
+#' @param min_year
+#' @param ncv_source iea or ipcc
 #'
 #' @return
 #' @export
@@ -12,10 +15,10 @@
 #' @examples
 get_co2 <- function(diagnostics_folder='diagnostics',
                     downscale_daily=T,
-                          use_cache=F,
-                          iso2s = get_eu_iso2s(include_eu = T),
-                          min_year = NULL
-                          ){
+                    use_cache=F,
+                    iso2s = get_eu_iso2s(include_eu = T),
+                    min_year = NULL,
+                    ncv_source = "iea"){
 
   create_dir(diagnostics_folder)
 
@@ -41,7 +44,10 @@ get_co2 <- function(diagnostics_folder='diagnostics',
 
 
   # Compute emissions from EUROSTAT first
-  co2_unprojected <- get_co2_from_eurostat_cons(eurostat_cons)
+  co2_unprojected <- get_co2_from_eurostat_cons(eurostat_cons,
+                                                ncv_source = ncv_source,
+                                                diagnostics_folder = diagnostics_folder,
+                                                )
 
 
   # Project data til now

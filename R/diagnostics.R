@@ -47,7 +47,11 @@ diagnostic_pwr <- function(pwr_generation, diagnostics_folder="diagnostics"){
 }
 
 
-diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, cons_combined, diagnostics_folder="diagnostics"){
+diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly,
+                                                    cons_monthly,
+                                                    cons_combined,
+                                                    detailed_iso2s=c("EU"),
+                                                    diagnostics_folder="diagnostics"){
 
   if(!is_null_or_empty(diagnostics_folder)){
 
@@ -71,7 +75,7 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, c
         ggplot(aes(year, values, col=sector, linetype=source)) +
         geom_line() +
         facet_grid(iso2_to_name(iso2) ~ siec,
-                   scales='free') +
+                   scales='free_y') +
         theme(legend.position = 'bottom') +
         rcrea::scale_y_crea_zero()
 
@@ -83,59 +87,62 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly, cons_monthly, c
            scale=1.5
            )
 
-    plt <- plt_data %>%
-      filter(iso2=="EU") %>%
-      ggplot(aes(year, values, col=sector, linetype=source)) +
-      geom_line() +
-      facet_wrap(~ siec,
-                 scales='free') +
-      theme(legend.position = 'bottom') +
-      rcrea::scale_y_crea_zero()
+    # Do detailed ones
+    for(iso2 in detailed_iso2s){
 
-    ggsave(filename=file.path(diagnostics_folder,'eurostat_annual_vs_monthly_yearly_eu.png'),
-           plot=plt,
-           width=10,
-           height=8,
-           bg='white'
-    )
+      plt <- plt_data %>%
+        filter(iso2 == !!iso2) %>%
+        ggplot(aes(year, values, col=sector, linetype=source)) +
+        geom_line() +
+        facet_wrap(~ siec,
+                   scales='free_y') +
+        theme(legend.position = 'bottom') +
+        rcrea::scale_y_crea_zero()
 
-    (plt <- cons_combined %>%
-      filter(grepl('European union', geo, T)) %>%
-      ggplot(aes(time, values, col=siec, linetype=source)) +
-      geom_line() +
-      facet_grid(fuel~sector, scales='free_y') +
-      theme(legend.position='bottom')+
-      rcrea::scale_y_crea_zero())
+      ggsave(filename=file.path(diagnostics_folder, glue('eurostat_annual_vs_monthly_yearly_{tolower(iso2)}.png')),
+             plot=plt,
+             width=10,
+             height=8,
+             bg='white'
+      )
 
-    ggsave(filename=file.path(diagnostics_folder,'eurostat_annual_vs_monthly_monthly.png'),
-           plot=plt,
-           width=8,
-           height=6,
-           bg='white')
+      (plt <- cons_combined %>%
+          filter(iso2 == !!iso2) %>%
+          ggplot(aes(time, values, col=siec, linetype=source)) +
+          geom_line() +
+          facet_grid(fuel~sector, scales='free_y') +
+          theme(legend.position='bottom')+
+          rcrea::scale_y_crea_zero())
 
-    (plt <- cons_combined %>%
-      filter(grepl('European union', geo, T)) %>%
-      # Complete dates so that there's no weird line in the plot
-      complete(time=seq.Date(min(time), max(time), by='month'),
-               geo,
-               siec,
-               fuel,
-               sector,
-               source,
-               fill=list(values=NA)) %>%
-      ggplot(aes(time, values, col=siec, linetype=source)) +
-      geom_line() +
-      facet_grid(fuel~sector, scales='free_y') +
-      theme(legend.position='bottom')+
-      rcrea::scale_y_crea_zero())
+      ggsave(filename=file.path(diagnostics_folder, glue('eurostat_annual_vs_monthly_monthly_{tolower(iso2)}.png')),
+             plot=plt,
+             width=8,
+             height=6,
+             bg='white')
 
-    ggsave(filename=file.path(diagnostics_folder,'eurostat_combined.png'),
-           plot=plt,
-           width=8,
-           height=6,
-           bg='white')
+      (plt <- cons_combined %>%
+          filter(iso2 == !!iso2) %>%
+          # Complete dates so that there's no weird line in the plot
+          complete(time=seq.Date(min(time), max(time), by='month'),
+                   geo,
+                   siec,
+                   fuel,
+                   sector,
+                   source,
+                   fill=list(values=NA)) %>%
+          ggplot(aes(time, values, col=siec, linetype=source)) +
+          geom_line() +
+          facet_grid(fuel~sector, scales='free_y') +
+          theme(legend.position='bottom')+
+          rcrea::scale_y_crea_zero())
+
+      ggsave(filename=file.path(diagnostics_folder, glue('eurostat_combined_{tolower(iso2)}.png')),
+             plot=plt,
+             width=8,
+             height=6,
+             bg='white')
+    }
   }
-
 }
 
 diagnostic_eurostat_cons <- function(eurostat_cons, iso2s=NULL, diagnostics_folder="diagnostics"){

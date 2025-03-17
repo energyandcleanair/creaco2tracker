@@ -120,7 +120,7 @@ add_total_co2 <- function(co2){
   # First handle non-total fuels
   co2 %>%
     filter(fuel != 'total') %>%
-    group_by(iso2, geo, date) %>%
+    group_by(iso2, geo, date, unit) %>%
     summarise(
       # First calculate central value and std dev
       central_value = sum(value[estimate == "central"], na.rm = TRUE),

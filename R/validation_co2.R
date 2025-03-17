@@ -76,12 +76,12 @@ validate_co2_historical <- function(co2 = NULL,
       filter(iso2 %in% unique(co2_crea$iso2),
              sector == SECTOR_ALL,
              fuel == FUEL_TOTAL) %>%
-      filter(source != "Carbon Monitor")
+      filter(grepl("Global Carbon Budget", source))
 
 
     plot_data <- bind_rows(
       co2_crea,
-      co2_validate %>% mutate(type='estimated')
+      co2_validate
     ) %>%
       mutate(
         source=factor(source, levels=c("CREA", unique(co2_validate$source)))
@@ -95,7 +95,9 @@ validate_co2_historical <- function(co2 = NULL,
 
     ggplot(plot_data) +
       geom_line(aes(year, value/1e3, col=source, linewidth=source, alpha=source)) +
-      scale_x_continuous(limits=c(min(co2_crea$year), NA)) +
+      scale_x_continuous(limits=c(min(co2_crea$year), NA),
+                         breaks=seq(min(co2_crea$year), 2025, 10)
+                         ) +
       scale_alpha_manual(values=alphas) +
       scale_linewidth_manual(values=linewidths) +
       scale_color_manual(values=colors) +
@@ -109,20 +111,20 @@ validate_co2_historical <- function(co2 = NULL,
                      )
         }
       } +
-      labs(title=glue("{iso2_to_name(iso2)} CO2 emissions from fossil fuels"),
-           subtitle="Projection of historical sources using CREA CO2 tracker, in billion tonne CO2 per year",
+      labs(title=glue("CO2 emissions from fossil fuels"),
+           subtitle="Comparison between CREA and Global Carbon Project estimates, in billion tonne CO2 per year",
            y=NULL,
            x=NULL,
            linewidth="Source",
            linetype=NULL,
            alpha="Source",
            color="Source",
-           caption="Source: CREA analysis and Global Carbon Project.") -> plt
+           caption="Source: CREA analysis and Global Carbon Budget 2024 (Friedlingstein et al., 2024b, ESSD).") -> plt
 
     quicksave(file.path(folder, glue("validation_co2_countries.jpg")),
               plot=plt,
               width=8,
-              height=12,
+              height=10,
               preview = F,
               logo = F)
 

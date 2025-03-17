@@ -156,7 +156,8 @@ get_eurostat_cons <- function(
       diagnostics_folder = diagnostics_folder,
       cons_yearly = cons_yearly,
       cons_monthly = cons_monthly,
-      cons_combined = cons_combined
+      cons_combined = cons_combined,
+      detailed_iso2s = c("BE","NL")
     )
   }
 
