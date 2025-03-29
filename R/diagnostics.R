@@ -124,7 +124,7 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly,
           filter(iso2 == !!iso2) %>%
           # Complete dates so that there's no weird line in the plot
           complete(time=seq.Date(min(time), max(time), by='month'),
-                   geo,
+                   iso2,
                    siec,
                    fuel,
                    sector,
@@ -152,6 +152,8 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s=NULL, diagnostics_fold
 
     create_dir(diagnostics_folder)
     plt_data <- eurostat_cons %>%
+      mutate(geo=countrycode::countrycode(iso2, "iso2c", "country.name", custom_match = c("EU"="EU",
+                                                                                          "XK"="Kosovo"))) %>%
       filter(is.null(iso2s) | iso2 %in% iso2s) %>%
       group_by(iso2, geo, fuel, sector, unit, time) %>%
       summarise(values=sum(values)) %>%

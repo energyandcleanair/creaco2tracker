@@ -19,21 +19,18 @@ add_ncv_iea <- function(x, diagnostics_folder=NULL){
       SIEC_HARD_COAL, "Anthracite",
       SIEC_BROWN_COAL, "Lignite",
       SIEC_BROWN_COAL_BRIQUETTES, "BKB/peat briquette plants",
-      "P1000", "Peat and peat products",
-      "S2000", "Oil shale and oil sands",
+      SIEC_PEAT, "Peat and peat products",
+      SIEC_OIL_SHALE, "Oil shale and oil sands",
       SIEC_CRUDE_OIL, "Crude oil",
-      SIEC_NATURAL_GAS, "Natural gas",
+      SIEC_NATURAL_GAS, "Natural Gas",
       SIEC_COKE_OVEN_COKE, "Coke oven coke",
       SIEC_OIL_PRODUCTS, "Other oil products",
       SIEC_ROAD_DIESEL, "Gas/diesel oil excl. biofuels",
       SIEC_GASOIL_DIESEL, "Gas/diesel oil excl. biofuels",
-      "O4652", "Motor gasoline excl. biofuels",
       SIEC_AVIATION_GASOLINE, "Aviation gasoline",
       SIEC_MOTOR_GASOLINE_XBIO, "Motor gasoline excl. biofuels",
       SIEC_FUEL_OIL, "Fuel oil",
       SIEC_HEATING_GASOIL, "Gas/diesel oil excl. biofuels",
-      "O4661", "Kerosene",
-      "O4661XR5230B", "Kerosene type jet fuel excl. biofuels",
       SIEC_KEROSENE_XBIO, "Kerosene type jet fuel excl. biofuels"
     )
 
@@ -106,6 +103,7 @@ add_ncv_iea <- function(x, diagnostics_folder=NULL){
     fill(ncv_kjkg, .direction = "downup") %>%
     left_join(conversion_wmean) %>%
     mutate(ncv_kjkg=coalesce(ncv_kjkg, ncv_kjkg_wmean)) %>%
+    fill(ncv_kjkg, .direction = "downup") %>%
     select(-c(ncv_kjkg_wmean)) %>%
     ungroup() %>%
     mutate(source=coalesce(source, "IEA (weighted averaged)"))
@@ -128,7 +126,7 @@ add_ncv_iea <- function(x, diagnostics_folder=NULL){
     mutate(year=year(time)) %>%
     add_iso2() %>%
     left_join(conversion_filled, by=c("iso2", "siec_code", "year")) %>%
-    group_by(geo, siec_code) %>%
+    group_by(iso2, siec_code) %>%
     arrange(time) %>%
     tidyr::fill(ncv_kjkg, .direction = "downup")
 
@@ -136,14 +134,14 @@ add_ncv_iea <- function(x, diagnostics_folder=NULL){
 
   # NEW: Make it time insensitive. It otherwise introduces weird patterns
   x_with_ncv <- x_with_ncv %>%
-    group_by(geo, siec_code) %>%
+    group_by(iso2, siec_code) %>%
     mutate(ncv_kjkg=mean(ncv_kjkg, na.rm=T))
 
   x_with_ncv
 }
 
 # New function to get SIEC fuel mapping
-get_siec_unfccc_fuel_mapping <- function() {
+get_siec_ipcc_fuel_mapping <- function() {
   tribble(
     ~siec_code, ~fuel,
     SIEC_HARD_COAL, "Anthracite",
@@ -164,12 +162,12 @@ get_siec_unfccc_fuel_mapping <- function() {
 }
 
 
-get_unfccc_data <- function() {
+get_ipcc_data <- function() {
   read_csv(get_data_filepath('EFDB_output.csv'))
 }
 
-get_unfccc_ncv <- function() {
-  get_unfccc_data() %>%
+get_ipcc_ncv <- function() {
+  get_ipcc_data() %>%
     filter(grepl('2006', `Type of parameter`)) %>%
     filter(Unit %in% ("TJ/Gg"),
            Description=="Net Calorific Value (NCV)") %>%
@@ -178,13 +176,13 @@ get_unfccc_ncv <- function() {
 }
 
 
-add_ncv_unfccc <- function(x, diagnostics_folder=NULL){
+add_ncv_ipcc <- function(x, diagnostics_folder=NULL){
 
   # Get IPCC data
   ipcc <- get_ipcc_ncv()
 
   # Get SIEC fuel mapping
-  siec_fuel <- get_siec_unfccc_fuel_mapping()
+  siec_fuel <- get_siec_ipcc_fuel_mapping()
 
   # Map SIEC codes to IPCC fuels
   ncvs <- siec_fuel %>%
@@ -194,7 +192,7 @@ add_ncv_unfccc <- function(x, diagnostics_folder=NULL){
   # Write diagnostics if folder is provided
   if(!is_null_or_empty(diagnostics_folder)){
     ncvs %>%
-      write_csv(file.path(diagnostics_folder, "ncv_unfccc.csv"))
+      write_csv(file.path(diagnostics_folder, "ncv_ipcc.csv"))
   }
 
   # Add NCVs to the input data

@@ -91,7 +91,11 @@ get_co2 <- function(diagnostics_folder='diagnostics',
 
    # Final tweaks
   co2 <- co2 %>%
-    rename(region=geo) %>%
+    mutate(region = countrycode::countrycode(iso2,
+                                             origin = "iso2c",
+                                             destination = "country.name",
+                                             custom_match = c("EU"="EU")
+                                             )) %>%
     mutate(unit='t/day') %>%
     filter(!is.na(date)) %>%
     {

@@ -3,7 +3,7 @@ get_co2_from_eurostat_cons <- function(eurostat_cons,
                                        keep_siec=F,
                                        ncv_source="iea"){
 
-  group_by_cols <- c("iso2", "geo", "date"="time", "fuel", "sector", "unit")
+  group_by_cols <- c("iso2", "date"="time", "fuel", "sector", "unit")
   if(keep_siec){
     group_by_cols <- c(group_by_cols, "siec_code")
   }
@@ -45,8 +45,8 @@ get_ipcc_emission_factors <- function() {
     SIEC_HARD_COAL,             92.8,                 # EFID=110620
     SIEC_BROWN_COAL,            113.1,                # EFID=123085
     SIEC_BROWN_COAL_BRIQUETTES, 99,                   # EFID=123073
-    # SIEC_PEAT ("P1000"),      117.766,              # EFID=122005 (Peat)
-    # SIEC_OIL_SHALE ("S2000"), 108,                  # Oil shale
+    SIEC_PEAT,                  117.766,              # EFID=122005 (Peat)
+    SIEC_OIL_SHALE,             108,                  # Oil shale
     SIEC_OIL_PRODUCTS,          20 * 44 / 12,         # EFID=110669 Other petroleum products
     SIEC_FUEL_OIL,              77.7,                 # EFID=121579
     SIEC_HEATING_GASOIL,        20 * 44 / 12,         # EFID=17174 = 73.33

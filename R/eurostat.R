@@ -25,12 +25,14 @@ get_eurostat_cons <- function(
   cons_raw_gas <- collect_gas(use_cache = use_cache)
 
   # Check siec and siec_code are full and univoqual
+  # That all iso2s are included
   check_siec_siec_code <- function(x) {
     y <- distinct(x, siec, siec_code)
     stopifnot(!any(is.na(y$siec_code)))
     stopifnot(!any(is.na(y$siec)))
     stopifnot(!any(duplicated(y$siec_code)))
     stopifnot(!any(duplicated(y$siec)))
+    stopifnot(!any(is.na(x$iso2)))
   }
   check_siec_siec_code(cons_raw_oil$monthly)
   check_siec_siec_code(cons_raw_oil$yearly)
@@ -42,20 +44,33 @@ get_eurostat_cons <- function(
   split_elec_others <- function(x) {
     x %>%
       mutate(values = values * ifelse(sector == SECTOR_ELEC, -1, 1)) %>%
-      group_by(geo, time, unit, siec, siec_code, fuel) %>%
+      group_by(iso2, time, unit, siec_code, fuel) %>%
       summarise(values=sum(values, na.rm = T),
                 n=sum(!is.na(values))
       ) %>%
       mutate(sector = SECTOR_OTHERS) %>%
-      bind_rows(x %>% filter(sector == SECTOR_ELEC))
+      bind_rows(x %>% filter(sector == SECTOR_ELEC)) %>%
+      ungroup() %>%
+      select(-n)
   }
 
   aggregate <- function(x) {
     x %>%
-        group_by(geo, sector, time, unit, siec, siec_code, fuel) %>%
+        group_by(iso2, sector, time, unit, siec_code, fuel) %>%
         summarise_at("values", sum, na.rm = T) %>%
       ungroup()
   }
+
+  # Collect siecs correpondence table
+  siecs <- bind_rows(
+    cons_raw_oil$yearly,
+    cons_raw_solid$yearly,
+    cons_raw_gas$yearly
+  ) %>%
+    ungroup() %>%
+    filter(!is.na(siec)) %>%
+    select(siec, siec_code) %>%
+    distinct()
 
   # Process data
   cons_monthly <- list(
@@ -64,7 +79,9 @@ get_eurostat_cons <- function(
     gas = process_gas_monthly(cons_raw_gas$monthly, pwr_generation=pwr_generation) %>% split_elec_others()
   ) %>%
     bind_rows() %>%
-    aggregate()
+    aggregate() %>%
+    add_iso2() %>%
+    select(iso2, sector, time, unit, siec_code, fuel, values)
 
   cons_yearly <- list(
     solid = process_solid_yearly(cons_raw_solid$yearly) %>% split_elec_others(),
@@ -72,16 +89,24 @@ get_eurostat_cons <- function(
     gas = process_gas_yearly(cons_raw_gas$yearly, pwr_generation=pwr_generation) %>% split_elec_others()
   ) %>%
     bind_rows() %>%
-    aggregate()
+    aggregate() %>%
+    add_iso2() %>%
+    select(iso2, sector, time, unit, siec_code, fuel, values)
+
+  # Check that there is no na value
+  if (any(!complete.cases(cons_monthly)) | any(!complete.cases(cons_yearly))) {
+    stop("There are NA values in the data (except in the 'values' column).")
+  }
+
 
   # Seasonal adjusment
   month_shares <- cons_monthly %>%
-      group_by(sector, siec, siec_code, unit, geo, fuel, year = lubridate::year(time)) %>%
+      group_by(iso2, sector, siec_code, unit, fuel, year = lubridate::year(time)) %>%
       mutate(count = n()) %>%
       filter(count == 12) %>%
-      group_by(sector, siec, siec_code, unit, geo, fuel, month = lubridate::month(time)) %>%
+      group_by(sector, siec_code, unit, iso2, fuel, month = lubridate::month(time)) %>%
       summarise(values = sum(values, na.rm = T), .groups = "drop") %>%
-      group_by(sector, siec, siec_code, unit, geo, fuel) %>%
+      group_by(sector, siec_code, unit, iso2, fuel) %>%
       mutate(month_share = values / sum(values, na.rm = T)) %>%
       mutate(
         month_share = replace_na(month_share, 1 / 12),
@@ -94,7 +119,7 @@ get_eurostat_cons <- function(
 
   # Check ~1
   if (!all(month_shares %>%
-    group_by(sector, siec, siec_code, unit, geo, fuel) %>%
+    group_by(sector, siec_code, unit, iso2, fuel) %>%
     summarise(one = round(sum(month_share), 5), .groups = "drop") %>%
     pull(one) %>%
     unique() == 1)) {
@@ -108,7 +133,7 @@ get_eurostat_cons <- function(
       inner_join(month_shares,
         relationship = "many-to-many"
       ) %>%
-      arrange(sector, siec, siec_code, unit, geo, fuel, time) %>%
+      arrange(sector, siec_code, unit, iso2, fuel, time) %>%
       mutate(
         time = as.Date(sprintf("%s-%0d-01", year, month)),
         values = values * month_share
@@ -116,7 +141,9 @@ get_eurostat_cons <- function(
       select(-c(year, month, month_share))
 
   # Keep monthly when both are available
-  # unless specified otherwise after looking at diagnostic charts
+  # Though only after a cutoff date. Monthly data is quite incomplete/chaotic
+  # before ~2020, and sometimes a bit after
+  # Look at diagnostic charts for more details
   cutoff_monthly <- tibble(
     siec_code=c(SIEC_NATURAL_GAS,
                 SIEC_COKE_OVEN_COKE,
@@ -131,9 +158,20 @@ get_eurostat_cons <- function(
     tidyr::complete(siec_code=unique(cons_yearly_monthly$siec_code),
                     source,
                     fill=list(cutoff_date="2020-01-01")
-                    )
+                    ) %>%
+    tidyr::crossing(iso2=unique(add_iso2(cons_yearly_monthly)$iso2)) %>%
+    left_join(cons_yearly_monthly %>% distinct(siec_code, fuel))
 
-
+  # Country-specific fix
+  cutoff_monthly <- cutoff_monthly %>%
+    mutate(
+      cutoff_date = case_when(
+        # Fuel oil is quite oscillating in Portugal before 2023
+        # Risk is that validation then isn't relevant as mostly on yearly data
+        iso2 == "PT" & fuel==FUEL_OIL ~ "2023-01-01",
+        T ~ cutoff_date
+      )
+    )
 
   cons_combined <- bind_rows(
     cons_yearly_monthly %>% mutate(source = "yearly"),
@@ -145,7 +183,7 @@ get_eurostat_cons <- function(
       is.na(cutoff_date) | time >= cutoff_date
     ) %>%
     select(-c(cutoff_date)) %>%
-    group_by(geo, sector, time, unit, siec, siec_code, fuel) %>%
+    group_by(iso2, sector, time, unit, siec_code, fuel) %>%
     arrange(source) %>% # monthly < yearly
     slice(1) %>%
     ungroup()
@@ -154,23 +192,23 @@ get_eurostat_cons <- function(
     # Visual check
     diagnostic_eurostat_cons_yearly_monthly(
       diagnostics_folder = diagnostics_folder,
-      cons_yearly = cons_yearly,
-      cons_monthly = cons_monthly,
-      cons_combined = cons_combined,
-      detailed_iso2s = c("BE","NL")
+      cons_yearly = cons_yearly %>% left_join(siecs),
+      cons_monthly = cons_monthly %>% left_join(siecs),
+      cons_combined = cons_combined %>% left_join(siecs),
+      detailed_iso2s = c("BE", "NL", "PT", "SK", "EU", "IE")
     )
   }
 
   cons <- cons_combined %>%
-    group_by(geo, sector, time, unit, siec, fuel) %>%
+    group_by(iso2, sector, time, unit, siec_code, fuel) %>%
     arrange(source) %>%
     slice(1) %>%
     ungroup() %>%
-    select(-c(source))
+    select(-c(source)) %>%
+    left_join(siecs)
 
   # Add infos
   cons <- cons %>%
-    add_iso2() %>%
     recode_siec()
 
   # Keep regions of interest
@@ -211,7 +249,7 @@ get_eurostat_cons <- function(
 remove_last_incomplete <- function(cons) {
   max_months <- 6
   cons %>%
-    group_by(geo, sector, unit, siec, fuel) %>%
+    group_by(iso2, sector, unit, siec_code, fuel) %>%
     arrange(desc(time)) %>%
     mutate(cumsum = cumsum(values)) %>%
     filter(cumsum != 0 | max(cumsum) == 0 | row_number() >= max_months) %>%

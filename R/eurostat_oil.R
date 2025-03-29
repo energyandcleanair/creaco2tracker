@@ -54,6 +54,9 @@ collect_oil <- function(use_cache = FALSE) {
   # Add missing GID_NE when it happens
   cons_yearly <- fill_oil_non_energy_use_yearly(cons_yearly_raw)
 
+  # Missing GID_OBS -> fill with GID_CAL
+  cons_yearly <- fill_gid_obs_with_gid_cal(cons_yearly)
+
   # And GID_NE
   cons_monthly_filled <- fill_oil_non_energy_use_monthly(
     yearly = cons_yearly,
@@ -66,9 +69,12 @@ collect_oil <- function(use_cache = FALSE) {
     yearly = cons_yearly
   )
 
+  # Missing GID_OBS -> fill with GID_CAL
+  cons_monthly_filled <- fill_gid_obs_with_gid_cal(cons_monthly_filled)
+
   list(
-    monthly = cons_monthly_filled,
-    yearly = cons_yearly
+    monthly = cons_monthly_filled %>% add_iso2() %>% filter(!is.na(iso2)),
+    yearly = cons_yearly %>% add_iso2() %>% filter(!is.na(iso2))
   )
 }
 
@@ -243,6 +249,16 @@ process_oil <- function(x) {
     "INTAVI_E",       1,        SECTOR_TRANSPORT_INTERNATIONAL_AVIATION
   )
 
+
+  # Only keep meaningful columns to avoid confusion
+  siecs <- x %>%
+    ungroup() %>%
+    distinct(siec_code, siec)
+
+  x <- x %>%
+    add_iso2() %>%
+    select(siec_code, nrg_bal_code, iso2, time, values, unit)
+
   # Step 1: Filter the data based on the filter matrix
   x_filtered <- x %>%
     inner_join(filter_matrix %>% filter(keep), by = c("siec_code", "nrg_bal_code"))
@@ -250,7 +266,7 @@ process_oil <- function(x) {
   # Step 2: Apply deductions to avoid double counting using a cleaner approach
   x_deducted <- x_filtered %>%
     # Create a temporary ID for each group
-    group_by(nrg_bal_code, freq, unit, geo, time) %>%
+    group_by(nrg_bal_code, unit, iso2, time) %>%
     mutate(group_id = dplyr::cur_group_id()) %>%
     ungroup()
 
@@ -295,11 +311,40 @@ process_oil <- function(x) {
   x_processed <- x_deducted %>%
     left_join(factor_matrix, by = "nrg_bal_code") %>%
     mutate(
-      values = values * factor,
-      fuel = FUEL_OIL
+      values = values * factor
     ) %>%
     select(-factor) %>%
-    arrange(desc(time)) %>%
+    arrange(desc(time))
+
+  # Apply gap filling
+  x_processed <- fill_gaps_in_time_series(
+    data = x_processed,
+    group_cols = c("iso2", "siec_code", "nrg_bal_code", "sector", "unit"),
+    zero_consecutive_required = 3,
+    zero_consecutive_required_beyond_last = 12,
+    exclude_iso2s = "EU"
+  )
+
+  # Manual gap filling for Estonia with more aggressive parameters
+  # It is missing one month data in 2024-10-01
+  x_processed <- x_processed %>%
+    fill_gaps_in_time_series(
+      group_cols = c("iso2", "siec_code", "nrg_bal_code", "sector", "unit"),
+      zero_consecutive_required = 2,
+      zero_consecutive_required_beyond_last = 6,
+      interp_cv_threshold = 3,
+      interp_maxgap = 6,
+      exclude_iso2s = setdiff(unique(x_processed$iso2), "EE")
+    )
+
+
+  # Fill EU values from country sums
+  x_processed <- fill_eu_from_countries_sum(
+    data = x_processed,
+    group_cols = c("sector", "siec_code", "time", "nrg_bal_code", "unit"),
+    min_countries = 25,
+    tolerance = Inf
+  ) %>%
     filter(!is.na(values)) %>%
     # After validation, we find that transport data is only correct from ~2010
     filter(
@@ -310,14 +355,17 @@ process_oil <- function(x) {
   validate_results(x_processed)
 
   # Aggregate
-  x_processed %>%
-    group_by(time, geo, fuel, unit, siec_code, sector) %>%
+  result <- x_processed %>%
+    mutate(fuel = FUEL_OIL) %>%
+    group_by(iso2, time, fuel, unit, siec_code, sector) %>%
     summarise(values = sum(values, na.rm = TRUE)) %>%
     ungroup() %>%
     # Re-add siec
     left_join(
-      x %>% distinct(siec_code, siec)
+      siecs %>% distinct(siec_code, siec)
     )
+
+  return(result)
 }
 
 
@@ -781,8 +829,46 @@ fill_oil_non_energy_use_yearly <- function(yearly){
     )
 }
 
-#' Non energy use is not available in monthly data. We derive it from industrial production data
-#' instead
+
+#' In some rare instances, GID_OBS is 0/NA while it clearly shouldn't be
+#' e.g. NL, Blended biodiesel, 2020, monthly data
+#'
+#' @param x
+#'
+#' @returns
+#' @export
+#'
+#' @examples
+fill_gid_obs_with_gid_cal <- function(x){
+
+  filler <- x %>%
+    ungroup() %>%
+    filter(nrg_bal_code=='GID_CAL') %>%
+    mutate(
+      nrg_bal_code = 'GID_OBS',
+      nrg_bal = first(x$nrg_bal[x$nrg_bal_code=='GID_OBS']),
+    ) %>%
+    rename(values_cal=values)
+
+  # Remove flags column if exists
+  if("flags" %in% colnames(x)){
+    filler <- filler %>% select(-flags)
+  }
+
+  # Join with all but values
+  x %>%
+    full_join(filler) %>%
+    mutate(values =
+      case_when(
+        !is.na(values_cal) & is.na(values) ~ values_cal,
+        !is.na(values_cal) & values==0 ~ values_cal,
+        T ~ values
+      )
+    )
+}
+
+#' Non energy use is not available in monthly data. We derive it from industrial GD_PI
+#' i.e. gross delieveries to petrochemical industry
 #'
 #' @return
 #' @export
@@ -851,7 +937,8 @@ fill_oil_non_energy_use_monthly <- function(yearly, monthly){
   bind_rows(
     monthly,
     monthly_gid_ne
-  )
+  ) %>%
+    add_iso2()
 }
 
 

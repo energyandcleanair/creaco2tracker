@@ -16,11 +16,22 @@ recode_siec <- function(x){
 }
 
 add_iso2 <- function(x, country_col="geo"){
+
+  if(!country_col %in% names(x)){
+   return(x)
+  }
+
+  # Keep iso2 as backup value if it had one
+  if(!"iso2" %in% names(x)){
+    x$iso2 <- NA
+  }
+
   x %>%
-    mutate(iso2=countrycode::countrycode(!!sym(country_col), "country.name", "iso2c",
+    mutate(iso2=coalesce(iso2,
+                         countrycode::countrycode(!!sym(country_col), "country.name", "iso2c",
                                          custom_match = c("European Union - 27 countries (from 2020)"="EU",
                                                           "EU27 & UK"="EU28",
-                                                          "Kosovo*"="XK")))
+                                                          "Kosovo*"="XK"))))
 }
 
 add_missing_cols <- function(df, cols){
@@ -120,7 +131,7 @@ add_total_co2 <- function(co2){
   # First handle non-total fuels
   co2 %>%
     filter(fuel != 'total') %>%
-    group_by(iso2, geo, date, unit) %>%
+    group_by(iso2, date, unit) %>%
     summarise(
       # First calculate central value and std dev
       central_value = sum(value[estimate == "central"], na.rm = TRUE),

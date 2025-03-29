@@ -93,41 +93,58 @@ validate_co2_historical <- function(co2 = NULL,
     colors <- unname(rcrea::pal_crea[c("Blue", "Dark.red", "Dark.blue", "Orange", "Red",
                                        "Dark.purple", "Dark.violet", "Green", "Turquoise")])
 
-    ggplot(plot_data) +
-      geom_line(aes(year, value/1e3, col=source, linewidth=source, alpha=source)) +
-      scale_x_continuous(limits=c(min(co2_crea$year), NA),
-                         breaks=seq(min(co2_crea$year), 2025, 10)
-                         ) +
-      scale_alpha_manual(values=alphas) +
-      scale_linewidth_manual(values=linewidths) +
-      scale_color_manual(values=colors) +
-      rcrea::theme_crea_new() +
-      rcrea::scale_y_crea_zero() +
-      {
-        if(length(unique(co2_crea$iso2)) > 1){
-          facet_wrap(~iso2_to_name(iso2),
-                     scales='free_y',
-                     ncol=4
-                     )
-        }
-      } +
-      labs(title=glue("CO2 emissions from fossil fuels"),
-           subtitle="Comparison between CREA and Global Carbon Project estimates, in billion tonne CO2 per year",
-           y=NULL,
-           x=NULL,
-           linewidth="Source",
-           linetype=NULL,
-           alpha="Source",
-           color="Source",
-           caption="Source: CREA analysis and Global Carbon Budget 2024 (Friedlingstein et al., 2024b, ESSD).") -> plt
+    local({
+      plt_from_data <- function(plt_data){
+        ggplot(plot_data) +
+          geom_line(aes(year, value/1e3, col=source, linewidth=source, alpha=source)) +
+          scale_x_continuous(limits=c(min(co2_crea$year), NA),
+                             breaks=seq(min(co2_crea$year), 2025, 10)
+          ) +
+          scale_alpha_manual(values=alphas) +
+          scale_linewidth_manual(values=linewidths) +
+          scale_color_manual(values=colors) +
+          rcrea::theme_crea_new() +
+          rcrea::scale_y_crea_zero() +
+          {
+            if(length(unique(co2_crea$iso2)) > 1){
+              facet_wrap(~iso2_to_name(iso2),
+                         scales='free_y',
+                         ncol=4
+              )
+            }
+          } +
+          labs(title=glue("CO2 emissions from fossil fuels"),
+               subtitle="Comparison between CREA and Global Carbon Project estimates, in billion tonne CO2 per year",
+               y=NULL,
+               x=NULL,
+               linewidth="Source",
+               linetype=NULL,
+               alpha="Source",
+               color="Source",
+               caption="Source: CREA analysis and Global Carbon Budget 2024 (Friedlingstein et al., 2024b, ESSD).")
+      }
 
-    quicksave(file.path(folder, glue("validation_co2_countries.jpg")),
-              plot=plt,
-              width=8,
-              height=10,
-              preview = F,
-              logo = F)
+      plt <- plt_from_data(plot_data)
+      quicksave(file.path(folder, glue("validation_co2_countries.jpg")),
+                plot=plt,
+                width=8,
+                height=10,
+                preview = F,
+                logo = F)
 
+      # Create a version for countries matching validation only (for the methodology doc)
+      valid_iso2s <- get_valid_countries(co2)
+      plot_data <- plot_data %>%
+        filter(iso2 %in% valid_iso2s)
+
+      plt <- plt_from_data(plot_data)
+      quicksave(file.path(folder, glue("validation_co2_countries_valid.jpg")),
+                plot=plt,
+                width=8,
+                height=10,
+                preview = F,
+                logo = F)
+    })
    }
 
   if(by_country){
@@ -510,7 +527,7 @@ validate_co2_monthly <- function(co2, folder="diagnostics"){
 
   co2_crea <- co2 %>%
     filter(fuel!='total', estimate=="central") %>%
-    group_by(iso2, geo, month=floor_date(date, 'month')) %>%
+    group_by(iso2, month=floor_date(date, 'month')) %>%
     summarise(value=sum(value)/1e6/(as.integer(difftime(max(date),min(date)))+1),
               unit="mt/day",
               source='CREA CO2 Tracker',

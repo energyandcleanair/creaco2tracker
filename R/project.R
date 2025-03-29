@@ -55,16 +55,15 @@ project_until_now_lm <- function(co2, proxy, dts_month, min_r2=0.9, force_overwr
   co2_touched <- co2 %>%
     inner_join(proxy %>% distinct(iso2, fuel, sector),
                by=c('iso2', 'fuel', 'sector')) %>%
-    group_by(iso2, geo, fuel, sector, unit) %>%
+    group_by(iso2, fuel, sector, unit) %>%
     expand_dates('date', dts_month) %>%
     arrange(desc(date)) %>%
     ungroup() %>%
-    group_by(iso2, geo, fuel, sector, unit) %>%
+    group_by(iso2, fuel, sector, unit) %>%
     group_modify(function(df, keys, ...) {
 
       iso2 <- keys %>% add_iso2() %>% pull(iso2)
       fuel <- unique(keys$fuel)
-      geo <- unique(keys$geo)
       sector <- unique(keys$sector)
 
       value_proxy_cols <- grep('value_proxy', colnames(proxy), value=T)
@@ -123,6 +122,7 @@ project_until_now_lm <- function(co2, proxy, dts_month, min_r2=0.9, force_overwr
         }
       })
 
+
       # Best R2
       if(all(r2s==0)){
         log_warn(glue("{iso2} - {fuel} {sector}: No proxy data. Leaving as such."))
@@ -171,7 +171,7 @@ project_until_now_lm <- function(co2, proxy, dts_month, min_r2=0.9, force_overwr
 project_until_now_yoy <- function(co2, dts_month, last_years=3, last_months=3){
 
   co2 %>%
-    group_by(iso2, geo, fuel, sector) %>%
+    group_by(iso2, fuel, sector) %>%
     expand_dates('date', dts_month) %>%
     arrange(date) %>%
     group_modify(function(df, ...) {
@@ -304,7 +304,7 @@ project_until_now_coal_others <- function(co2, eurostat_indprod, dts_month, min_
 project_until_now_forecast <- function(co2, dts_month, last_years=10, conf_level=0.90){
 
   res <- co2 %>%
-    group_by(iso2, geo, fuel, sector, unit) %>%
+    group_by(iso2, fuel, sector, unit) %>%
     expand_dates('date', dts_month) %>%
     arrange(date) %>%
     group_modify(function(df, group_keys) {

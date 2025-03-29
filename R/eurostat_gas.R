@@ -42,8 +42,8 @@ collect_gas <- function(use_cache = FALSE) {
   cons_monthly_raw <- fill_ng_elec_eu27(cons_monthly_raw = cons_monthly_raw)
 
   list(
-    monthly = cons_monthly_raw,
-    yearly = cons_yearly_raw
+    monthly = cons_monthly_raw %>% add_iso2() %>% filter(!is.na(iso2)),
+    yearly = cons_yearly_raw %>% add_iso2() %>% filter(!is.na(iso2))
   )
 }
 
@@ -118,7 +118,9 @@ collect_gas <- function(use_cache = FALSE) {
     bind_rows(
       x_all,
       x_elec
-    )
+    ) %>%
+      ungroup() %>%
+      select(iso2, fuel, sector, siec_code, time, unit, values)
   }
 
   process_gas_monthly <- function(x, pwr_generation) {
