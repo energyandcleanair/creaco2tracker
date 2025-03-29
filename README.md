@@ -9,7 +9,7 @@ Live charts are available on [CREA's website](https://energyandcleanair.org/prod
 
 ## Release Notes
 
-### Version 0.8.2
+### Version 0.9
 Version used for 31 March 2025 Report.
 
 #### Changes
