@@ -1,8 +1,3 @@
-
-
-
-
-
 validate_power <- function(pwr_generation=entsoe.get_power_generation(), folder="validation"){
 
   ember_explorer <- ember.get_power_generation(iso2s=="EU")

@@ -1,7 +1,3 @@
-SIEC_NATURAL_GAS <- "G3000"
-SIEC_COKE_OVEN_GAS <- "C0350"
-
-
 #' Collect gas consumption data from EUROSTAT
 #'
 #' @param use_cache Whether to use cached data
@@ -52,7 +48,6 @@ collect_gas <- function(use_cache = FALSE) {
     # Monthly data only valid from 2014, way too low before
     x <- x %>%
       filter(freq != "Monthly" | time >= "2015-01-01")
-
 
     x_all <- x %>%
       filter(
