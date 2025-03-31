@@ -74,6 +74,8 @@ plot_vs_targets <- function(co2,
 
   plt_data$sector <- factor(plt_data$sector, levels=labels)
 
+  write_csv(plt_data, creahelpers::change_extension(filepath, "csv"))
+
   # Create plot
   plt <- ggplot(plt_data) +
     geom_area(aes(x=date, y=value, fill=sector),
