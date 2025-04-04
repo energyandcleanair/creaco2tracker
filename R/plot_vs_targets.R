@@ -3,12 +3,12 @@ plot_vs_targets <- function(co2,
                           colors,
                           filepath,
                           min_year = 2010,
-                          title = "EU CO2 emissions vs. 2035 and 2050 reduction targets",
+                          title = "EU CO2 emissions vs. 2030 and 2050 reduction targets",
                           width = 8,
                           height = 5) {
 
    # https://climateactiontracker.org/countries/eu/targets/
-  # As per CAT, we assume the target translates into 44% below 2010 levels in 2035 and 93% in 2050
+  # As per CAT, we assume the target translates into 44% below 2010 levels in 2030 and 93% in 2050
   # excluding LULUCF and international aviation
 
   # Set default title if not provided
@@ -29,7 +29,7 @@ plot_vs_targets <- function(co2,
     pull(value)
 
   # Calculate targets
-  target_2035 <- baseline_2010 * (1 - 0.44)
+  target_2030 <- baseline_2010 * (1 - 0.44)
   target_2050 <- baseline_2010 * (1 - 0.93)
 
 
@@ -47,23 +47,23 @@ plot_vs_targets <- function(co2,
     summarise(value=sum(value, na.rm=T)) %>%
     pull(value)
 
-  target_projection_2035 <- tibble(
-    year = 2024:2035,
-    value = seq(latest_total, target_2035, length.out=12),
+  target_projection_2030 <- tibble(
+    year = 2024:2030,
+    value = seq(latest_total, target_2030, length.out=7),
     sector = "Target"
   ) %>%
     mutate(date=as.Date(paste0(year, "-01-01")))
 
   target_projection_2050 <- tibble(
-    year = 2035:2050,
-    value = seq(target_2035, target_2050, length.out=16),
+    year = 2030:2050,
+    value = seq(target_2030, target_2050, length.out=21),
     sector = "Target"
   ) %>%
     mutate(date=as.Date(paste0(year, "-01-01")))
 
   plt_data <- bind_rows(
     recode_sector_names(historical),
-    target_projection_2035,
+    target_projection_2030,
     target_projection_2050
   )
 
@@ -81,7 +81,7 @@ plot_vs_targets <- function(co2,
     geom_area(aes(x=date, y=value, fill=sector),
               alpha=0.8) +
     # geom_area(data=bind_rows(
-    #   target_projection_2035,
+    #   target_projection_2030,
     #   target_projection_2050),
     #  ,
     #   alpha=0.5) +
@@ -101,7 +101,7 @@ plot_vs_targets <- function(co2,
       subtitle = "Billion tonnes of CO2 per year",
       caption = paste0(
         c("Source: CREA estimates based on EUROSTAT, IPCC and Climate Action Tracker (CAT).",
-        "Targets are based on CAT interpretation of 2023 EU NDCs: 44% reduction by 2035 and 93% by 2050 compared to 2010 levels.",
+        "Targets are based on CAT interpretation of 2023 EU NDCs: 44% reduction by 2030 and 93% by 2050 compared to 2010 levels.",
         "Estimates include emissions from fossil fuel combustion alone and excludes LULUCF and international aviation."),
         collapse = "\n"
       ),
