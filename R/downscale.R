@@ -29,7 +29,7 @@ downscale_daily <- function(co2, pwr_generation, gas_demand){
 
   #expand monthly data to daily and add daily data
   co2_daily_flat <- co2 %>%
-    group_by(iso2, geo, fuel, sector, estimate) %>%
+    group_by(iso2, fuel, sector, estimate) %>%
     rename(month=date) %>%
     full_join(
       tibble(date=dts_daily, month=dts_daily %>% 'day<-'(1)),
@@ -43,7 +43,7 @@ downscale_daily <- function(co2, pwr_generation, gas_demand){
 
   # Use daily data when available
   co2_daily <- co2_daily_flat %>%
-    group_by(iso2, geo, fuel, sector, estimate, month) %>%
+    group_by(iso2, fuel, sector, estimate, month) %>%
     mutate(has_both=!is.na(value+proxy_value) & date>='2021-03-01',
            proxy_eurostat_ratio = mean(proxy_value[has_both]) / mean(value[has_both]),
            proxy_CO2 = proxy_value / proxy_eurostat_ratio,
