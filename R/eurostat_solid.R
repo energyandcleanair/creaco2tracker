@@ -139,7 +139,7 @@ process_solid_monthly <- function(x, pwr_generation) {
     data = by_sector_fixed,
     group_cols = c("sector", "siec_code", "nrg_bal_code", "unit", "time"),
     min_countries = 25,
-    tolerance = 0.05
+    max_rel_diff = 0.05
   ) %>%
     mutate(fuel = ifelse(siec_code == SIEC_COKE_OVEN_COKE, FUEL_COKE, FUEL_COAL))
 

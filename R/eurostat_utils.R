@@ -76,91 +76,127 @@ fill_gaps_with_interp_when_suitable <- function(x, cv_threshold = 0.1, maxgap = 
   }
 }
 
-#' Fill missing EU values using the sum of EU member countries
+
+#' Fill missing EU values using the sum of EU member countries with correlation checks
 #'
 #' This function calculates the sum of values from EU member countries and uses it
-#' to fill missing values for the EU aggregate. It also validates that when both
-#' EU aggregate and sum of countries exist, they are similar.
+#' to fill missing values for the EU aggregate, but only when the relative difference
+#' between the sum and the EU values is small enough. It tries different combinations
+#' of countries to find the best fit.
 #'
 #' @param data A dataframe containing the data with an iso2 column identifying countries
 #' @param group_cols Column names to group by when summing country values
 #' @param value_col Name of the column containing values to sum
-#' @param min_countries Minimum number of countries required for a valid sum (default: 25)
-#' @param tolerance Maximum allowed relative difference between EU value and sum of countries (default: 0.05)
-#' @param eu_pattern Pattern to identify EU rows in the data (default: "European")
+#' @param min_countries Minimum number of countries required for a valid sum (default: 20)
+#' @param max_rel_diff Maximum allowed relative difference between EU value and sum (default: 0.05)
+#' @param min_points Minimum number of non-NA points required for correlation check (default: 12)
 #' @return A dataframe with filled EU values
 #' @export
 fill_eu_from_countries_sum <- function(data,
-                                      group_cols,
-                                      min_countries = 25,
-                                      tolerance = 0.05) {
-
+                                          group_cols,
+                                          min_countries = 20,
+                                          max_rel_diff = 0.05,
+                                          min_points = 12) {
 
   # Get EU member states
   eu_iso2s <- get_eu_iso2s(include_eu = FALSE)
 
-  # Calculate sum of countries
-  countries_sum <- data %>%
-    add_iso2() %>%
-    filter(iso2 %in% eu_iso2s) %>%
-    group_by(across(all_of(group_cols))) %>%
+  # Split EU and country data
+  eu_data <- data %>% filter(iso2 == "EU")
+  country_data <- data %>% filter(iso2 %in% eu_iso2s)
+
+  # Get latest date with EU data for each group
+  latest_eu_dates <- eu_data %>%
+    filter(!is.na(values)) %>%
+    group_by(across(all_of(setdiff(group_cols, "time")))) %>%
+    summarise(latest_eu_date = max(time), .groups = "drop")
+
+  # For each month after latest EU data, get country availability info
+  countries_availability <- country_data %>%
+    left_join(latest_eu_dates, by = setdiff(group_cols, "time")) %>%
+    filter(time > latest_eu_date) %>%
+    group_by(time, across(all_of(setdiff(group_cols, c("time", "iso2"))))) %>%
     summarise(
-      values_sum_countries = sum(values, na.rm = TRUE),
-      n = sum(!is.na(values)),
+      available_countries = list(iso2[!is.na(values)]),
+      n_countries = length(available_countries[[1]]),
       .groups = "drop"
     ) %>%
-    filter(n >= min_countries)
+    filter(n_countries >= min_countries)
 
-  # Identify EU rows
-  eu_data <- data %>%
-    filter(iso2=="EU")
+  # Get distinct country sets
+  country_sets <- countries_availability %>%
+    distinct(available_countries, n_countries) %>%
+    arrange(desc(n_countries))
 
-  # Join with country sums
-  eu_from_countries <- eu_data %>%
-    ungroup() %>%
-    # We do full join in case eu is missing some time x categories
-    full_join(countries_sum, by = group_cols) %>%
-    mutate(iso2="EU")
+  if(nrow(country_sets) == 0) {
+    return(data)
+  }
+
+  # Initialize results list
+  projected_results <- list()
+
+  # Loop through each distinct set of countries
+  for (i in 1:nrow(country_sets)) {
+    current_countries <- country_sets$available_countries[[i]]
+
+    # Calculate sum for this set of countries
+    country_sums <- country_data %>%
+      filter(iso2 %in% current_countries) %>%
+      group_by(across(all_of(group_cols))) %>%
+      summarise(
+        values_sum = sum(values, na.rm = TRUE),
+        n = sum(!is.na(values)),
+        .groups = "drop"
+      ) %>%
+      filter(n == length(current_countries))  # Only keep rows where all countries have data
+
+    # Check correlation with existing EU data
+    correlation_check <- eu_data %>%
+      left_join(country_sums, by = group_cols) %>%
+      filter(!is.na(values), !is.na(values_sum)) %>%
+      group_by(across(all_of(setdiff(group_cols, "time")))) %>%
+      summarise(
+        corr = list(check_proxy_correlation(values, values_sum, max_rel_diff = max_rel_diff, min_points = min_points)),
+        .groups = "drop"
+      ) %>%
+      # Expand list
+      unnest_wider(corr, names_sep = "_")
 
 
-  # Validate when both values exist
-  comparison <- eu_from_countries %>%
-    filter(!is.na(values), !is.na(values_sum_countries),
-           (values != 0  | values_sum_countries != 0)) %>%
-    mutate(diff = abs(values - values_sum_countries) / values)
+    # If correlation is good enough, use this set for filling
+    if(any(correlation_check$corr_is_good_enough)) {
+      # Get the groups where correlation is good enough
+      good_groups <- correlation_check %>%
+        filter(corr_is_good_enough) %>%
+        select(-corr_rel_diff, -corr_n_points, -corr_is_good_enough)
 
-  if (nrow(comparison) > 0) {
-    max_diff <- max(abs(comparison$values - comparison$values_sum_countries) /
-                   comparison$values, na.rm = TRUE)
+      # Fill missing values for these groups
+      current_projection <- eu_data %>%
+        left_join(country_sums, by = group_cols) %>%
+        inner_join(good_groups, by = setdiff(group_cols, "time")) %>%
+        mutate(
+          values = coalesce(values, values_sum),
+          order = i  # Add order based on country set size
+        ) %>%
+        select(-values_sum, -n)
 
-    if (max_diff > tolerance) {
-      warning(sprintf("Maximum relative difference between EU value and sum of countries is %.2f, which exceeds tolerance of %.2f",
-                     max_diff, tolerance))
+      projected_results[[i]] <- current_projection
     }
   }
 
-  # Fill missing values
-  eu_filled <- eu_from_countries %>%
-    mutate(values = coalesce(values, values_sum_countries)) %>%
-    select(-values_sum_countries, -n)
+  # Combine all projections and take first available value for each combination
+  final_projection <- bind_rows(projected_results) %>%
+    group_by(across(all_of(group_cols))) %>%
+    filter(!is.na(values)) %>%
+    slice_min(order, n = 1) %>%  # Take row with smallest order number
+    ungroup() %>%
+    select(-order)  # Remove the order column
 
-  # Only keep contiguous values (optional)
-  # eu_filled <- eu_filled %>%
-  #   group_by(across(setdiff(group_cols, "time"))) %>%
-  #   arrange(time) %>%
-  #   mutate(invalid = cumsum(diff(c(time[1], time)) > 31)) %>%
-  #   filter(invalid == 0) %>%
-  #   select(-invalid)
-
-  # Replace in original data
-  result <- bind_rows(
-    # Keep all non-EU rows and EU rows that don't match with filled data
-    data %>% anti_join(eu_filled, by = names(eu_filled)),
-    # Add filled EU rows
-    eu_filled
+  # Combine projected EU data with original data, ensuring no duplicates
+  bind_rows(
+    data %>% anti_join(final_projection, by = group_cols),
+    final_projection %>% distinct(across(all_of(group_cols)), .keep_all = TRUE)
   )
-
-  return(result)
 }
 
 #' Fill gaps in time series data with appropriate methods
@@ -255,4 +291,36 @@ fill_gaps_in_time_series <- function(data,
     ungroup()
 
   return(result)
+}
+
+#' Check if proxy variable has good enough correlation with target variable
+#'
+#' @param target A numeric vector of target values
+#' @param proxy A numeric vector of proxy values
+#' @param max_rel_diff Maximum allowed relative difference between target and proxy (default: 0.05)
+#' @param min_points Minimum number of non-NA points required (default: 12)
+#' @return A list with correlation metrics and whether it's good enough
+#' @export
+check_proxy_correlation <- function(target, proxy, max_rel_diff=0.05, min_points=12) {
+  # Remove rows where either target or proxy is NA
+  valid_data <- data.frame(target=target, proxy=proxy) %>%
+    filter(!is.na(target), !is.na(proxy))
+
+  if(nrow(valid_data) < min_points) {
+    return(list(
+      rel_diff = 1,
+      n_points = nrow(valid_data),
+      is_good_enough = FALSE
+    ))
+  }
+
+  # Calculate relative difference
+  rel_diff <- abs(valid_data$target - valid_data$proxy) / valid_data$target
+  max_rel_diff_observed <- max(rel_diff)
+
+  list(
+    rel_diff = max_rel_diff_observed,
+    n_points = nrow(valid_data),
+    is_good_enough = max_rel_diff_observed <= max_rel_diff
+  )
 }

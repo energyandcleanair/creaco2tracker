@@ -211,7 +211,7 @@ process_oil <- function(x) {
     data = x_processed,
     group_cols = c("sector", "siec_code", "time", "nrg_bal_code", "unit"),
     min_countries = 25,
-    tolerance = Inf
+    max_rel_diff = 0.05
   ) %>%
     filter(!is.na(values)) %>%
   # After validation, we find that transport data is only correct from ~2010
