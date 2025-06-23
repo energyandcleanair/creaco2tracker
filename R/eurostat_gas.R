@@ -114,8 +114,11 @@ collect_gas <- function(use_cache = FALSE) {
       x_all,
       x_elec
     ) %>%
-      ungroup() %>%
-      select(iso2, fuel, sector, siec_code, time, unit, values)
+      group_by(iso2, fuel, sector, siec_code, time, unit) %>%
+      summarise(
+        values = sum(values, na.rm = TRUE),
+        .groups = "drop"
+      )
   }
 
   process_gas_monthly <- function(x, pwr_generation) {

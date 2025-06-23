@@ -324,3 +324,44 @@ check_proxy_correlation <- function(target, proxy, max_rel_diff=0.05, min_points
     is_good_enough = max_rel_diff_observed <= max_rel_diff
   )
 }
+
+#' Split Eurostat data into electricity and other sectors
+#'
+#' This function takes Eurostat fossil fuel consumption data and splits it into
+#' 'electricity' and 'others' sectors, ensuring that the sum is preserved and
+#' that the sectoral split is consistent. It is used for both solid and gas fuels.
+#'
+#' @param x A data frame with columns iso2, time, unit, siec_code, fuel, sector, values
+#' @return A data frame with sectors split into 'electricity' and 'others'
+#' @export
+eurostat_split_elec_others <- function(x) {
+  # Quick return if no work needed
+  sectors <- unique(x$sector)
+  if(setequal(sectors, c(SECTOR_ELEC, SECTOR_OTHERS))) {
+    return(x)
+  }
+
+  group_cols <- intersect(names(x), c("iso2", "time", "unit", "siec_code", "fuel"))
+
+  # Process data using pivot operations
+  result <- x %>%
+    pivot_wider(
+      id_cols = all_of(group_cols),
+      names_from = sector,
+      values_from = values,
+      values_fill = NA
+    ) %>%
+    add_missing_cols(c("all", "others", "electricity")) %>%
+    mutate(
+      others = suppressWarnings(coalesce(others, all - electricity)),  # calculate others value
+      electricity = suppressWarnings(coalesce(electricity, all - others))  # calculate electricity value
+    ) %>%
+    select(-all) %>%
+    pivot_longer(
+      cols = c(electricity, others),
+      names_to = "sector",
+      values_to = "values"
+    )
+
+  result
+}
