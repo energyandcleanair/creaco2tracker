@@ -93,10 +93,14 @@ fill_gaps_with_interp_when_suitable <- function(x, cv_threshold = 0.1, maxgap = 
 #' @return A dataframe with filled EU values
 #' @export
 fill_eu_from_countries_sum <- function(data,
-                                          group_cols,
-                                          min_countries = 20,
-                                          max_rel_diff = 0.05,
-                                          min_points = 12) {
+                                       group_cols,
+                                       min_countries = 20,
+                                       max_rel_diff = 0.05,
+                                       min_points = 12) {
+
+
+  # Add iso2 and time to group_cols if in data cols and not in group_cols
+  group_cols <- unique(c(group_cols, "iso2", "time"))
 
   # Get EU member states
   eu_iso2s <- get_eu_iso2s(include_eu = FALSE)
@@ -108,12 +112,12 @@ fill_eu_from_countries_sum <- function(data,
   # Get latest date with EU data for each group
   latest_eu_dates <- eu_data %>%
     filter(!is.na(values)) %>%
-    group_by(across(all_of(setdiff(group_cols, "time")))) %>%
+    group_by(across(all_of(setdiff(group_cols, c("time", "iso2"))))) %>%
     summarise(latest_eu_date = max(time), .groups = "drop")
 
   # For each month after latest EU data, get country availability info
   countries_availability <- country_data %>%
-    left_join(latest_eu_dates, by = setdiff(group_cols, "time")) %>%
+    left_join(latest_eu_dates, by = setdiff(group_cols, c("time", "iso2"))) %>%
     filter(time > latest_eu_date) %>%
     group_by(time, across(all_of(setdiff(group_cols, c("time", "iso2"))))) %>%
     summarise(
@@ -142,7 +146,7 @@ fill_eu_from_countries_sum <- function(data,
     # Calculate sum for this set of countries
     country_sums <- country_data %>%
       filter(iso2 %in% current_countries) %>%
-      group_by(across(all_of(group_cols))) %>%
+      group_by(across(all_of(setdiff(group_cols, "iso2")))) %>%
       summarise(
         values_sum = sum(values, na.rm = TRUE),
         n = sum(!is.na(values)),
@@ -152,7 +156,7 @@ fill_eu_from_countries_sum <- function(data,
 
     # Check correlation with existing EU data
     correlation_check <- eu_data %>%
-      left_join(country_sums, by = group_cols) %>%
+      left_join(country_sums, by = setdiff(group_cols, "iso2")) %>%
       filter(!is.na(values), !is.na(values_sum)) %>%
       group_by(across(all_of(setdiff(group_cols, "time")))) %>%
       summarise(
@@ -172,7 +176,7 @@ fill_eu_from_countries_sum <- function(data,
 
       # Fill missing values for these groups
       current_projection <- eu_data %>%
-        left_join(country_sums, by = group_cols) %>%
+        left_join(country_sums, by = setdiff(group_cols, "iso2")) %>%
         inner_join(good_groups, by = setdiff(group_cols, "time")) %>%
         mutate(
           values = coalesce(values, values_sum),
