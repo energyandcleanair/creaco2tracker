@@ -93,3 +93,54 @@ test_that("fill_eu_from_countries_sum works correctly", {
     select(iso2, sector, time, values, values_new)
   expect_equal(joined$values, joined$values_new)
 })
+
+test_that("eurostat_split_elec_others splits electricity and others correctly", {
+
+  # Both sectors present
+  df <- tibble(
+    iso2 = "DE", time = as.Date("2023-01-01"), unit = "TWh", siec_code = "C0100", fuel = "solid",
+    sector = c(SECTOR_ELEC, SECTOR_OTHERS), values = c(10, 90)
+  )
+  result <- eurostat_split_elec_others(df)
+  expect_equal(sort(result$sector), sort(c(SECTOR_ELEC, SECTOR_OTHERS)))
+  expect_equal(sum(result$values), 100)
+  expect_equal(result$values[result$sector == SECTOR_ELEC], 10)
+  expect_equal(result$values[result$sector == SECTOR_OTHERS], 90)
+
+  # Main case: "all" and "electricity" -> split into "electricity" and "others"
+  df_main <- tibble(
+    iso2 = "DE", time = as.Date("2023-02-01"), unit = "TWh", siec_code = "C0100", fuel = "solid",
+    sector = c(SECTOR_ALL, SECTOR_ELEC), values = c(100, 30)
+  )
+  result_main <- eurostat_split_elec_others(df_main)
+  expect_equal(sort(result_main$sector), sort(c(SECTOR_ELEC, SECTOR_OTHERS)))
+  expect_equal(result_main$values[result_main$sector == SECTOR_ELEC], 30)
+  expect_equal(result_main$values[result_main$sector == SECTOR_OTHERS], 70)  # 100 - 30
+  expect_equal(sum(result_main$values), 100)
+
+  # Only electricity present
+  df2 <- tibble(
+    iso2 = "DE", time = as.Date("2023-03-01"), unit = "TWh", siec_code = "C0100", fuel = "solid",
+    sector = c(SECTOR_ELEC), values = c(20)
+  )
+  result2 <- eurostat_split_elec_others(df2)
+  expect_true(SECTOR_OTHERS %in% result2$sector)
+  expect_equal(result2$values[result2$sector == SECTOR_ELEC], 20)
+
+  # Only others present
+  df3 <- tibble(
+    iso2 = "DE", time = as.Date("2023-04-01"), unit = "TWh", siec_code = "C0100", fuel = "solid",
+    sector = c(SECTOR_OTHERS), values = c(30)
+  )
+  result3 <- eurostat_split_elec_others(df3)
+  expect_true(SECTOR_OTHERS %in% result3$sector)
+  expect_equal(result3$values[result3$sector == SECTOR_OTHERS], 30)
+
+  # Sum preservation with both sectors
+  df4 <- tibble(
+    iso2 = "DE", time = as.Date("2023-05-01"), unit = "TWh", siec_code = "C0100", fuel = "solid",
+    sector = c(SECTOR_ELEC, SECTOR_OTHERS), values = c(15, 85)
+  )
+  result4 <- eurostat_split_elec_others(df4)
+  expect_equal(sum(result4$values), 100)
+})
