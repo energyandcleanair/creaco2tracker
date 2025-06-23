@@ -142,3 +142,26 @@ test_that("fill_eu_from_countries_sum comprehensive test", {
                              original_row$iso2, original_row$time))
   }
 })
+
+test_that("eurostat_split_elec_others preserves data when only 'all' sector is available", {
+  # Create test data with only "all" sector (like coke data)
+  test_data <- tibble(
+    iso2 = "DE",
+    time = as.Date("2024-01-01"),
+    unit = "Thousand tonnes",
+    siec_code = "C0311",  # Coke oven coke
+    fuel = "coke",
+    sector = "all",
+    values = 500
+  )
+  
+  # Run the function
+  result <- eurostat_split_elec_others(test_data)
+  
+  # Test that data is preserved
+  expect_equal(nrow(result), 2, info = "Should return 2 rows (electricity and others)")
+  expect_equal(sum(result$values, na.rm = TRUE), 500, info = "Total value should be preserved")
+  expect_true(all(result$sector %in% c("electricity", "others")), info = "Should have electricity and others sectors")
+  expect_equal(result$values[result$sector == "others"], 500, info = "All value should go to others when no electricity data")
+  expect_equal(result$values[result$sector == "electricity"], 0, info = "Electricity should be 0 when no electricity data")
+})
