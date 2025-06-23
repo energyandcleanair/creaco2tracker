@@ -77,16 +77,15 @@ fill_gaps_with_interp_when_suitable <- function(x, cv_threshold = 0.1, maxgap = 
 }
 
 
-#' Fill missing EU values using the sum of EU member countries with correlation checks
+#' Fill missing EU values using the sum of EU member countries when the sum is historically close enough
 #'
 #' This function calculates the sum of values from EU member countries and uses it
 #' to fill missing values for the EU aggregate, but only when the relative difference
 #' between the sum and the EU values is small enough. It tries different combinations
-#' of countries to find the best fit.
+#' of countries to fill as many rows as possible
 #'
 #' @param data A dataframe containing the data with an iso2 column identifying countries
 #' @param group_cols Column names to group by when summing country values
-#' @param value_col Name of the column containing values to sum
 #' @param min_countries Minimum number of countries required for a valid sum (default: 20)
 #' @param max_rel_diff Maximum allowed relative difference between EU value and sum (default: 0.05)
 #' @param min_points Minimum number of non-NA points required for correlation check (default: 12)
@@ -357,8 +356,16 @@ eurostat_split_elec_others <- function(x) {
     ) %>%
     add_missing_cols(c("all", "others", "electricity")) %>%
     mutate(
-      others = suppressWarnings(coalesce(others, all - electricity)),  # calculate others value
-      electricity = suppressWarnings(coalesce(electricity, all - others))  # calculate electricity value
+      # Handle case where only "all" data is available
+      electricity = coalesce(electricity, 0),  # Default to 0 if no electricity data
+      others = coalesce(others, all - electricity),  # calculate others value
+      # If others is still NA (which can happen if all is NA), set it to 0
+      others = coalesce(others, 0),
+      # Recalculate electricity if it was set to 0 but we have all data
+      electricity = case_when(
+        !is.na(all) & electricity == 0 ~ all - others,
+        TRUE ~ electricity
+      )
     ) %>%
     select(-all) %>%
     pivot_longer(
