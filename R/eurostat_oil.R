@@ -32,6 +32,9 @@ collect_oil <- function(use_cache = FALSE) {
   ) %>%
     bind_rows()
 
+  # EU to NA when important countries are missing
+  cons_yearly_raw <- fix_eu_when_important_countries_missing(cons_yearly_raw)
+
   # Add missing GID_NE when it happens
   cons_yearly <- fill_oil_non_energy_use_yearly(cons_yearly_raw)
 
@@ -133,10 +136,10 @@ process_oil <- function(x) {
 
   # Step 2: Apply deductions to avoid double counting using a cleaner approach
   x_deducted <- x_filtered %>%
-  # Create a temporary ID for each group
-  group_by(nrg_bal_code, unit, iso2, time) %>%
-    mutate(group_id = dplyr::cur_group_id()) %>%
-    ungroup()
+    # Create a temporary ID for each group
+    group_by(nrg_bal_code, unit, iso2, time) %>%
+      mutate(group_id = dplyr::cur_group_id()) %>%
+      ungroup()
 
   # For each deduction rule, calculate the deduction amount
   deductions <- map_df(1:nrow(deduction_rules), function(i) {
@@ -205,7 +208,6 @@ process_oil <- function(x) {
       exclude_iso2s = setdiff(unique(x_processed$iso2), "EE")
     )
 
-
   # Fill EU values from country sums
   x_processed <- fill_eu_from_countries_sum(
     data = x_processed,
@@ -214,10 +216,14 @@ process_oil <- function(x) {
     max_rel_diff = 0.05
   ) %>%
     filter(!is.na(values)) %>%
-  # After validation, we find that transport data is only correct from ~2010
-  filter(
-      sector == SECTOR_ALL | time >= "2010-01-01"
-    )
+    # After validation, we find that transport data is only correct from ~2010
+    filter(
+        sector == SECTOR_ALL | time >= "2010-01-01"
+      )
+
+  # Remove EU rows that are based on incomplete data
+  x_processed <- x_processed %>%
+    fix_eu_when_important_countries_missing()
 
   # Check that we have all siecs per sectors
   check_eurostat_oil_completeness(x_processed)
@@ -775,4 +781,51 @@ fill_oil_non_energy_use_monthly <- function(yearly, monthly) {
     monthly_gid_ne
   ) %>%
     add_iso2()
+}
+
+#' Remove EU aggregate values for months where important countries are missing (including absent)
+#'
+#' Builds a reference dataframe of valid EU time points where all important countries are present and non-NA,
+#' then only keeps EU values for those combinations.
+#'
+#' @param data A dataframe with columns iso2, time, values (and possibly others)
+#' @param important_iso2s A character vector of important country ISO2 codes (default: c("DE", "FR", "IT", "ES"))
+#' @return The dataframe with EU values set to NA where any important country is missing
+#' @export
+fix_eu_when_important_countries_missing <- function(data,
+
+                                                    important_iso2s = c("DE", "FR", "IT", "ES")) {
+  # Ensure 'iso2' and 'time' columns exist in the data
+  stopifnot("iso2" %in% names(data), "time" %in% names(data))
+
+  # Identify unique EU time points with non-NA values
+  eu_times <- data %>%
+    filter(iso2=="EU", !is.na(values)) %>%
+    distinct(nrg_bal_code, time)
+
+  # Determine if all important countries are present for each time point
+  important_countries_times <- data %>%
+    filter(iso2 %in% important_iso2s, !is.na(values)) %>%
+    group_by(nrg_bal_code, time) %>%
+    summarise(
+      has_important_countries = n_distinct(iso2) == length(important_iso2s),
+      .groups = "drop"
+    )
+
+  # Identify EU time points where not all important countries are present
+  to_remove <- eu_times %>%
+    left_join(important_countries_times, by = c("nrg_bal_code", "time")) %>%
+    filter(has_important_countries == FALSE) %>%
+    mutate(iso2="EU")
+
+  # Remove EU rows where not all important countries are present
+  data <- data %>%
+    anti_join(to_remove, by = c("iso2", "time", "nrg_bal_code"))
+
+  # Print information if rows were removed
+  if(nrow(to_remove) > 0) {
+    cat("Rows removed for EU where not all important countries are present: ", nrow(to_remove), "\n")
+  }
+
+  return(data)
 }
