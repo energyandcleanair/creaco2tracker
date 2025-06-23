@@ -32,9 +32,6 @@ collect_oil <- function(use_cache = FALSE) {
   ) %>%
     bind_rows()
 
-  # EU to NA when important countries are missing
-  cons_yearly_raw <- fix_eu_when_important_countries_missing(cons_yearly_raw)
-
   # Add missing GID_NE when it happens
   cons_yearly <- fill_oil_non_energy_use_yearly(cons_yearly_raw)
 
@@ -348,10 +345,13 @@ add_oil_transport <- function(monthly, yearly, plot_validation = F) {
     summarise(values = sum(values, na.rm = T)) %>%
     spread(nrg_bal_code, values) %>%
     group_by(geo, time, siec_code) %>%
+    filter(
+      FC_TRA_ROAD_E > 0
+    ) %>%
     summarise(share = FC_TRA_ROAD_E / (GID_OBS - GID_NE))
 
   # Visually validate assumption
-  ggplot(share_motor_gasoline_road %>% filter_plot) +
+  ggplot(share_motor_gasoline_road %>% project_shares %>% filter_plot) +
     geom_line(aes(time, share)) +
     facet_wrap(~geo) +
     rcrea::scale_y_zero()
@@ -387,6 +387,10 @@ add_oil_transport <- function(monthly, yearly, plot_validation = F) {
     group_by(geo, time, nrg_bal_code, siec_code) %>%
     summarise(values = sum(values, na.rm = T)) %>%
     spread(nrg_bal_code, values) %>%
+    filter(
+      GID_OBS > 0,
+      FC_TRA_ROAD_E > 0
+    ) %>%
     group_by(geo, time, siec_code) %>%
     summarise(share = FC_TRA_ROAD_E / (GID_OBS))
 
@@ -422,6 +426,10 @@ add_oil_transport <- function(monthly, yearly, plot_validation = F) {
     group_by(geo, time, nrg_bal_code, siec_code) %>%
     summarise(values = sum(values, na.rm = T)) %>%
     spread(nrg_bal_code, values) %>%
+    filter(
+      GID_OBS > 0,
+      FC_TRA_E > 0
+    ) %>%
     group_by(geo, time, siec_code) %>%
     summarise(share = FC_TRA_E / (GID_OBS))
 
@@ -456,6 +464,10 @@ add_oil_transport <- function(monthly, yearly, plot_validation = F) {
     group_by(geo, time, siec_code, nrg_bal_code) %>%
     summarise(values = sum(values, na.rm = T)) %>%
     spread(nrg_bal_code, values) %>%
+    filter(
+      GID_OBS > 0,
+      FC_TRA_E > 0
+    ) %>%
     group_by(geo, time, siec_code) %>%
     summarise(share = FC_TRA_E / (GID_OBS - GID_NE))
 
@@ -520,6 +532,10 @@ add_oil_transport <- function(monthly, yearly, plot_validation = F) {
     group_by(geo, time, nrg_bal_code, siec_code) %>%
     summarise(values = sum(values, na.rm = T)) %>%
     spread(nrg_bal_code, values) %>%
+    filter(
+      INTAVI_E > 0,
+      FC_TRA_DAVI_E > 0
+    ) %>%
     group_by(geo, time, siec_code) %>%
     summarise(share = FC_TRA_DAVI_E / INTAVI_E) %>%
     ungroup()
@@ -559,6 +575,10 @@ add_oil_transport <- function(monthly, yearly, plot_validation = F) {
     group_by(geo, time, nrg_bal_code, siec_code) %>%
     summarise(values = sum(values, na.rm = T)) %>%
     spread(nrg_bal_code, values) %>%
+    filter(
+      GID_OBS > 0,
+      FC_TRA_DAVI_E > 0
+    ) %>%
     group_by(geo, time, siec_code) %>%
     summarise(share = (FC_TRA_DAVI_E) / GID_OBS,
               .groups = 'drop'
