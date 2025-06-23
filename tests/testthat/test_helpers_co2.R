@@ -1,169 +1,179 @@
-test_that("split_gas_to_elec_others correctly splits gas between electricity and others", {
+# Tests for split_gas_to_elec_others and split_gas_to_elec_all
 
+context("split_gas_to_elec_others and split_gas_to_elec_all")
 
-  # Test data with multiple dates and varying sector combinations
-    test_data <- tibble(
-      iso2 = rep("DE", 6),
-      geo = "DE",
-      unit = "t",
-      date = as.Date(c(
-        rep("2023-01-01", 2),
-        rep("2023-01-02", 2),
-        rep("2023-01-03", 2)
-      )),
-      fuel = rep("gas", 6),
-      sector = c(
-        "all", "electricity",  # day 1
-        "electricity", "all",   # day 2
-        "electricity", "others" # day 3 - already split
-      ),
-      value = c(100, 40, 30, 90, 35, 55),
-      estimate = "central"
-    )
+# Helper for easy comparison
+expect_gas_sectors <- function(df, date, expected_sectors, expected_values) {
+  res <- df %>% filter(date == as.Date(date)) %>% arrange(sector)
+  expect_equal(res$sector, sort(expected_sectors))
+  expect_equal(res$value, expected_values)
+}
 
+# Helper to compare data frames ignoring column order
+expect_equal_ignore_order <- function(actual, expected) {
+  expect_equal(actual %>% arrange(across(everything())), 
+               expected %>% arrange(across(everything())))
+}
+
+# 1. Only "all" and "electricity" present (should infer "others")
+test_that("split_gas_to_elec_others infers 'others' from 'all' and 'electricity'", {
+  test_data <- tibble(
+    iso2 = "DE", geo = "DE", unit = "t", date = as.Date("2023-01-01"),
+    fuel = "gas", sector = c("all", "electricity"), value = c(100, 40), estimate = "central"
+  )
   result <- split_gas_to_elec_others(test_data)
-
-
-  # Check day 1: sum of electricity and others equals original all
-  day1_sum <- result %>%
-    filter(date == as.Date("2023-01-01")) %>%
-    pull(value) %>%
-    sum()
-  expect_equal(day1_sum, 100)  # original "all" value
-
-  # Check day 2: sum of electricity and others equals original all
-  day2_sum <- result %>%
-    filter(date == as.Date("2023-01-02")) %>%
-    pull(value) %>%
-    sum()
-  expect_equal(day2_sum, 90)  # original "all" value
-
-  # Check day 3: values remain unchanged when already split
-  day3_result <- result %>%
-    filter(date == as.Date("2023-01-03")) %>%
-    arrange(sector)
-  expect_equal(day3_result$value, c(35, 55))  # electricity and others values should remain the same
-  expect_equal(day3_result$sector, c("electricity", "others"))
+  expect_gas_sectors(result, "2023-01-01", c("electricity", "others"), c(40, 60))
 })
 
-
-test_that("split_gas_to_elec_all correctly combines electricity and others into all", {
-  # Test data with multiple dates and varying sector combinations
+# 2. Only "all" and "others" present (should infer "electricity")
+test_that("split_gas_to_elec_others infers 'electricity' from 'all' and 'others'", {
   test_data <- tibble(
-    iso2 = rep("DE", 6),
-    geo = "DE",
-    date = as.Date(c(
-      rep("2023-01-01", 2),
-      rep("2023-01-02", 2),
-      rep("2023-01-03", 2)
-    )),
-    fuel = rep("gas", 6),
-    sector = c(
-      "others", "electricity",  # day 1
-      "others", "electricity",  # day 2
-      "all", "electricity"             # day 3 - already all
-    ),
-    value = c(60, 40, 25, 35, 100, 20),
-    estimate = "central",
-    unit = "t"
+    iso2 = "DE", geo = "DE", unit = "t", date = as.Date("2023-01-02"),
+    fuel = "gas", sector = c("all", "others"), value = c(90, 30), estimate = "central"
   )
+  result <- split_gas_to_elec_others(test_data)
+  expect_gas_sectors(result, "2023-01-02", c("electricity", "others"), c(60, 30))
+})
 
+# 3. Only "electricity" and "others" present (should return unchanged)
+test_that("split_gas_to_elec_others returns unchanged if already split", {
+  test_data <- tibble(
+    iso2 = "DE", geo = "DE", unit = "t", date = as.Date("2023-01-03"),
+    fuel = "gas", sector = c("electricity", "others"), value = c(35, 55), estimate = "central"
+  )
+  result <- split_gas_to_elec_others(test_data)
+  expect_gas_sectors(result, "2023-01-03", c("electricity", "others"), c(35, 55))
+})
+
+# 4. All three present (should return unchanged)
+test_that("split_gas_to_elec_others returns unchanged if all sectors present", {
+  test_data <- tibble(
+    iso2 = "DE", geo = "DE", unit = "t", date = as.Date("2023-01-04"),
+    fuel = "gas", sector = c("all", "electricity", "others"), value = c(100, 40, 60), estimate = "central"
+  )
+  result <- split_gas_to_elec_others(test_data)
+  expect_gas_sectors(result, "2023-01-04", c("electricity", "others"), c(40, 60))
+})
+
+# 5. Only "all" present (should infer both as NA)
+test_that("split_gas_to_elec_others infers both as NA if only 'all' present", {
+  test_data <- tibble(
+    iso2 = "DE", geo = "DE", unit = "t", date = as.Date("2023-01-05"),
+    fuel = "gas", sector = c("all"), value = c(100), estimate = "central"
+  )
+  result <- split_gas_to_elec_others(test_data)
+  res <- result %>% filter(date == as.Date("2023-01-05"))
+  expect_true(all(res$sector %in% c("electricity", "others")))
+  expect_true(all(is.na(res$value)))
+})
+
+# 6. Only "electricity" present (should infer "others" as NA)
+test_that("split_gas_to_elec_others infers 'others' as NA if only 'electricity' present", {
+  test_data <- tibble(
+    iso2 = "DE", geo = "DE", unit = "t", date = as.Date("2023-01-06"),
+    fuel = "gas", sector = c("electricity"), value = c(40), estimate = "central"
+  )
+  result <- split_gas_to_elec_others(test_data)
+  res <- result %>% filter(date == as.Date("2023-01-06"))
+  expect_true(all(res$sector %in% c("electricity", "others")))
+  expect_equal(res$value[res$sector == "electricity"], 40)
+  expect_true(is.na(res$value[res$sector == "others"]))
+})
+
+# 7. Only "others" present (should infer "electricity" as NA)
+test_that("split_gas_to_elec_others infers 'electricity' as NA if only 'others' present", {
+  test_data <- tibble(
+    iso2 = "DE", geo = "DE", unit = "t", date = as.Date("2023-01-07"),
+    fuel = "gas", sector = c("others"), value = c(60), estimate = "central"
+  )
+  result <- split_gas_to_elec_others(test_data)
+  res <- result %>% filter(date == as.Date("2023-01-07"))
+  expect_true(all(res$sector %in% c("electricity", "others")))
+  expect_equal(res$value[res$sector == "others"], 60)
+  expect_true(is.na(res$value[res$sector == "electricity"]))
+})
+
+# 8. Non-gas fuel should be unchanged
+test_that("split_gas_to_elec_others leaves non-gas data unchanged", {
+  test_data <- tibble(
+    iso2 = "DE", geo = "DE", unit = "t", date = as.Date("2023-01-08"),
+    fuel = "oil", sector = c("all", "electricity"), value = c(100, 40), estimate = "central"
+  )
+  result <- split_gas_to_elec_others(test_data)
+  # Compare ignoring column order
+  expect_equal_ignore_order(result, test_data)
+})
+
+# 9. Duplicates or extra rows (should handle gracefully)
+test_that("split_gas_to_elec_others handles duplicate rows", {
+  test_data <- tibble(
+    iso2 = "DE", geo = "DE", unit = "t", date = as.Date("2023-01-09"),
+    fuel = "gas", sector = c("all", "electricity"), value = c(100, 40), estimate = "central"
+  )
+  # Add a duplicate row
+  test_data <- bind_rows(test_data, test_data[1, ])
+  result <- split_gas_to_elec_others(test_data)
+  # Should not error, and should have expected sectors
+  res <- result %>% filter(date == as.Date("2023-01-09"))
+  expect_true(all(c("electricity", "others") %in% res$sector))
+})
+
+# 10. Missing values (should handle NA correctly)
+test_that("split_gas_to_elec_others handles NA values", {
+  test_data <- tibble(
+    iso2 = "DE", geo = "DE", unit = "t", date = as.Date("2023-01-10"),
+    fuel = "gas", sector = c("all", "electricity"), value = c(NA, 40), estimate = "central"
+  )
+  result <- split_gas_to_elec_others(test_data)
+  res <- result %>% filter(date == as.Date("2023-01-10"))
+  expect_true(all(res$sector %in% c("electricity", "others")))
+  expect_equal(res$value[res$sector == "electricity"], 40)
+  # others should be NA
+  expect_true(is.na(res$value[res$sector == "others"]))
+})
+
+# Tests for split_gas_to_elec_all
+
+test_that("split_gas_to_elec_all infers 'all' from 'electricity' and 'others'", {
+  test_data <- tibble(
+    iso2 = "DE", geo = "DE", unit = "t", date = as.Date("2023-02-01"),
+    fuel = "gas", sector = c("electricity", "others"), value = c(40, 60), estimate = "central"
+  )
   result <- split_gas_to_elec_all(test_data)
-
-  # Check day 1: should have gas combined
-  day1_result <- result %>%
-    filter(date == as.Date("2023-01-01")) %>%
-    arrange(sector)
-  expect_equal(nrow(day1_result), 2)
-  expect_equal(day1_result$value, c(100, 40))
-  expect_equal(day1_result$sector, c("all", "electricity"))
-
-
-  # Check day 2: should have gas combined
-  day2_result <- result %>%
-    filter(date == as.Date("2023-01-02")) %>%
-    arrange(sector)
-  expect_equal(nrow(day2_result), 2)
-  expect_equal(day2_result$value, c(60, 35))  # values should be combined
-  expect_equal(day2_result$sector, c("all", "electricity"))
-
-  # Check day 3: values should remain unchanged
-  day3_result <- result %>%
-    filter(date == as.Date("2023-01-03")) %>%
-    arrange(sector)
-  expect_equal(nrow(day3_result), 2)
-  expect_equal(day3_result$value, c(100, 20))  # values should remain the same
-  expect_equal(day3_result$sector, c("all", "electricity"))
+  res <- result %>% filter(date == as.Date("2023-02-01")) %>% arrange(sector)
+  expect_equal(res$sector, c("all", "electricity"))
+  expect_equal(res$value, c(100, 40))
 })
 
-test_that("split_gas_to_elec_others works if already splitted", {
-
-
-  # Test data with multiple dates and varying sector combinations
+test_that("split_gas_to_elec_all returns unchanged if already combined", {
   test_data <- tibble(
-    iso2 = rep("DE", 6),
-    geo = "DE",
-    unit = "t",
-    date = as.Date(c(
-      rep("2023-01-01", 2),
-      rep("2023-01-02", 2),
-      rep("2023-01-03", 2)
-    )),
-    fuel = rep("gas", 6),
-    sector = c(
-      "electricity", "others",  # day 1
-      "electricity", "others",   # day 2
-      "electricity", "others" # day 3 - already split
-    ),
-    value = c(100, 40, 30, 90, 35, 55),
-    estimate = "central"
+    iso2 = "DE", geo = "DE", unit = "t", date = as.Date("2023-02-02"),
+    fuel = "gas", sector = c("all", "electricity"), value = c(100, 40), estimate = "central"
   )
+  result <- split_gas_to_elec_all(test_data)
+  res <- result %>% filter(date == as.Date("2023-02-02")) %>% arrange(sector)
+  expect_equal(res$sector, c("all", "electricity"))
+  expect_equal(res$value, c(100, 40))
+})
 
-  result <- split_gas_to_elec_others(test_data)
-  result <- split_gas_to_elec_all(result)
-
-
-  # Test data with multiple dates and varying sector combinations
+test_that("split_gas_to_elec_all handles only 'all' present", {
   test_data <- tibble(
-    iso2 = rep("DE", 6),
-    geo = "DE",
-    unit = "t",
-    date = as.Date(c(
-      rep("2023-01-01", 2),
-      rep("2023-01-02", 2),
-      rep("2023-01-03", 2)
-    )),
-    fuel = rep("gas", 6),
-    sector = c(
-      "electricity", "others",  # day 1
-      "electricity", "others",   # day 2
-      "electricity", "others" # day 3 - already split
-    ),
-    value = c(100, 40, 30, 90, 35, 55),
-    estimate = "central"
+    iso2 = "DE", geo = "DE", unit = "t", date = as.Date("2023-02-03"),
+    fuel = "gas", sector = c("all"), value = c(100), estimate = "central"
   )
+  result <- split_gas_to_elec_all(test_data)
+  res <- result %>% filter(date == as.Date("2023-02-03"))
+  expect_true(all(res$sector %in% c("all", "electricity")))
+  expect_equal(res$value[res$sector == "all"], 100)
+  expect_true(is.na(res$value[res$sector == "electricity"]))
+})
 
-  result <- split_gas_to_elec_others(test_data)
-
-
-  # Check day 1: sum of electricity and others equals original all
-  day1_sum <- result %>%
-    filter(date == as.Date("2023-01-01")) %>%
-    pull(value) %>%
-    sum()
-  expect_equal(day1_sum, 100)  # original "all" value
-
-  # Check day 2: sum of electricity and others equals original all
-  day2_sum <- result %>%
-    filter(date == as.Date("2023-01-02")) %>%
-    pull(value) %>%
-    sum()
-  expect_equal(day2_sum, 90)  # original "all" value
-
-  # Check day 3: values remain unchanged when already split
-  day3_result <- result %>%
-    filter(date == as.Date("2023-01-03")) %>%
-    arrange(sector)
-  expect_equal(day3_result$value, c(35, 55))  # electricity and others values should remain the same
-  expect_equal(day3_result$sector, c("electricity", "others"))
+test_that("split_gas_to_elec_all leaves non-gas data unchanged", {
+  test_data <- tibble(
+    iso2 = "DE", geo = "DE", unit = "t", date = as.Date("2023-02-04"),
+    fuel = "oil", sector = c("all", "electricity"), value = c(100, 40), estimate = "central"
+  )
+  result <- split_gas_to_elec_all(test_data)
+  # Compare ignoring column order
+  expect_equal_ignore_order(result, test_data)
 })
