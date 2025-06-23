@@ -49,7 +49,6 @@ iso2_to_name <- function(x){
 
 
 split_gas_to_elec_others <- function(co2) {
-
   # Quick return if no work needed
   gas_data <- co2 %>% filter(fuel == 'gas')
   gas_sectors <- unique(gas_data$sector)
@@ -69,8 +68,8 @@ split_gas_to_elec_others <- function(co2) {
     ) %>%
     add_missing_cols(c("all", "others", "electricity")) %>%
     mutate(
-      others = coalesce(others, all - electricity),  # calculate others value
-      electricity = coalesce(electricity, all - others)  # calculate electricity value
+      others = suppressWarnings(coalesce(others, all - electricity)),  # calculate others value
+      electricity = suppressWarnings(coalesce(electricity, all - others))  # calculate electricity value
     ) %>%
     select(-all) %>%
     pivot_longer(
@@ -79,16 +78,15 @@ split_gas_to_elec_others <- function(co2) {
       values_to = "value"
     )
 
-  # Combine results
-  bind_rows(
-    gas_result,
-    co2 %>% filter(fuel != 'gas')
-  )
+  # Combine results, preserving non-gas data as-is (including column order/types)
+  non_gas_data <- co2 %>% filter(fuel != 'gas')
+  # Reorder columns to match input
+  gas_result <- gas_result[, names(co2)]
+  bind_rows(gas_result, non_gas_data)
 }
 
 
 split_gas_to_elec_all <- function(co2){
-
   # Quick return if no work needed
   gas_data <- co2 %>% filter(fuel == 'gas')
   gas_sectors <- unique(gas_data$sector)
@@ -105,8 +103,8 @@ split_gas_to_elec_all <- function(co2){
     ) %>%
     add_missing_cols(c("all", "others", "electricity")) %>%
     mutate(
-      all = coalesce(all, others + electricity),
-      electricity = coalesce(electricity, all - others)
+      all = suppressWarnings(coalesce(all, others + electricity)),
+      electricity = suppressWarnings(coalesce(electricity, all - others))
     ) %>%
     select(-others) %>%
     pivot_longer(
@@ -115,11 +113,10 @@ split_gas_to_elec_all <- function(co2){
       values_to = "value"
     )
 
-  # Combine results
-  bind_rows(
-    gas_result,
-    co2 %>% filter(fuel != 'gas')
-  )
+  # Combine results, preserving non-gas data as-is (including column order/types)
+  non_gas_data <- co2 %>% filter(fuel != 'gas')
+  gas_result <- gas_result[, names(co2)]
+  bind_rows(gas_result, non_gas_data)
 }
 
 #' This computes total co2, while properly aggregating uncertainty
