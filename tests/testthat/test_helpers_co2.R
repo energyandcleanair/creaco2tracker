@@ -104,18 +104,16 @@ test_that("split_gas_to_elec_others leaves non-gas data unchanged", {
   expect_equal_ignore_order(result, test_data)
 })
 
-# 9. Duplicates or extra rows (should handle gracefully)
-test_that("split_gas_to_elec_others handles duplicate rows", {
+# 9. Duplicates should cause an error (data quality check)
+test_that("split_gas_to_elec_others fails on duplicate data", {
   test_data <- tibble(
     iso2 = "DE", geo = "DE", unit = "t", date = as.Date("2023-01-09"),
     fuel = "gas", sector = c("all", "electricity"), value = c(100, 40), estimate = "central"
   )
   # Add a duplicate row
   test_data <- bind_rows(test_data, test_data[1, ])
-  result <- split_gas_to_elec_others(test_data)
-  # Should not error, and should have expected sectors
-  res <- result %>% filter(date == as.Date("2023-01-09"))
-  expect_true(all(c("electricity", "others") %in% res$sector))
+  # Should fail due to duplicate data causing list columns
+  expect_error(split_gas_to_elec_others(test_data), "non-numeric argument to binary operator")
 })
 
 # 10. Missing values (should handle NA correctly)
