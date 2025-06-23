@@ -66,6 +66,10 @@ project_until_now_lm <- function(co2, proxy, dts_month, min_r2=0.9, force_overwr
       fuel <- unique(keys$fuel)
       sector <- unique(keys$sector)
 
+      if(verbose){
+        print(keys)
+      }
+
       value_proxy_cols <- grep('value_proxy', colnames(proxy), value=T)
       data <- df %>%
         left_join(keys %>%
