@@ -219,13 +219,15 @@ project_until_now_elec <- function(co2, pwr_generation, dts_month, min_r2=0.85, 
     # => The last month data doesn't reflect emissions so far (e.g. if we're on the 15th of the month)
     # It does reflect the total expected emission/generation of the month
     # We do that by iso2 to account for different data latency
+    # BUT we also want to account for number of days in the month to avoid 28-31 stuff
     group_by(iso2) %>%
     tidyr::complete(
       source, date=seq.Date(min(date), max(date), by='day'),
       fill=list(value_mwh=0)
     ) %>%
     group_by(iso2, sector=SECTOR_ELEC, fuel, date=floor_date(as.Date(date), 'month')) %>%
-    summarise(value_proxy=mean(value_mwh), .groups = 'drop') %>%
+    summarise(value_proxy=mean(value_mwh) * days_in_month(first(date)),
+              .groups = 'drop') %>%
     arrange(desc(date))
 
 
@@ -244,13 +246,15 @@ project_until_now_gas <- function(co2, gas_demand, dts_month, min_r2=0.85){
     # => The last month data doesn't reflect emissions so far (e.g. if we're on the 15th of the month)
     # It does reflect the total expected emission/generation of the month
     # We do that by iso2 to account for different data latency
+    # BUT we also want to account for number of days in the month to avoid 28-31 stuff
     group_by(iso2) %>%
     tidyr::complete(
       date=seq.Date(min(date), max(date), by='day'),
       fill=list(value=0)
     ) %>%
     group_by(iso2, date=floor_date(date, 'month')) %>%
-    summarise(value_proxy=mean(value), .groups = 'drop') %>%
+    summarise(value_proxy=mean(value) * days_in_month(first(date)),
+              .groups = 'drop') %>%
     arrange(desc(date)) %>%
     mutate(fuel='gas', sector=SECTOR_ALL)
 

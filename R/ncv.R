@@ -360,5 +360,6 @@ diagnose_ncv_data <- function(conversion_filled, x = NULL, diagnostics_folder = 
   }
 
   # Display plot
-  print(p1)
+  # print(p1)
+  return(p1)
 }

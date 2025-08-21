@@ -1,11 +1,11 @@
-downscale_daily <- function(co2, pwr_generation, gas_demand){
+downscale_daily <- function(co2, pwr_generation, gas_demand, cut_latest_days=3){
 
   #add Gas all sectors total
   co2 <- co2 %>%
     split_gas_to_elec_all()
 
 
-  daily_proxy <- get_daily_proxy(pwr_generation = pwr_generation, gas_demand = gas_demand)
+  daily_proxy <- get_daily_proxy(pwr_generation = pwr_generation, gas_demand = gas_demand, cut_latest_days=cut_latest_days)
 
   #identify variable combos with data
   grps <- co2 %>% ungroup %>% filter(value>0) %>% distinct(fuel, sector)
@@ -75,7 +75,7 @@ downscale_daily <- function(co2, pwr_generation, gas_demand){
 }
 
 
-get_daily_proxy <- function(pwr_generation, gas_demand){
+get_daily_proxy <- function(pwr_generation, gas_demand, cut_latest_days=3){
 
   #aggregate daily power and gas data
   pwr_generation %>%
@@ -97,7 +97,7 @@ get_daily_proxy <- function(pwr_generation, gas_demand){
   bind_rows(pwr_yoy, gas_yoy) %>%
     ungroup %>%
     mutate(date=as.Date(date)) %>%
-    filter(date<=max(gas_yoy$date) - lubridate::days(3)) %>%
+    filter(date<=max(gas_yoy$date) - lubridate::days(cut_latest_days)) %>%
     select(iso2, date, fuel, sector, proxy_value=value) ->
     daily_proxy
 

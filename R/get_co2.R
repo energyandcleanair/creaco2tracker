@@ -15,7 +15,7 @@
 #' @examples
 get_co2 <- function(diagnostics_folder='diagnostics',
                     downscale_daily=T,
-                    use_cache=F,
+                    # use_cache=F,
                     iso2s = get_eu_iso2s(include_eu = T),
                     min_year = NULL,
                     ncv_source = "iea"){
@@ -26,32 +26,35 @@ get_co2 <- function(diagnostics_folder='diagnostics',
   gas_demand <- download_gas_demand(iso2=NULL, use_cache = use_cache)
   pwr_generation <- entsoe.get_power_generation(use_cache = use_cache)
 
+  # Get fossil-fuel consumption based on Eurostat
   eurostat_cons <- get_eurostat_cons(
     diagnostics_folder = file.path(diagnostics_folder, "eurostat"),
     pwr_generation = pwr_generation,
     use_cache = use_cache)
 
+  # Get industrial production data from Eurostat
   eurostat_indprod <- get_eurostat_indprod(
     use_cache = use_cache,
     diagnostics_folder = file.path(diagnostics_folder, 'eurostat')
     )
 
-  # Quick sanity checks
+  # Quick sanity checks on power generation
   if(!is_null_or_empty(diagnostics_folder)){
     diagnostic_pwr(pwr_generation,
                    diagnostics_folder = file.path(diagnostics_folder, "pwr"))
   }
 
 
-  # Compute emissions from EUROSTAT first
+  # Compute CO2 emissions based on Eurostat fossil-fuel consumption/oxydation
   co2_unprojected <- get_co2_from_eurostat_cons(eurostat_cons,
                                                 ncv_source = ncv_source,
                                                 diagnostics_folder = diagnostics_folder,
                                                 )
 
 
-  # Project data til now
-  # Need to be after filter since we're using all countries to fill missing EU data
+  # Project and impute data until now using various methods
+  # We need to have all EU countries there as some EU imputation
+  # relies on its member states
   co2 <- project_until_now(co2_unprojected,
                            pwr_generation=pwr_generation,
                            gas_demand=gas_demand,
