@@ -36,6 +36,9 @@ downscale_daily <- function(co2, pwr_generation, gas_demand){
       relationship = "many-to-many",
       by="month"
       ) %>%
+    # Here we divide by "days_in_month". This assumes that the imputed/projected CO2
+    # should be a monthly total estimated emission, even for the last month that may be partial
+    # according to entsoe and entsog proxies (see project.R fix on 20250821)
     mutate(value = value/days_in_month(date)) %>%
     right_join(grps, by=c("fuel", "sector")) %>%
     left_join(daily_proxy, by=c("iso2", "fuel", "sector", "date"))
