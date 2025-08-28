@@ -1,8 +1,8 @@
 #' Get Raw Weather Data from API
-#' 
+#'
 #' Fetches HDD and CDD weather data from the CREA API for EU regions.
-#' 
-#' @return A data frame containing raw weather data with columns: date, variable (hdd/cdd), 
+#'
+#' @return A data frame containing raw weather data with columns: date, variable (hdd/cdd),
 #'         value, region_id, and other metadata
 #' @export
 get_weather_raw <- function() {
@@ -11,13 +11,13 @@ get_weather_raw <- function() {
 }
 
 #' Fill Missing Values in Weather Data
-#' 
+#'
 #' Takes raw weather data from API and fills missing values using forward fill method.
 #' This function handles the data cleaning and gap filling for HDD and CDD data.
-#' 
-#' @param weather_raw A data frame containing raw weather data with columns: date, variable (hdd/cdd), 
+#'
+#' @param weather_raw A data frame containing raw weather data with columns: date, variable (hdd/cdd),
 #'                    value, region_id, and other metadata
-#' 
+#'
 #' @return A data frame with filled weather data
 #' @export
 fill_weather <- function(weather_raw) {
@@ -32,7 +32,7 @@ fill_weather <- function(weather_raw) {
     fill(value) %>%
     ungroup() ->
     weather_filled
-  
+
   return(weather_filled)
 }
 
@@ -51,22 +51,17 @@ fill_weather <- function(weather_raw) {
 #' @export
 diagnose_weather <- function(weather,
                             weather_raw = NULL,
-                            diagnostics_folder = 'diagnostics',
-                            save_plots = TRUE) {
+                            diagnostics_folder = 'diagnostics') {
+
 
   # Create diagnostics directory if it doesn't exist
-  if (!dir.exists(diagnostics_folder)) {
+  if (!is.null(diagnostics_folder) & !dir.exists(diagnostics_folder)) {
     dir.create(diagnostics_folder, recursive = TRUE)
   }
 
   # Use centralized quicksave function
 
   # Ensure date column is properly formatted
-  weather <- weather %>%
-    mutate(date = as.Date(date),
-           year = lubridate::year(date),
-           month = lubridate::month(date),
-           day_of_year = lubridate::yday(date))
 
   # 1. Running average
   #additional plots
@@ -80,7 +75,7 @@ diagnose_weather <- function(weather,
     mutate(plotdate=as.Date(plotdate)) %>%
     mutate(year=as.factor(year(date)),
            variable_name=ifelse(variable=='cdd', 'cooling', 'heating')) %>%
-    ggplot(aes(plotdate, value, alpha=year, col=variable_name)) +
+    ggplot(aes(plotdate, value, alpha=factor(year(date)), col=variable_name)) +
     facet_wrap(~variable_name, scales='free_y', ncol=1) +
     geom_line(size=1) +
     labs(title='EU average cooling and heating needs',
@@ -96,7 +91,7 @@ diagnose_weather <- function(weather,
     rcrea::scale_y_crea_zero() +
     guides(alpha=guide_legend(title=NULL, title.position = 'right', ncol=1))
 
-  if (save_plots) {
+  if (!is.null(diagnostics_folder)) {
     quicksave(file.path(diagnostics_folder, 'weather_running_30day.png'),
               plot = plt, width = 10, height = 6)
   }
@@ -104,24 +99,11 @@ diagnose_weather <- function(weather,
 
   # 3. Raw Weather Tilemap (if raw data provided)
   if (!is.null(weather_raw)) {
-    # Ensure date column is properly formatted for raw data
-    weather_raw <- weather_raw %>%
-      mutate(date = as.Date(date),
-             year = lubridate::year(date),
-             month = lubridate::month(date),
-             day_of_year = lubridate::yday(date))
-
-    # Create daily averages for raw weather data
-    daily_evolution_raw <- weather_raw %>%
-      filter(region_id == 'EU') %>%
-      # Fill missing day_of_year values
-      complete(variable, year, month, day_of_year = 1:366) %>%
-      arrange(variable, year, month, day_of_year)
 
     # Create tilemap for raw data
     tilemap_raw_plot <- weather_raw %>%
       filter(!is.na(year)) %>%
-      ggplot(aes(x = `year<-`(date, 2000), y = year, fill = value)) +
+      ggplot(aes(x = `year<-`(date, 2000), y = year(date), fill = value)) +
       geom_tile(data = ~ subset(., variable=='cdd'), aes(cdd=value)) +
       geom_tile(data = ~ subset(., variable=='hdd'), aes(hdd=value)) +
       scale_x_date(date_labels = '%b', expand = expansion(mult = .01)) +
@@ -139,7 +121,7 @@ diagnose_weather <- function(weather,
       theme_minimal()
 
 
-    if (save_plots) {
+    if (!is.null(diagnostics_folder)) {
       quicksave(file.path(diagnostics_folder, 'weather_data_availability.png'),
                 plot = tilemap_raw_plot, width = 12, height = 8)
     }
