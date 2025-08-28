@@ -99,7 +99,7 @@ get_co2 <- function(diagnostics_folder='diagnostics',
                                              destination = "country.name",
                                              custom_match = c("EU"="EU")
                                              )) %>%
-    mutate(unit='t/day') %>%
+    mutate(unit="t") %>%
     filter(!is.na(date)) %>%
     {
       if(!is.null(min_year)){
