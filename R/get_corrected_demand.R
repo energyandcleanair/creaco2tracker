@@ -17,18 +17,6 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
     mutate(value_TWh = value / 55 / 3.6 / 1000) %>%
     select(date, value_TWh)
 
-  # gas_demand2 <- download_gas_demand(iso2='EU') %>%
-  #   mutate(value_TWh=value*gcv_kwh_m3/1e9)
-  #
-  #
-  # bind_rows(gas_demand1 %>% mutate(source='co2'), gas_demand2 %>% mutate(source='demand') %>% filter(region_id=='EU')) %>%
-  #   ggplot() +
-  #   geom_line(aes(date, value_TWh, col=source))
-  #
-  #   filter(sector=='Others', fuel=='Gas') %>%
-  #   mutate(value_TWh = value / 55 / 3.6 / 1000) %>%
-  #   select(date, value_TWh)
-
   pwr <- entsoe.get_power_generation(use_cache = F)
 
   pwr_generation <- pwr %>%
@@ -38,33 +26,22 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
     mutate(country='EU')
 
   # hdd and cdd
-  creahelpers::api.get("api.energyandcleanair.org/v1/weather", variable="HDD,CDD", region_id="EU") %>%
-    mutate(across(variable, tolower)) ->
-    dd
+  weather_raw <- get_weather_raw()
 
-  # Fill na values
-  dd %>%
-    mutate(date=lubridate::date(date)) %>%
-    ungroup() %>%
-    tidyr::complete(date=seq.Date(min(date), max(date), by='day'),
-                    tidyr::nesting(variable, unit, region_id, region_type, region_iso2, averaging_period, source, region_name)) %>%
-    group_by(variable, unit, region_id, region_type, region_iso2, averaging_period, source, region_name) %>%
-    arrange(date) %>%
-    fill(value) %>%
-    ungroup() ->
-  dd
+  # Fill missing values
+  weather <- fill_weather(weather_raw)
 
-  #defaults for saving plots
-  quicksave <- function(file, width=8, height=6, bg='white', ...) {
-    ggsave(file, width=width, height=height, bg=bg, ...)
-  }
+  # Run weather diagnostics
+  weather_diagnostics <- diagnose_weather(weather, weather_raw, diagnostics_folder)
+
+  # Use centralized quicksave function from utils.R
 
   #function to fit model for energy demand vs temperature
   fit_model <- function(data,
                         independents='hdd|cdd',
                         countries=get_eu_iso2s(include_eu = T),
                         plot_moving_average_days=7) {
-    dd %>%
+    weather %>%
       select(region_id, date, variable, value) %>%
       filter(region_id %in% countries,
              date %in% data$date) %>%
@@ -94,7 +71,7 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
       pivot_longer(c(anomaly, value, value_pred, value_temperature_corrected),
                    names_to = 'measure') %>%
       filter(date>='2019-01-01',
-             date <= max(dd$date)) ->
+             date <= max(weather$date)) ->
       data
 
     # Timeseries
@@ -162,59 +139,7 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
     fit_model() ->
     gas_model
 
-  #additional plots
-  dd %>%
-    filter(year(date) %in% 2018:2024, region_id=='EU') %>%
-    group_by(variable) %>%
-    mutate(plotdate = date %>% 'year<-'(2000),
-           across(value, zoo::rollapplyr, FUN=mean, width=30, fill=NA, na.rm=T)) ->
-    dd_plot
-
-  plt <- dd_plot %>%
-    mutate(plotdate=as.Date(plotdate)) %>%
-    mutate(year=as.factor(year(date)),
-           variable_name=ifelse(variable=='cdd', 'cooling', 'heating')) %>%
-    ggplot(aes(plotdate, value, alpha=year, col=variable_name)) +
-    facet_wrap(~variable_name, scales='free_y', ncol=1) +
-    geom_line(size=1) +
-    labs(title='EU average cooling and heating needs',
-         subtitle='population-weighted average for EU-27',
-         y='degree-days', x='') +
-    theme_crea(legend.position='top') + scale_color_crea_d('change', col.index = c(7,1), guide='none') +
-    scale_alpha_discrete(range=c(.33,1),
-                         # guide=guide_legend(nrow=1, override.aes = list(alpha=1, color=c('gray66', 'gray33', 'black')), title.position = 'left')
-                         ) +
-    scale_x_date(date_labels = '%b', expand=expansion(mult=.01)) +
-    rcrea::scale_y_crea_zero()
-
-  ggsave(file.path(diagnostics_folder, 'EU average cooling and heating needs.png'),
-         plot=plt,
-         width=10,
-         height=8)
-
-
-  plt_zh <- dd_plot %>%
-    mutate(plotdate=as.Date(plotdate)) %>%
-    mutate(year=as.factor(paste0(year(date),'年')),
-           variable_name=ifelse(variable=='cdd', '制冷', '采暖')) %>%
-    ggplot(aes(plotdate, value, alpha=year, col=variable_name)) +
-    facet_wrap(~variable_name, scales='free_y', ncol=1) +
-    geom_line(size=1) +
-    labs(title='欧盟的采暖和制冷需求',
-         subtitle='整个欧盟人口加权平均值',
-         y='度日', x='', alpha='') +
-    theme_crea(legend.position='top') + scale_color_crea_d('change', col.index = c(7,1), guide='none') +
-    scale_alpha_discrete(range=c(.33,1),
-                         guide=guide_legend(nrow=1,
-                                            # override.aes = list(alpha=1, color=c('gray66', 'gray33', 'black')),
-                                            title.position = 'left')) +
-    scale_x_date(labels = function(x) paste0(month(x), '月'), expand=expansion(mult=.01)) +
-    rcrea::scale_y_crea_zero()
-
-  ggsave(file.path(diagnostics_folder, 'EU average cooling and heating needs ZH.png'),
-         plot=plt_zh,
-         width=10,
-         height=8)
+  # Weather plotting is now handled by diagnose_weather function
 
 
   # Format for DB
