@@ -15,7 +15,7 @@
 #' @examples
 get_co2 <- function(diagnostics_folder='diagnostics',
                     downscale_daily=T,
-                    # use_cache=F,
+                    use_cache=F,
                     iso2s = get_eu_iso2s(include_eu = T),
                     min_year = NULL,
                     ncv_source = "iea"){
