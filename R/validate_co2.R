@@ -472,6 +472,7 @@ validate_co2_timeseries <- function(co2, folder="diagnostics"){
         filter(iso2==!!iso2) %>%
         mutate(across(c(fuel, sector), tolower)) %>%
         group_by(sector, fuel, estimate) %>%
+        arrange(date) %>%
         mutate(value = zoo::rollapplyr(value, 30, mean, fill=NA),
                year=as.factor(year(date)),
                plotdate=date %>% 'year<-'(2022)) %>%
