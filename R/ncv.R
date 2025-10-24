@@ -1,23 +1,23 @@
 # Helper function to create SIEC fuel mapping
 create_siec_fuel_mapping <- function() {
   tribble(
-    ~siec_code, ~product,
-    SIEC_HARD_COAL, "Anthracite",
-    SIEC_BROWN_COAL, "Lignite",
-    SIEC_BROWN_COAL_BRIQUETTES, "BKB/peat briquette plants",
-    SIEC_PEAT, "Peat and peat products",
-    SIEC_OIL_SHALE, "Oil shale and oil sands",
-    SIEC_CRUDE_OIL, "Crude oil",
-    SIEC_NATURAL_GAS, "Natural Gas",
-    SIEC_COKE_OVEN_COKE, "Coke oven coke",
-    SIEC_OIL_PRODUCTS, "Other oil products",
-    SIEC_ROAD_DIESEL, "Gas/diesel oil excl. biofuels",
-    SIEC_GASOIL_DIESEL, "Gas/diesel oil excl. biofuels",
-    SIEC_AVIATION_GASOLINE, "Aviation gasoline",
-    SIEC_MOTOR_GASOLINE_XBIO, "Motor gasoline excl. biofuels",
-    SIEC_FUEL_OIL, "Fuel oil",
-    SIEC_HEATING_GASOIL, "Gas/diesel oil excl. biofuels",
-    SIEC_KEROSENE_XBIO, "Kerosene type jet fuel excl. biofuels"
+    ~siec_code, ~product_raw,
+    SIEC_HARD_COAL, "ANTHRACITE",
+    SIEC_BROWN_COAL, "LIGNITE",
+    SIEC_BROWN_COAL_BRIQUETTES, "BKB",
+    SIEC_PEAT, "PEAT_PRODUCTS",
+    SIEC_OIL_SHALE, "OIL_SHALE",
+    SIEC_CRUDE_OIL, "CRUDE_OIL",
+    SIEC_NATURAL_GAS, "NATURAL_GAS",
+    SIEC_COKE_OVEN_COKE, "COKE_OVEN_COKE_OTH",
+    SIEC_OIL_PRODUCTS, "OTH_SEC_OIL_PRODS_ND",
+    SIEC_ROAD_DIESEL, "GAS_DIESEL_OIL_NONBIO",
+    SIEC_GASOIL_DIESEL, "GAS_DIESEL_OIL_NONBIO",
+    SIEC_AVIATION_GASOLINE, "AVIATION_GASOLINE",
+    SIEC_MOTOR_GASOLINE_XBIO, "MOTOR_GASOLINE_NONBIO",
+    SIEC_FUEL_OIL, "FUEL_OIL_RESIDUAL",
+    SIEC_HEATING_GASOIL, "GAS_DIESEL_OIL_NONBIO",
+    SIEC_KEROSENE_XBIO, "KEROSENE_JET_NONBIO"
   )
 }
 
@@ -26,7 +26,7 @@ add_siec_code_to_iea <- function(conversion_raw) {
   siec_fuel <- create_siec_fuel_mapping()
 
   conversion_raw %>%
-    right_join(siec_fuel, by="product", relationship='many-to-many')
+    right_join(siec_fuel, by="product_raw", relationship='many-to-many')
 }
 
 # Function to process and clean conversion factors

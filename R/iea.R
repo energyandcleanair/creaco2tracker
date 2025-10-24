@@ -44,7 +44,7 @@ iea.get_conversion_factors <- function(year_from = 2000, year_to = 2022, iso2, u
     return(readRDS(filepath))
   } else {
     # Fetch the data
-    print(glue("Getting conversion factors from IEA for {iso2} from {year_from} to {year_to}"))
+    print(glue("Getting conversion factors from IEA for {paste(iso2, sep=',')} from {year_from} to {year_to}"))
     result <- creahelpers::api.get("api.energyandcleanair.org/energy/iea_conversion",
                                    year_from = year_from,
                                    year_to = year_to,
