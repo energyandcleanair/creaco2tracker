@@ -35,7 +35,7 @@ process_conversion_factors <- function(conversion_raw) {
   # In 2021, lignite made up 99.6 % of the brown coal consumed in the EU,and sub-bituminous coal 0.4 %.
   # https://ec.europa.eu/eurostat/statistics-explained/index.php?title=Production_of_lignite_in_the_Western_Balkans_-_statistics&oldid=627763
   conversion <- conversion_raw %>%
-    filter(flow_raw=="NAVERAGE", unit=="KJKG", iso2 %in% get_eu_iso2s()) %>%
+    filter(flow_raw=="NAVERAGE", unit=="KJ_KG", iso2 %in% get_eu_iso2s()) %>%
     add_siec_code_to_iea() %>%
     filter(!is.na(value)) %>%
     mutate(source="IEA") %>%
@@ -185,9 +185,9 @@ make_ncv_time_insensitive <- function(x_with_ncv) {
     mutate(ncv_kjkg=mean(ncv_kjkg, na.rm=T))
 }
 
-add_ncv_iea <- function(x, diagnostics_folder=NULL){
+add_ncv_iea <- function(x, diagnostics_folder=NULL, use_cache=TRUE, ...){
 
-  conversion_raw <- iea.get_conversion_factors(iso2=c(get_eu_iso2s(), "EU"))
+  conversion_raw <- iea.get_conversion_factors(iso2=c(get_eu_iso2s(), "EU"), use_cache=use_cache)
 
   # Process conversion factors
   conversion <- process_conversion_factors(conversion_raw)
@@ -251,7 +251,7 @@ get_ipcc_ncv <- function() {
 }
 
 
-add_ncv_ipcc <- function(x, diagnostics_folder=NULL){
+add_ncv_ipcc <- function(x, diagnostics_folder=NULL, ...){
 
   # Get IPCC data
   ipcc <- get_ipcc_ncv()

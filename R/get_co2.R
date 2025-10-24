@@ -49,6 +49,7 @@ get_co2 <- function(diagnostics_folder='diagnostics',
   co2_unprojected <- get_co2_from_eurostat_cons(eurostat_cons,
                                                 ncv_source = ncv_source,
                                                 diagnostics_folder = diagnostics_folder,
+                                                use_cache = use_cache
                                                 )
 
 

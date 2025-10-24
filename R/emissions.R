@@ -1,7 +1,9 @@
 get_co2_from_eurostat_cons <- function(eurostat_cons,
                                        diagnostics_folder="diagnostics",
-                                       keep_siec=F,
-                                       ncv_source="iea"){
+                                       keep_siec=FALSE,
+                                       ncv_source="iea",
+                                       use_cache=TRUE
+                                       ){
 
   group_by_cols <- c("iso2", "date"="time", "fuel", "sector", "unit")
   if(keep_siec){
@@ -15,7 +17,7 @@ get_co2_from_eurostat_cons <- function(eurostat_cons,
                        add_ncv_iea) # Default to IEA if invalid source
 
   eurostat_cons %>%
-    add_ncv_fn(diagnostics_folder = diagnostics_folder) %>%
+    add_ncv_fn(diagnostics_folder = diagnostics_folder, use_cache=use_cache) %>%
     add_emission_factor() %>%
     mutate(value_co2_tonne=
              case_when(unit=='Thousand tonnes' ~ values * ncv_kjkg / 1000 * co2_factor_t_per_TJ,
