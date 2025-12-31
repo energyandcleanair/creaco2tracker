@@ -196,6 +196,11 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s=NULL, diagnostics_fold
           aes(label=max_date),
           size=3,
         ) +
+        geom_text(
+          data=function(x) filter(x, iso2!="EU"),
+          aes(label=lubridate::month(max_date)),
+          size=3,
+        ) +
         rcrea::scale_fill_crea_d() +
         rcrea::theme_crea_new() +
         labs(

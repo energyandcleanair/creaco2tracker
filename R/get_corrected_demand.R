@@ -26,7 +26,7 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
     mutate(country='EU')
 
   # hdd and cdd
-  weather_raw <- get_weather_raw()
+  weather_raw <- get_weather(variable = "HDD,CDD", region_id = "EU")
 
   # Fill missing values
   weather <- fill_weather(weather_raw)

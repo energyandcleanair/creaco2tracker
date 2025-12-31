@@ -26,11 +26,9 @@ get_co2_from_eurostat_cons <- function(eurostat_cons,
     filter(!is.na(value_co2_tonne)) %>%
     group_by_at(group_by_cols) %>%
     summarise(value = sum(value_co2_tonne, na.rm=T),
-              unit='t',
+              unit="t",
               .groups="drop"
-    ) %>%
-    # Remove those with only partial data
-    ungroup()
+    )
 }
 
 #' Get emission factors from IPCC
