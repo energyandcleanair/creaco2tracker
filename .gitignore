@@ -1,6 +1,11 @@
 # History files
 .Rhistory
 .Rapp.history
+man/
+diagnostics/
+tests/testthat/cache
+plots/ 
+investigate/
 
 # Session Data files
 .RData
