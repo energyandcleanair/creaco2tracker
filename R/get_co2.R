@@ -23,7 +23,7 @@ get_co2 <- function(diagnostics_folder='diagnostics',
   create_dir(diagnostics_folder)
 
   # Collect necessary data
-  gas_demand <- download_gas_demand(iso2=NULL, use_cache = use_cache)
+  gas_demand <- download_gas_demand(iso2 = NULL, use_cache = use_cache)
   pwr_generation <- entsoe.get_power_generation(use_cache = use_cache)
 
   # Get fossil-fuel consumption based on Eurostat

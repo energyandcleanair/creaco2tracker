@@ -95,6 +95,8 @@ importFrom(magrittr,add)
 importFrom(magrittr,use_series)
 importFrom(magrittr,subtract)
 
+importFrom(pbapply,pblapply)
+
 importFrom(readr,read_csv)
 importFrom(readr,cols)
 

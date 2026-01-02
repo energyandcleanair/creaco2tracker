@@ -115,7 +115,7 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
     data %>% group_by(measure) %>%
       mutate(yoy=creahelpers::get_yoy(value, date)) %>% select(date, yoy) %>%
       slice_tail(n=1) %>%
-      write_csv(file.path(diagnostics_folder,
+      readr::write_csv(file.path(diagnostics_folder,
                           paste0(unique(data$name), ', YoY changes, past ',
                                  plot_moving_average_days,' days.csv'))) ->
       changes

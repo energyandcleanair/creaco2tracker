@@ -1,3 +1,56 @@
+#' Get Weather-Corrected Renewable Generation
+#'
+#' Retrieves weather-corrected generation for renewable sources (wind, solar)
+#' and compares with actual generation to calculate the delta.
+#'
+#' @inheritParams get_weather_corrected_co2_power
+#' @return Data frame with actual and weather-corrected renewable generation
+#'
+#' @keywords internal
+get_weather_corrected_renewables <- function(iso2s,
+                                             date_from,
+                                             pwr_generation,
+                                             sources = c("wind", "solar", "hydro"),
+                                             use_cache = TRUE) {
+
+  renewable_data <- list()
+
+  # Get weather-corrected wind
+  if ("wind" %in% tolower(sources)) {
+    renewable_data[["wind"]] <- get_weather_corrected_wind(
+      iso2s = iso2s,
+      pwr_generation = pwr_generation,
+      date_from = date_from,
+      use_cache = use_cache
+    )
+  }
+
+  # Get weather-corrected solar
+  if ("solar" %in% tolower(sources)) {
+    renewable_data[["solar"]] <- get_weather_corrected_solar(
+      iso2s = iso2s,
+      pwr_generation = pwr_generation,
+      date_from = date_from,
+      use_cache = use_cache
+    )
+  }
+
+  # Get weather-corrected hydro
+  if ("hydro" %in% tolower(sources)) {
+    renewable_data[["hydro"]] <- get_weather_corrected_hydro(
+      iso2s = iso2s,
+      pwr_generation = pwr_generation,
+      date_from = date_from,
+      use_cache = use_cache
+    )
+  }
+
+  # Combine all renewable sources
+  result <- dplyr::bind_rows(renewable_data)
+
+  return(result)
+}
+
 #' Get Weather-Corrected Wind Power Generation
 #'
 #' Corrects wind power generation for weather variations using wind speed data.
@@ -25,7 +78,7 @@ get_weather_corrected_wind <- function(iso2s = "EU",
   create_dir(diagnostics_folder)
 
   # Handle EU case
-  if (length(iso2s)== 1 & "EU" == iso2s) {
+  if (length(iso2s) == 1 && "EU" == iso2s) {
     iso2s <- get_eu_iso2s(include_eu = FALSE)
   }
 
@@ -204,7 +257,7 @@ get_weather_corrected_solar <- function(iso2s = "EU",
   create_dir(diagnostics_folder)
 
   # Handle EU case
-  if (length(iso2s) == 1 & "EU" == iso2s) {
+  if (length(iso2s) == 1 && "EU" == iso2s) {
     iso2s <- get_eu_iso2s(include_eu = FALSE)
   }
 
@@ -342,6 +395,141 @@ get_weather_corrected_solar <- function(iso2s = "EU",
 }
 
 
+#' Get Weather-Corrected Hydro Power Generation
+#'
+#' Corrects hydro power generation using capacity-based approach:
+#' - Uses ENTSOE capacity data where available
+#' - For countries without capacity data, assumes constant capacity
+#' - Calculates 10-year rolling average capacity factor
+#' - Weather-corrected generation = capacity × mean CF × 24 hours
+#' - Scales daily values to match actual yearly total
+#'
+#' @param iso2s Character vector of ISO2 country codes. Use "EU" for all EU countries,
+#'   or specify individual countries like c("DE", "FR"). Default is "EU".
+#' @param pwr_generation Data frame with power generation data from entsoe.get_power_generation
+#' @param date_from Start date for analysis (default: "2015-01-01")
+#' @param diagnostics_folder Path to save diagnostic plots and outputs
+#' @param use_cache Logical, whether to use cached data (default: TRUE)
+#' @param use_local Logical, whether to use localhost API for weather data (default: FALSE)
+#'
+#' @return A data frame with weather-corrected hydro generation matching the power
+#'   generation format (columns: date, iso2, source, value_mwh, etc.)
+#'
+#' @export
+get_weather_corrected_hydro <- function(iso2s = "EU",
+                                        pwr_generation,
+                                        date_from = "2015-01-01",
+                                        diagnostics_folder = 'diagnostics/hydro_correction',
+                                        use_cache = TRUE,
+                                        use_local = FALSE) {
+
+  create_dir(diagnostics_folder)
+
+  # Handle EU case
+  if (length(iso2s) == 1 && "EU" == iso2s) {
+    iso2s <- get_eu_iso2s(include_eu = FALSE)
+  }
+
+  # Ensure this is daily data
+  stopifnot(all(lubridate::date(pwr_generation$date) == pwr_generation$date))
+
+  # Filter for hydro generation in specified countries
+  hydro_generation <- pwr_generation %>%
+    filter(iso2 %in% iso2s) %>%
+    filter(grepl("hydro", source, ignore.case = TRUE))
+
+  message("Getting ENTSOE capacity data")
+  # Get ENTSOE installed capacity data for hydro
+  capacity_raw <- tryCatch({
+    entsoe.get_installed_capacity(iso2s = iso2s, date_from = date_from) %>%
+      filter(grepl("hydro", source, ignore.case = TRUE)) %>%
+      mutate(year = lubridate::year(date)) %>%
+      group_by(iso2, year) %>%
+      summarise(capacity_mw = mean(value_mw, na.rm = TRUE), .groups = "drop")
+  }, error = function(e) {
+    warning(sprintf("Failed to get ENTSOE capacity data: %s", e$message))
+    tibble(iso2 = character(), year = integer(), capacity_mw = numeric())
+  })
+
+  # Fill missing capacity data
+  # 1. Forward fill within each country (2025 = 2024)
+  # 2. Interpolate gaps
+  # 3. Backward fill for early years
+  # 4. For countries without capacity data, use a constant capacity (doesn't matter what level)
+  all_years <- seq(lubridate::year(as.Date(date_from)), lubridate::year(Sys.Date()))
+
+  capacity <- capacity_raw %>%
+    complete(iso2 = iso2s, year = all_years) %>%
+    group_by(iso2) %>%
+    arrange(year) %>%
+    # Forward fill (2025 uses 2024 capacity)
+    fill(capacity_mw, .direction = "down") %>%
+    # Backward fill for early years
+    fill(capacity_mw, .direction = "up") %>%
+    # Linear interpolation for gaps
+    mutate(capacity_mw = zoo::na.approx(capacity_mw, na.rm = FALSE)) %>%
+    ungroup() %>%
+    # Fill countries with no capacity data with constant value
+    group_by(iso2) %>%
+    mutate(capacity_mw = case_when(
+      all(is.na(capacity_mw)) ~ 1,
+      TRUE ~ capacity_mw
+    )) %>%
+    ungroup()
+
+  # We don't have much more than 10 years of data, so we use a simple rolling average
+  message("Calculating 10-year rolling average capacity factors")
+
+  # Merge generation with capacity
+  cf <- hydro_generation %>%
+    group_by(iso2, year = lubridate::year(date)) %>%
+    summarise(value_mwh = mean(value_mwh, na.rm = TRUE), .groups = "drop") %>%
+    left_join(capacity, by = c("iso2", "year")) %>%
+    mutate(cf = value_mwh / (capacity_mw * 24)) %>%
+    group_by(iso2) %>%
+    arrange(year) %>%
+    mutate(cf_10yr = zoo::rollmean(cf, k = 10, fill = NA, align = "right")) %>%
+    # Then fill backwards to fill missing values
+    fill(cf_10yr, .direction = "up") %>%
+    ungroup() %>%
+    # Then derive a ratio to apply to generation time series
+    mutate(ratio = cf_10yr / cf) %>%
+    select(iso2, year, ratio)
+
+  # Apply ratio to generation time series, by year
+  corrected_data <- hydro_generation %>%
+    mutate(year = lubridate::year(date)) %>%
+    left_join(cf, by = c("iso2", "year")) %>%
+    mutate(value_mwh_corrected = value_mwh * ratio) %>%
+    # Scale to preserve total generation per country (across all years)
+    group_by(iso2) %>%
+    mutate(
+      scaling_factor = sum(value_mwh, na.rm = TRUE) / sum(value_mwh_corrected, na.rm = TRUE),
+      value_mwh = value_mwh_corrected * scaling_factor
+    ) %>%
+    ungroup() %>%
+    select(date, iso2, value_mwh) %>%
+    mutate(source = "Hydro")
+
+  # Add EU total
+  if (all(get_eu_iso2s() %in% corrected_data$iso2)) {
+    eu_total <- corrected_data %>%
+      group_by(date, source) %>%
+      summarise(
+        value_mwh = sum(value_mwh, na.rm = TRUE),
+        .groups = "drop"
+      ) %>%
+      mutate(
+        iso2 = "EU"
+      )
+
+    corrected_data <- bind_rows(corrected_data, eu_total)
+  }
+
+  return(corrected_data)
+}
+
+
 #' Plot Corrected Generation vs EMBER Capacity
 #'
 #' Helper function to create faceted plots comparing weather-corrected generation
@@ -349,7 +537,7 @@ get_weather_corrected_solar <- function(iso2s = "EU",
 #'
 #' @param model_data Data frame with corrected generation predictions
 #' @param country_iso2 ISO2 country code
-#' @param source_type Either "wind" or "solar"
+#' @param source_type Either "wind", "solar", or "hydro"
 #' @param diagnostics_folder Path to save diagnostic plot
 #'
 #' @return NULL (plot is saved to file)
