@@ -33,25 +33,16 @@
 #'
 #' @export
 get_weather_corrected_co2 <- function(co2,
-                                       apply_powermix = TRUE,
-                                       apply_demand = FALSE,
-                                       use_cache = TRUE,
-                                       diagnostics_folder = NULL) {
+                                      apply_demand_correction = TRUE,
+                                      apply_powermix_correction = TRUE,
+                                      use_cache = TRUE,
+                                      diagnostics_folder = NULL) {
 
   # Derive parameters from co2 data
   iso2s <- unique(co2$iso2)
-  message(sprintf("Auto-detected iso2s: %s", paste(iso2s, collapse = ", ")))
-
-  if ("date" %in% names(co2)) {
-    date_from <- min(co2$date, na.rm = TRUE)
-    date_to <- max(co2$date, na.rm = TRUE)
-    message(sprintf("Auto-detected date range: %s to %s", date_from, date_to))
-  } else {
-    date_from <- "2015-01-01"
-    date_to <- Sys.Date()
-    message("No date column found, using default date range")
-  }
-
+  date_from <- min(co2$date, na.rm = TRUE)
+  date_to <- max(co2$date, na.rm = TRUE)
+  
   # Initialize result with original data
   result <- co2
 
@@ -62,7 +53,7 @@ get_weather_corrected_co2 <- function(co2,
   }
 
   # Apply power mix correction
-  if (apply_powermix) {
+  if (apply_powermix_correction) {
     message("Applying power generation mix correction...")
     wc_powermix <- get_weather_correction_powermix(
       iso2s = iso2s,
@@ -91,7 +82,7 @@ get_weather_corrected_co2 <- function(co2,
   }
 
   # Apply demand correction
-  if (apply_demand) {
+  if (apply_demand_correction) {
     message("Applying demand correction...")
     wc_demand <- get_weather_correction_demand(
       iso2s = iso2s,

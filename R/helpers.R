@@ -204,7 +204,8 @@ format_co2_for_db <- function(co2, cut_tail_days=3){
     ungroup() %>%
     # Combine coal and coke
     combine_coke_coal() %>%
-    mutate(across(c(fuel, sector), stringr::str_to_title),
+    mutate(fuel=fuel_code_to_label(fuel),
+           sector=sector_code_to_label(sector),
            frequency='daily',
            region=iso2,
            version=as.character(packageVersion("creaco2tracker"))) %>%
@@ -249,3 +250,38 @@ create_dir <- function(folder){
 is_null_or_empty <- function(x){
   is.null(x) | (length(x)==0)
 }
+
+sector_code_to_label <- function(sector_code){
+  stringr::str_to_title(sector_code)
+}
+
+sector_label_to_code <- function(sector_label){
+  code = case_when(sector_label == str_to_title(SECTOR_ALL) ~ SECTOR_ALL,
+    sector_label == str_to_title(SECTOR_ELEC) ~ SECTOR_ELEC,
+    sector_label == str_to_title(SECTOR_TRANSPORT) ~ SECTOR_TRANSPORT,
+    sector_label == str_to_title(SECTOR_TRANSPORT_DOMESTIC) ~ SECTOR_TRANSPORT_DOMESTIC,
+    sector_label == str_to_title(SECTOR_TRANSPORT_INTERNATIONAL_AVIATION) ~ SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,
+    sector_label == str_to_title(SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING) ~ SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING,
+    sector_label == str_to_title(SECTOR_OTHERS) ~ SECTOR_OTHERS,
+    sector_label == str_to_title(SECTOR_ALL) ~ SECTOR_ALL,
+    TRUE ~ NA_character_
+  )
+  if(any(is.na(code))) stop(glue("Unknown sector label: {sector_label}"))
+  code
+}
+
+fuel_code_to_label <- function(fuel_code){
+  stringr::str_to_title(fuel_code)
+}
+
+fuel_label_to_code <- function(fuel_label){
+  code = case_when(fuel_label == str_to_title(FUEL_COAL) ~ FUEL_COAL,
+    fuel_label == str_to_title(FUEL_COKE) ~ FUEL_COKE,
+    fuel_label == str_to_title(FUEL_OIL) ~ FUEL_OIL,
+    fuel_label == str_to_title(FUEL_GAS) ~ FUEL_GAS,
+    fuel_label == str_to_title(FUEL_TOTAL) ~ FUEL_TOTAL,
+    TRUE ~ NA_character_
+  )
+  if(any(is.na(code))) stop(glue("Unknown fuel label: {fuel_label}"))
+  code
+} 

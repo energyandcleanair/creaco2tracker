@@ -17,7 +17,12 @@ download_co2 <- function(date_from="2015-01-01", use_cache = F, refresh_cache = 
                        cache_folder = "cache",
                        region = iso2s,
                        version = version) %>%
-    select_if_exists(region, iso2, date, fuel, sector, unit, frequency, value, version)
+    select_if_exists(region, fuel, sector, unit, date, frequency, value, version) %>%
+    # Poor design/naming of the API and db
+    mutate(iso2 = region) %>%
+    # Format it back
+    mutate(fuel=fuel_label_to_code(fuel),
+           sector=sector_label_to_code(sector))
 }
 
 download_gas_demand <- function(iso2=NULL,

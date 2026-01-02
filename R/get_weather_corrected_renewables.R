@@ -71,7 +71,7 @@ get_weather_corrected_renewables <- function(iso2s,
 get_weather_corrected_wind <- function(iso2s = "EU",
                                        pwr_generation,
                                        date_from = "2020-01-01",
-                                       diagnostics_folder = 'diagnostics/wind_correction',
+                                       diagnostics_folder = 'diagnostics/weather_correction/wind',
                                        use_cache = TRUE,
                                        use_local = FALSE) {
 
@@ -115,8 +115,7 @@ get_weather_corrected_wind <- function(iso2s = "EU",
   }
 
   # Ensure these are daily as well
-  stopifnot(all(lubridate::date(weather$date)==weather$date))
-
+  stopifnot(all(lubridate::date(weather$date) == weather$date))
 
   # Merge wind generation with weather data
   model_data <- wind_generation %>%
@@ -125,7 +124,6 @@ get_weather_corrected_wind <- function(iso2s = "EU",
                 select(iso2=region_iso2, date, variable, value) %>%
                 tidyr::pivot_wider(names_from = variable, values_from = value),
               by = c("iso2", "date")) %>%
-    filter(complete.cases(.)) %>%
     # Add time vars
     mutate(
       yday = lubridate::yday(date),  # Day of year for climatology
@@ -144,19 +142,20 @@ get_weather_corrected_wind <- function(iso2s = "EU",
 
   message("Fitting weather correction models...")
   # Fit model for each country
-  corrected_data <- pblapply(iso2s, function(country_iso2) {
+  corrected_data <- pblapply(iso2s, function(iso2) {
 
     model_data_country <- model_data %>%
-      filter(iso2 == country_iso2)
+      filter(iso2 == !!iso2) %>%
+      filter(complete.cases(.))
 
     # Check if we have data
     if (nrow(model_data_country) == 0) {
-      warning(sprintf("No data for %s, skipping", country_iso2))
+      warning(sprintf("No data for %s, skipping", iso2))
       return(NULL)
     }
 
     if (nrow(model_data_country) < 100) {
-      warning(sprintf("Insufficient data for %s (%d rows), skipping", country_iso2, nrow(model_data)))
+      warning(sprintf("Insufficient data for %s (%d rows), skipping", iso2, nrow(model_data)))
       return(NULL)
     }
 
@@ -175,7 +174,11 @@ get_weather_corrected_wind <- function(iso2s = "EU",
       # Plot importance
       # randomForest::varImpPlot(model)
 
-      # Create average climatology
+      # Predict at ACTUAL weather (fitted values)
+      fitted_actual <- predict(model, model_data_country)
+
+      # Create average climatology (normal weather)
+      # Note: group_by %>% mutate preserves row order (no arrange!)
       model_data_averaged <- model_data_country %>%
         group_by(lubridate::yday(date)) %>%
         mutate_at(
@@ -184,21 +187,22 @@ get_weather_corrected_wind <- function(iso2s = "EU",
           .groups = "drop"
         )
 
-      # Predict actual generation
-      model_data_country$value_pred <- predict(model, model_data_averaged)
+      # Predict at NORMAL weather
+      fitted_normal <- predict(model, model_data_averaged)
 
-      # Scale to have exact same generation figures
-      model_data_country$value_pred <- model_data_country$value_pred *
-        (sum(model_data_country$value_mwh) / sum(model_data_country$value_pred))
+      # Calculate weather-corrected values (preserves residuals!)
+      # Row order is preserved, so direct indexing is safe
+      model_data_country$value_mwh_corrected <-
+        model_data_country$value_mwh + (fitted_normal - fitted_actual)
 
       # Plot comparison with EMBER using helper function
       if(!is.null(diagnostics_folder)){
-        plot_corrected_vs_ember(model_data_country, country_iso2, "wind", diagnostics_folder)
+        plot_corrected_vs_ember(model_data_country, iso2, "wind", diagnostics_folder)
       }
 
       # Return deweathered data
       model_data_country %>%
-        select(date, iso2, value_mwh=value_pred) %>%
+        select(date, iso2, value_mwh=value_mwh_corrected) %>%
         mutate(
           source = "Wind"
         )
@@ -211,7 +215,7 @@ get_weather_corrected_wind <- function(iso2s = "EU",
     bind_rows()
 
   # Add EU total
-  if (all(get_eu_iso2s() %in% corrected_data$iso2)) {
+  if (all(setdiff(get_eu_iso2s(), c("CY", "MT")) %in% corrected_data$iso2)) {
     eu_total <- corrected_data %>%
       group_by(date, source) %>%
       summarise(
@@ -250,7 +254,7 @@ get_weather_corrected_wind <- function(iso2s = "EU",
 get_weather_corrected_solar <- function(iso2s = "EU",
                                         pwr_generation,
                                         date_from = "2020-01-01",
-                                        diagnostics_folder = 'diagnostics/solar_correction',
+                                        diagnostics_folder = 'diagnostics/weather_correction/solar',
                                         use_cache = TRUE,
                                         use_local = FALSE) {
 
@@ -342,7 +346,11 @@ get_weather_corrected_solar <- function(iso2s = "EU",
       # Plot importance
       # randomForest::varImpPlot(model)
 
-      # Create averaged data with climatological weather
+      # Predict at ACTUAL weather (fitted values)
+      fitted_actual <- predict(model, model_data_country)
+
+      # Create averaged data with climatological weather (normal weather)
+      # Note: group_by %>% mutate preserves row order (no arrange!)
       model_data_averaged <- model_data_country %>%
         group_by(lubridate::yday(date)) %>%
         mutate_at(
@@ -352,19 +360,20 @@ get_weather_corrected_solar <- function(iso2s = "EU",
         ) %>%
         mutate(yday_weather = 0)
 
-      # Predict deweathered generation
-      model_data_country$value_pred <- predict(model, model_data_averaged)
+      # Predict at NORMAL weather
+      fitted_normal <- predict(model, model_data_averaged)
 
-      # Scale to have exact same generation figures
-      model_data_country$value_pred <- model_data_country$value_pred *
-        (sum(model_data_country$value_mwh) / sum(model_data_country$value_pred))
+      # Calculate weather-corrected values (preserves residuals!)
+      # Row order is preserved, so direct indexing is safe
+      model_data_country$value_mwh_corrected <-
+        model_data_country$value_mwh + (fitted_normal - fitted_actual)
 
       # Plot comparison with EMBER using helper function
       plot_corrected_vs_ember(model_data_country, country_iso2, "solar", diagnostics_folder)
 
       # Return deweathered data
       model_data_country %>%
-        select(date, iso2, value_mwh = value_pred) %>%
+        select(date, iso2, value_mwh = value_mwh_corrected) %>%
         mutate(
           source = "Solar"
         )
@@ -419,7 +428,7 @@ get_weather_corrected_solar <- function(iso2s = "EU",
 get_weather_corrected_hydro <- function(iso2s = "EU",
                                         pwr_generation,
                                         date_from = "2015-01-01",
-                                        diagnostics_folder = 'diagnostics/hydro_correction',
+                                        diagnostics_folder = 'diagnostics/weather_correction/hydro',
                                         use_cache = TRUE,
                                         use_local = FALSE) {
 
@@ -541,20 +550,33 @@ get_weather_corrected_hydro <- function(iso2s = "EU",
 #' @param diagnostics_folder Path to save diagnostic plot
 #'
 #' @return NULL (plot is saved to file)
-plot_corrected_vs_ember <- function(model_data, country_iso2, source_type, diagnostics_folder) {
+plot_corrected_vs_ember <- function(model_data, iso2, source_type, diagnostics_folder) {
 
   # Get EMBER capacity data once
   ember_capacity_raw <- tryCatch({
-    ember.get_installed_capacity(iso2s = country_iso2) %>%
+    ember.get_installed_capacity(iso2s = iso2) %>%
       filter(grepl(source_type, source, ignore.case = TRUE)) %>%
       filter(date >= min(model_data$date))
   }, error = function(e) {
-    warning(sprintf("Could not get EMBER data for %s: %s", country_iso2, e$message))
+    warning(sprintf("Could not get EMBER data for %s: %s", iso2, e$message))
+    tibble(date = as.Date(character()), value_mw = numeric())
+  })
+
+  entsoe_capacity_raw <- tryCatch({
+    entsoe.get_installed_capacity(iso2s = iso2, date_from = min(model_data$date)) %>%
+      filter(grepl(source_type, source, ignore.case = TRUE))
+  }, error = function(e) {
+    warning(sprintf("Could not get ENTSOE data for %s: %s", iso2, e$message))
     tibble(date = as.Date(character()), value_mw = numeric())
   })
 
   # Aggregate to yearly
   ember_capacity_yearly <- ember_capacity_raw %>%
+    mutate(year = lubridate::year(date)) %>%
+    group_by(year) %>%
+    summarise(capacity_mw = mean(value_mw, na.rm = TRUE), .groups = "drop")
+
+  entsoe_capacity_yearly <- entsoe_capacity_raw %>%
     mutate(year = lubridate::year(date)) %>%
     group_by(year) %>%
     summarise(capacity_mw = mean(value_mw, na.rm = TRUE), .groups = "drop")
@@ -565,16 +587,28 @@ plot_corrected_vs_ember <- function(model_data, country_iso2, source_type, diagn
     group_by(year_month) %>%
     summarise(capacity_mw = mean(value_mw, na.rm = TRUE), .groups = "drop")
 
+  entsoe_capacity_monthly <- entsoe_capacity_raw %>%
+    mutate(year_month = lubridate::floor_date(date, "month")) %>%
+    group_by(year_month) %>%
+    summarise(capacity_mw = mean(value_mw, na.rm = TRUE), .groups = "drop")
+
   # Prepare plot data for yearly comparison
   plot_data_yearly <- bind_rows(
     model_data %>%
       group_by(year) %>%
-      summarise(value = mean(value_pred, na.rm = TRUE), .groups = "drop") %>%
-      mutate(source = "Corrected generation"),
+      summarise(value = mean(value_mwh_corrected, na.rm = TRUE), .groups = "drop") %>%
+      mutate(source = "Weather-corrected generation"),
+    model_data %>%
+      group_by(year) %>%
+      summarise(value = mean(value_mwh, na.rm = TRUE), .groups = "drop") %>%
+      mutate(source = "Actual generation"),
     ember_capacity_yearly %>%
       select(year, value = capacity_mw) %>%
-      mutate(source = "Ember capacity-based estimate")
-  ) %>%
+      mutate(source = "Capacity (EMBER)"),
+    entsoe_capacity_yearly %>%
+      select(year, value = capacity_mw) %>%
+      mutate(source = "Capacity (ENTSOE)")
+  ) %>% 
     group_by(source) %>%
     mutate(value = if(n() > 0 && !all(is.na(value))) value / value[year == min(year)] * 100 else NA_real_) %>%
     ungroup() %>%
@@ -585,11 +619,18 @@ plot_corrected_vs_ember <- function(model_data, country_iso2, source_type, diagn
   plot_data_monthly <- bind_rows(
     model_data %>%
       group_by(year_month) %>%
-      summarise(value = mean(value_pred, na.rm = TRUE), .groups = "drop") %>%
-      mutate(source = "Corrected generation"),
+      summarise(value = mean(value_mwh_corrected, na.rm = TRUE), .groups = "drop") %>%
+      mutate(source = "Weather-corrected generation"),
+    model_data %>%
+      group_by(year_month) %>%
+      summarise(value = mean(value_mwh, na.rm = TRUE), .groups = "drop") %>%
+      mutate(source = "Actual generation"),
     ember_capacity_monthly %>%
       select(year_month, value = capacity_mw) %>%
-      mutate(source = "Ember capacity-based estimate")
+      mutate(source = "Capacity (EMBER)"),
+    entsoe_capacity_monthly %>%
+      select(year_month, value = capacity_mw) %>%
+      mutate(source = "Capacity (ENTSOE)")
   ) %>%
     group_by(source) %>%
     mutate(value = if(n() > 0 && !all(is.na(value))) value / value[year_month == min(year_month)] * 100 else NA_real_) %>%
@@ -597,25 +638,37 @@ plot_corrected_vs_ember <- function(model_data, country_iso2, source_type, diagn
     mutate(time_scale = "Monthly",
            date = year_month)
 
+  colors <- c(
+    "Actual generation" = rcrea::pal_crea[["Light.gray"]],
+    "Weather-corrected generation" = rcrea::pal_crea[["Dark.blue"]],
+    "Capacity (EMBER)" = rcrea::pal_crea[["Green"]],
+    "Capacity (ENTSOE)" = rcrea::pal_crea[["Orange"]]
+  )
+
   # Combine and plot both
   plt_vs_ember <- bind_rows(plot_data_yearly, plot_data_monthly) %>%
-    ggplot(aes(date, value, col = source)) +
+    ggplot(aes(date, value, col = factor(source, levels = names(colors)))) +
     geom_line(linewidth = 1) +
-    geom_point(size = 1.5) +
+    geom_point(size = 1) +
     facet_wrap(~time_scale, scales = "free_x", ncol = 1) +
     labs(
-      title = paste("Weather-corrected", source_type, "generation vs Ember estimates -", country_iso2),
+      title = paste("Weather-corrected", source_type, "generation vs Ember estimates -", iso2),
       y = "Index 100 (base period)",
       x = "",
-      col = "Source"
+      col = NULL
     ) +
+    scale_color_manual(values = colors) +
     theme_crea_new() +
     scale_x_date(date_breaks = "1 year", date_minor_breaks = "6 months", date_labels = "%Y") +
     rcrea::scale_y_crea_zero()
 
+  dir.create(diagnostics_folder, showWarnings = FALSE, recursive = TRUE)
   quicksave(
-    file.path(diagnostics_folder, paste0(source_type, "_corrected_vs_ember_", country_iso2, ".png")),
+    file.path(diagnostics_folder, paste0(source_type, "_corrected_vs_ember_", iso2, ".png")),
     plot = plt_vs_ember,
-    preview = FALSE
+    preview = FALSE,
+    width = 12,
+    height = 8,
+    logo = FALSE
   )
 }

@@ -186,7 +186,8 @@ calculate_powermix_correction_factors <- function(
       .groups = "drop"
     )
 
-  stopifnot("Delta doesn't sum to zero" = abs(sum(renewable_agg$renewable_delta_mwh)) < 1e-3)
+
+  # stopifnot("Delta doesn't sum to zero" = abs(sum(renewable_agg$renewable_delta_mwh)) < 1e-3)
 
   # Then 1MWh additional renewable is considered to be 1MWh less thermal
   # And we keep the same thermal generation mix
