@@ -19,9 +19,9 @@
 ##
 ## ---------------------------
 
-get_gas_demand <- function(diagnostics_folder='diagnostics/gas_demand', verbose=F){
+get_gas_demand <- function(diagnostics_folder='diagnostics/gas_demand', verbose=F, use_cache=FALSE, refresh_cache=FALSE){
 
-  years <- seq(2018, lubridate::year(lubridate::today()))
+  years <- seq(2015, lubridate::year(lubridate::today()))
 
   create_dir(diagnostics_folder)
 
@@ -31,7 +31,9 @@ get_gas_demand <- function(diagnostics_folder='diagnostics/gas_demand', verbose=
                                      date_to=glue("{max(years)}-12-31}"),
                                      type='consumption,distribution,storage,crossborder,production',
                                      split_by='year',
-                                     verbose=verbose)
+                                     verbose=verbose,
+                                     use_cache=use_cache,
+                                     refresh_cache=refresh_cache)
 
   # Estimate with two different methods
   message('Getting gas demand from Consumption + Distribution ENTSOG points')
