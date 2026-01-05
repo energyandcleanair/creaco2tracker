@@ -259,5 +259,5 @@ corrected = actual_generation × ratio
 **Key Assumption**: At this stage, we consider first order only and ignore interaction i.e. the fact that reduced demand would have led to a different electricity mix.
 
 **Potential improvements**: account for potential interaction between demand change and electricity mix.
----
+
 
