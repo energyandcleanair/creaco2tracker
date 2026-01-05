@@ -487,8 +487,8 @@ get_weather_corrected_hydro <- function(iso2s = get_eu_iso2s(include_eu = FALSE)
     )) %>%
     ungroup()
 
-  # We don't have much more than 10 years of data, so we use a simple rolling average
-  message("Calculating 10-year rolling average capacity factors")
+  # We don't have much more than 10 years of data, so we use a simple average
+  message("Calculating average capacity factors")
 
   # Merge generation with capacity
   cf <- hydro_generation %>%
@@ -497,13 +497,10 @@ get_weather_corrected_hydro <- function(iso2s = get_eu_iso2s(include_eu = FALSE)
     left_join(capacity, by = c("iso2", "year")) %>%
     mutate(cf = value_mwh / (capacity_mw * 24)) %>%
     group_by(iso2) %>%
-    arrange(year) %>%
-    mutate(cf_10yr = zoo::rollmean(cf, k = 10, fill = NA, align = "right")) %>%
-    # Then fill backwards to fill missing values
-    fill(cf_10yr, .direction = "up") %>%
+    mutate(cf_avg = mean(cf, na.rm = TRUE)) %>%
     ungroup() %>%
     # Then derive a ratio to apply to generation time series
-    mutate(ratio = cf_10yr / cf) %>%
+    mutate(ratio = cf_avg / cf) %>%
     select(iso2, year, ratio)
 
   # Apply ratio to generation time series, by year
@@ -513,12 +510,6 @@ get_weather_corrected_hydro <- function(iso2s = get_eu_iso2s(include_eu = FALSE)
     mutate(
       value_mwh_actual = value_mwh,
       value_mwh_corrected = value_mwh * ratio
-    ) %>%
-    # Scale to preserve total generation per country (across all years)
-    group_by(iso2) %>%
-    mutate(
-      scaling_factor = sum(value_mwh_actual, na.rm = TRUE) / sum(value_mwh_corrected, na.rm = TRUE),
-      value_mwh_corrected = value_mwh_corrected * scaling_factor
     ) %>%
     ungroup() %>%
     select(date, iso2, value_mwh_actual, value_mwh_corrected) %>%
