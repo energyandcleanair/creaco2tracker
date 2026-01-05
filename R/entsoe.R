@@ -70,7 +70,7 @@ entsoe.get_power_generation <- function(date_from="2015-01-01", iso2s="EU", use_
 }
 
 
-entsoe.get_installed_capacity <- function(date_from="2015-01-01", iso2s="EU", use_cache=T, refresh_cache=!use_cache, use_local=F) {
+entsoe.get_installed_capacity <- function(date_from="2015-01-01", date_to=NULL, iso2s="EU", use_cache=T, refresh_cache=!use_cache, use_local=F) {
 
   if(all(iso2s=="EU")){
     iso2s <- get_eu_iso2s(include_eu = F)
@@ -79,6 +79,7 @@ entsoe.get_installed_capacity <- function(date_from="2015-01-01", iso2s="EU", us
   base_url <- ifelse(use_local, "http://localhost:8080", "https://api.energyandcleanair.org")
   capacity <- creahelpers::api.get(glue('{base_url}/power/installed_capacity'),
                                    date_from=date_from,
+                                   date_to=date_to,
                                    aggregate_by='country,source,date',
                                    country=paste(iso2s, collapse=','),
                                    data_source='entsoe',
