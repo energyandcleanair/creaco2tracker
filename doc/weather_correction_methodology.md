@@ -19,8 +19,8 @@ Weather corrections remove the impact of abnormal weather conditions on CO2 emis
 4. Apply to CO2 → Weather-corrected emissions
 ```
 
-**Core Formula**: `corrected = actual + (fitted_normal - fitted_actual)`
-This additive approach preserves residuals (unexplained variation) which contain real trends.
+**Core Formula**: `corrected = actual + (fitted_weather_corrected - fitted_actual)`
+The idea is to preserve residuals and only substract the estimated impact of weather.
 
 ---
 
@@ -203,6 +203,7 @@ corrected = actual + (fitted_normal - fitted_actual)
 ### 2.3 Hydro Correction
 
 **Model**: Capacity factor normalization, not really a weather-correction
+
 **Approach**: Average capacity factor over the 11 years since 2015
 
 **Steps**:
