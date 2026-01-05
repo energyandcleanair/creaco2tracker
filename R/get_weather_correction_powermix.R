@@ -52,6 +52,14 @@ get_weather_correction_powermix <- function(iso2s = "EU",
 
   message(sprintf("Calculating weather correction factors: %s", paste(iso2s, collapse = ", ")))
 
+  # Handle EU case - track the original request
+  user_requested_eu <- (length(iso2s) == 1 && "EU" == iso2s)
+
+  if (user_requested_eu) {
+    # For power generation, weather correction happens at country level, not EU level
+    iso2s <- get_eu_iso2s(include_eu = FALSE)
+  }
+
   # Get power generation once
   message("Getting power generation data...")
   pwr_generation <- entsoe.get_power_generation(
@@ -65,6 +73,7 @@ get_weather_correction_powermix <- function(iso2s = "EU",
   weather_corrected_renewables <- get_weather_corrected_renewables(
     iso2s = iso2s,
     date_from = date_from,
+    date_to = date_to,
     pwr_generation = pwr_generation,
     use_cache = use_cache
   )
@@ -78,7 +87,8 @@ get_weather_correction_powermix <- function(iso2s = "EU",
   message("Step 2/2: Calculating weather correction factors...")
   correction_factors <- calculate_powermix_correction_factors(
     weather_corrected_renewables = weather_corrected_renewables,
-    pwr_generation = pwr_generation
+    pwr_generation = pwr_generation,
+    add_eu = user_requested_eu
   )
 
   message(sprintf("Weather correction complete. Generated %d correction factors.", nrow(correction_factors)))
@@ -144,23 +154,24 @@ calculate_powermix_correction_factor <- function(thermal, renewable_delta) {
 #' Calculates weather correction factors based on thermal generation share
 #' in actual vs weather-corrected scenarios.
 #'
-#' @param renewable_generation Output from get_weather_corrected_renewable_generation
-#' @param generation_mix Output from get_total_generation_mix
-#' @param aggregation "yearly" or "ytd"
+#' @param weather_corrected_renewables Output from get_weather_corrected_renewables
+#' @param pwr_generation Power generation data from entsoe.get_power_generation
+#' @param add_eu Logical, if TRUE calculates EU-level correction factor using
+#'   thermal-weighted average (assumes user requested EU)
+#' @param diagnostics_folder Path to save diagnostic plots
 #' @return Tibble with weather correction factors
 #'
 #' @keywords internal
 calculate_powermix_correction_factors <- function(
   weather_corrected_renewables,
   pwr_generation,
+  add_eu = FALSE,
   diagnostics_folder = 'diagnostics/weather_correction') {
 
 
   # Aggregate renewable data by country, source, and year for diagnostics
   renewable_agg_by_source <- weather_corrected_renewables %>%
-    select(iso2, source, date, value_mwh_corrected = value_mwh) %>%
-    left_join(pwr_generation %>% select(iso2, source, date, value_mwh_actual = value_mwh),
-              by = c("iso2", "source", "date")) %>%
+    select(iso2, source, date, value_mwh_actual, value_mwh_corrected) %>%
     group_by(iso2, source, year = year(date)) %>%
     summarise(
       renewable_actual_mwh = sum(value_mwh_actual, na.rm = TRUE),
@@ -205,6 +216,7 @@ calculate_powermix_correction_factors <- function(
   }
 
   thermal_agg <- pwr_generation %>%
+    filter(iso2 %in% unique(weather_corrected_renewables$iso2)) %>%
     # Only keep dates that are in the weather_corrected_renewables
     filter(date %in% weather_corrected_renewables$date) %>%
     select(iso2, date, source, value_mwh) %>%
@@ -221,26 +233,42 @@ calculate_powermix_correction_factors <- function(
     mutate(sector = SECTOR_ELEC) %>%
     select(iso2, year, sector, emission_correction_factor, thermal)
 
-  # Add EU total as emission-weighted average of member states
+  # Add EU total if requested
   # Assumes no grid interconnectivity - each country's correction weighted by its thermal generation
-  eu_iso2s <- get_eu_iso2s(include_eu = FALSE)
+  if (add_eu) {
+    eu_iso2s <- get_eu_iso2s(include_eu = FALSE)
+    iso2s_with_correction <- correction_factors %>%
+      filter(!is.na(emission_correction_factor)) %>%
+      pull(iso2) %>%
+      unique()
 
-  if (all(setdiff(eu_iso2s, c("CY", "MT")) %in% correction_factors$iso2)) {
-    eu_correction <- correction_factors %>%
-      filter(iso2 %in% eu_iso2s) %>%
-      group_by(year, sector) %>%
-      summarise(
-        # Emission-weighted average: weight = thermal_i / sum(thermal)
-        emission_correction_factor = sum(emission_correction_factor * thermal) / sum(thermal),
-        .groups = "drop"
-      ) %>%
-      mutate(iso2 = "EU")
+    # Check if we have sufficient EU countries (excluding CY, MT which aren't in ENTSOE)
+    if (all(setdiff(eu_iso2s, c("CY", "MT")) %in% iso2s_with_correction)) {
 
-    correction_factors <- bind_rows(
-      correction_factors %>% select(-thermal),
-      eu_correction
-    )
+      # Calculate thermal-weighted EU average
+      eu_correction <- correction_factors %>%
+        filter(iso2 %in% eu_iso2s) %>%
+        group_by(year, sector) %>%
+        filter(!is.na(emission_correction_factor)) %>%
+        summarise(
+          # Emission-weighted average: weight = thermal_i / sum(thermal)
+          emission_correction_factor = sum(emission_correction_factor * thermal) / sum(thermal),
+          .groups = "drop"
+        ) %>%
+        mutate(iso2 = "EU")
+
+      # Add EU to correction_factors (without thermal column)
+      correction_factors <- bind_rows(
+        correction_factors %>% select(-thermal),
+        eu_correction
+      )
+    } else {
+      # Not enough EU countries
+      warning("Not enough EU countries to compute EU correction factor")
+      correction_factors <- correction_factors %>% select(-thermal)
+    }
   } else {
+    # Remove thermal column if not adding EU
     correction_factors <- correction_factors %>% select(-thermal)
   }
 
@@ -257,14 +285,16 @@ plot_weather_correction_factors <- function(correction_factors, diagnostics_fold
 
   plt <- ggplot(correction_factors, aes(x=year, y=iso2)) +
     geom_tile(aes(fill = emission_correction_factor) ) +
-    facet_wrap(~sector) +
-    scale_fill_gradient2(low = "red", mid = "white", high = "green", midpoint = 1) +
+    geom_text(aes(label = sprintf("%.2f", emission_correction_factor)), size = 2.5) +
+    facet_wrap(~sector_code_to_label(sector)) +
+    scale_fill_gradient2(low = "red", mid = "white", high = "green", midpoint = 1, na.value = "grey90") +
     labs(title = "Weather Correction Factors",
          x = "Year",
-         y = "Country") +
+         y = NULL,
+         fill = "Emission\nCorrection\nFactor") +
     theme_crea_new()
 
-  quicksave(file.path(diagnostics_folder, 'weather_correction_factors.png'),
+  quicksave(file.path(diagnostics_folder, 'powermix_correction_factors.png'),
             plot = plt, width = 10, height = 10, preview = FALSE, logo = FALSE)
 
   return(plt)
@@ -307,11 +337,12 @@ plot_renewable_correction_by_source <- function(renewable_agg_by_source, diagnos
       midpoint = 0,
       name = "Weather\nCorrection (%)",
       limits = c(-30, 30),
-      oob = scales::squish
+      oob = scales::squish,
+      na.value = "grey90"
     ) +
     labs(
       title = "Renewable Generation Weather Correction by Source",
-      subtitle = "Percentage change: weather-corrected vs actual generation",
+      subtitle = "Percentage change: weather-corrected generation vs actual generation",
       x = "Year",
       y = "Country"
     ) +
