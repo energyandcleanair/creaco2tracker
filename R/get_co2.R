@@ -7,7 +7,8 @@
 #' @param iso2s
 #' @param downscale_daily
 #' @param min_year
-#' @param ncv_source iea or ipcc
+#' @param ncv_source iea, iea_shared, ipcc
+#' @param fill_mode one of "missing", "overwrite", or "ratio". Default is "missing".
 #'
 #' @return
 #' @export
@@ -18,7 +19,8 @@ get_co2 <- function(diagnostics_folder='diagnostics',
                     use_cache=F,
                     iso2s = get_eu_iso2s(include_eu = T),
                     min_year = NULL,
-                    ncv_source = "iea"){
+                    ncv_source = "iea",
+                    fill_mode=c("missing", "overwrite", "ratio")){
 
   create_dir(diagnostics_folder)
 
@@ -59,7 +61,8 @@ get_co2 <- function(diagnostics_folder='diagnostics',
   co2 <- project_until_now(co2_unprojected,
                            pwr_generation=pwr_generation,
                            gas_demand=gas_demand,
-                           eurostat_indprod=eurostat_indprod)
+                           eurostat_indprod=eurostat_indprod,
+                           fill_mode=fill_mode)
 
 
   if(!is_null_or_empty(diagnostics_folder)){

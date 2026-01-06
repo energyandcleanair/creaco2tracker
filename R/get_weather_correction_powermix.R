@@ -53,7 +53,7 @@ get_weather_correction_powermix <- function(iso2s = "EU",
   message(sprintf("Calculating weather correction factors: %s", paste(iso2s, collapse = ", ")))
 
   # Handle EU case - track the original request
-  user_requested_eu <- (length(iso2s) == 1 && "EU" == iso2s)
+  user_requested_eu <- "EU" %in% iso2s
 
   if (user_requested_eu) {
     # For power generation, weather correction happens at country level, not EU level

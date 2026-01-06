@@ -98,7 +98,7 @@ get_eurostat_cons <- function(
       cons_yearly = cons_yearly %>% left_join(siecs),
       cons_monthly = cons_monthly %>% left_join(siecs),
       cons_combined = cons_combined %>% left_join(siecs),
-      detailed_iso2s = c("BE", "NL", "PT", "SK", "EU", "IE")
+      detailed_iso2s = c("BE", "NL", "PT", "SK", "EU", "IE", "DE")
     )
   }
 
