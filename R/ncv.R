@@ -265,11 +265,11 @@ add_ncv_iea_shared <- function(x, diagnostics_folder=NULL, use_cache=TRUE, ...){
 
   # Run comprehensive diagnostics if folder is provided
   if(!is_null_or_empty(diagnostics_folder)){
-    diagnose_ncv_data(conversion_filled2, x, diagnostics_folder)
+    diagnose_ncv_data(conversion_filled, x, diagnostics_folder)
   }
 
   # Add ncv
-  x_with_ncv <- add_ncv_to_data(x, conversion_filled2)
+  x_with_ncv <- add_ncv_to_data(x, conversion_filled)
 
   # Validate NCV completeness with detailed diagnostics
   validate_ncv_completeness(x_with_ncv)
