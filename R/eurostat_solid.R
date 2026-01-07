@@ -42,7 +42,7 @@ collect_solid <- function(use_cache = FALSE) {
     )
 }
 
-process_solid_monthly <- function(x) {
+process_solid_monthly <- function(x, pwr_generation) {
   # This one is a bit tricky: for certain months/regions,
   # EUROSTAT has gross inland deliveries data but no transformation/consumption data
   # We should make sure to filter out these months so that it's not considered months without coal
