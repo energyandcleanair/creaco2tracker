@@ -7,6 +7,8 @@
 #' @param iso2s Character vector of ISO2 country codes. Default is "EU".
 #' @param date_from Start date for analysis. Default is "2020-01-01".
 #' @param date_to End date for analysis. Default is today.
+#' @param demand_fuels Character vector of demand types to correct. Default c("electricity", "fossil_gas").
+#'   Valid values: "electricity", "fossil_gas"
 #' @param use_cache Whether to use cached data. Default is TRUE.
 #' @param diagnostics_folder Optional folder path for saving diagnostic plots.
 #'
@@ -29,28 +31,50 @@ get_weather_correction_demand <- function(
   iso2s = "EU",
   date_from = "2015-01-01",
   date_to = Sys.Date(),
+  demand_fuels = c("electricity", "fossil_gas"),
   use_cache = TRUE,
   diagnostics_folder = "diagnostics/weather_correction") {
 
-  # Get both electricity and gas correction factors
-  elec_factors <- get_weather_correction_demand_elec(
-    iso2s = iso2s,
-    date_from = date_from,
-    date_to = date_to,
-    use_cache = use_cache,
-    diagnostics_folder = diagnostics_folder
-  )
+  # Initialize list to collect correction factors
+  correction_factors_list <- list()
 
-  gas_factors <- get_weather_correction_demand_gas(
-    iso2s = iso2s,
-    date_from = date_from,
-    date_to = date_to,
-    use_cache = use_cache,
-    diagnostics_folder = diagnostics_folder
-  )
+  # Get electricity correction factors if requested
+  if ("electricity" %in% demand_fuels) {
+    elec_factors <- get_weather_correction_demand_elec(
+      iso2s = iso2s,
+      date_from = date_from,
+      date_to = date_to,
+      use_cache = use_cache,
+      diagnostics_folder = diagnostics_folder
+    )
+    correction_factors_list[["electricity"]] <- elec_factors
+  }
+
+  # Get gas correction factors if requested
+  if ("fossil_gas" %in% demand_fuels) {
+    gas_factors <- get_weather_correction_demand_gas(
+      iso2s = iso2s,
+      date_from = date_from,
+      date_to = date_to,
+      use_cache = use_cache,
+      diagnostics_folder = diagnostics_folder
+    )
+    correction_factors_list[["fossil_gas"]] <- gas_factors
+  }
 
   # Combine results
-  correction_factors <- bind_rows(elec_factors, gas_factors)
+  if (length(correction_factors_list) > 0) {
+    correction_factors <- bind_rows(correction_factors_list)
+  } else {
+    # Return empty tibble with expected structure if no fuels requested
+    correction_factors <- tibble(
+      iso2 = character(),
+      date = as.Date(character()),
+      fuel = character(),
+      sector = character(),
+      correction_factor = numeric()
+    )
+  }
 
   # Diagnostic plots
   if (!is.null(diagnostics_folder) && nrow(correction_factors) > 0) {
@@ -73,14 +97,15 @@ get_weather_correction_demand_elec <- function(iso2s = "EU",
                                                use_cache = TRUE,
                                                diagnostics_folder = NULL) {
 
-  # Only support EU for now
-  stopifnot("Only EU is supported for electricity demand correction" = all(iso2s == "EU"))
-
   # Get power generation data
   pwr <- entsoe.get_power_generation(date_from = date_from, use_cache = use_cache)
 
   # Get weather data (HDD and CDD)
-  weather_iso2s <- get_eu_iso2s(include_eu = F)
+  weather_iso2s <- if("EU" %in% iso2s){
+    get_eu_iso2s(include_eu = F)
+  }else{
+    iso2s
+  }
   weather_raw <- get_weather(variable = "HDD,CDD", region_id = weather_iso2s, use_cache = use_cache)
   weather <- fill_weather(weather_raw)
 
@@ -98,7 +123,7 @@ get_weather_correction_demand_elec <- function(iso2s = "EU",
 
     # Check if we have sufficient data
     if (nrow(country_pwr) < 100) {
-      warning(glue("Insufficient power data for {country}, returning factor=1.0"))
+      warning(glue("Insufficient power data for {iso2}, returning factor=1.0"))
       return(tibble(
         iso2 = iso2,
         date = seq(as.Date(date_from), as.Date(date_to), by = "day"),
@@ -199,6 +224,12 @@ get_weather_correction_demand_gas <- function(iso2s = "EU",
   stopifnot("demand correction at country level is not supported yet" = all(iso2s == "EU"))
 
 
+
+  # NEW APPROACH: We use daily gas demand
+  gas_demand <- download_gas_demand(iso2 = iso2s)
+
+
+  # OLD APPROACH: We used gas-others derived from our previous co2 computations
   # co2 <- download_co2()
   #
   # # Extract gas demand (excluding power sector)
@@ -218,7 +249,7 @@ get_weather_correction_demand_gas <- function(iso2s = "EU",
   #   pull(sector)
   # }
 
-  gas_demand <- download_gas_demand(iso2 = "EU")
+
 
   # Get power generation data
   pwr_gas <- entsoe.get_power_generation(date_from = date_from, use_cache = use_cache) %>%
@@ -227,7 +258,11 @@ get_weather_correction_demand_gas <- function(iso2s = "EU",
   non_power_sectors <- SECTOR_OTHERS
 
   # Get weather data (HDD only for gas)
-  weather_iso2s <- get_eu_iso2s(include_eu = F)
+  weather_iso2s <- if("EU" %in% iso2s){
+    get_eu_iso2s(include_eu = F)
+  }else{
+    iso2s
+  }
 
   weather_raw <- get_weather(variable = "HDD", region_id = weather_iso2s, use_cache = use_cache)
   weather <- fill_weather(weather_raw)
@@ -275,27 +310,14 @@ get_weather_correction_demand_gas <- function(iso2s = "EU",
         by="date"
       )
 
-    # Gas demand derived from CO2 is monthly data before certain dates and daily after that
-    # The date changes by country, and is based on when ENTSOG starts matching EUROSTAT data
-    # To reduce biases, we use monthly data for the training
-    # But keep daily records for convenience purposes
-    # Also, because we average monthly, we don't use wday anymore
-    # model_data <- model_data %>%
-    #   group_by(iso2, date_month = floor_date(date, "month")) %>%
-    #   mutate_at(c("value", formula_terms), mean, na.rm = TRUE) %>%
-    #   ungroup() %>%
-    #   select(-date_month)
-
     # Check for sufficient merged data
     if (nrow(model_data) < 100) {
       warning(glue("Insufficient merged data for {iso2}, returning factor=1.0"))
       return(tibble(
         iso2 = iso2,
         date = seq(as.Date(date_from), as.Date(date_to), by = "day"),
-        fuel = "fossil_gas",
-        correction_factor = 1.0,
-        hdd = NA_real_,
-        cdd = NA_real_
+        fuel = FUEL_GAS,
+        correction_factor = 1.0
       ) %>%
         tidyr::crossing(sector = non_power_sectors))
     }
