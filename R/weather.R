@@ -171,8 +171,8 @@ diagnose_weather <- function(weather,
   # 1. Running average
   #additional plots
   running_plot_data <- weather %>%
-    filter(year(date) >= 2018, region_id=='EU') %>%
-    group_by(variable) %>%
+    filter(year(date) >= 2018) %>%
+    group_by(region_id, variable) %>%
     mutate(plotdate = date %>% 'year<-'(2000),
            across(value, zoo::rollapplyr, FUN=mean, width=30, fill=NA, na.rm=T))
 
@@ -181,7 +181,7 @@ diagnose_weather <- function(weather,
     mutate(year=as.factor(year(date)),
            variable_name=ifelse(variable=='cdd', 'cooling', 'heating')) %>%
     ggplot(aes(plotdate, value, alpha=factor(year(date)), col=variable_name)) +
-    facet_wrap(~variable_name, scales='free_y', ncol=1) +
+    facet_grid(region_id~variable_name, scales='free_y') +
     geom_line(size=1) +
     labs(title='EU average cooling and heating needs',
          subtitle='30-day running average. Population-weighted average for EU-27',
@@ -194,7 +194,7 @@ diagnose_weather <- function(weather,
     ) +
     scale_x_date(date_labels = '%b', expand=expansion(mult=.01)) +
     rcrea::scale_y_crea_zero() +
-    guides(alpha=guide_legend(title=NULL, title.position = 'right', ncol=1))
+    guides(alpha=guide_legend(title=NULL, title.position = 'right'))
 
   if (!is.null(diagnostics_folder)) {
     quicksave(file.path(diagnostics_folder, 'weather_running_30day.png'),
@@ -212,7 +212,7 @@ diagnose_weather <- function(weather,
       geom_tile(data = ~ subset(., variable=='cdd'), aes(cdd=value)) +
       geom_tile(data = ~ subset(., variable=='hdd'), aes(hdd=value)) +
       scale_x_date(date_labels = '%b', expand = expansion(mult = .01)) +
-      facet_wrap(~toupper(variable), scales = 'free', ncol = 1) +
+      facet_grid(region_id~toupper(variable), scales = 'free') +
       ggh4x::scale_fill_multi(
         aesthetics = c('hdd', 'cdd'),
         name = list("HDD", "CDD"),
