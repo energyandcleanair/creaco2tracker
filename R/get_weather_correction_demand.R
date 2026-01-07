@@ -25,11 +25,12 @@
 #' The correction factor represents: corrected_demand / actual_demand
 #'
 #' @export
-get_weather_correction_demand <- function(iso2s = "EU",
-                                          date_from = "2015-01-01",
-                                          date_to = Sys.Date(),
-                                          use_cache = TRUE,
-                                          diagnostics_folder = "diagnostics/weather_correction") {
+get_weather_correction_demand <- function(
+  iso2s = "EU",
+  date_from = "2015-01-01",
+  date_to = Sys.Date(),
+  use_cache = TRUE,
+  diagnostics_folder = "diagnostics/weather_correction") {
 
   # Get both electricity and gas correction factors
   elec_factors <- get_weather_correction_demand_elec(
@@ -56,7 +57,7 @@ get_weather_correction_demand <- function(iso2s = "EU",
     create_dir(diagnostics_folder)
     plot_demand_correction(correction_factors, diagnostics_folder)
   }
- 
+
   return(correction_factors)
 }
 
@@ -67,7 +68,7 @@ get_weather_correction_demand <- function(iso2s = "EU",
 #' @return Tibble with electricity demand correction factors
 #' @keywords internal
 get_weather_correction_demand_elec <- function(iso2s = "EU",
-                                               date_from = "2020-01-01",
+                                               date_from = "2015-01-01",
                                                date_to = Sys.Date(),
                                                use_cache = TRUE,
                                                diagnostics_folder = NULL) {
@@ -79,7 +80,8 @@ get_weather_correction_demand_elec <- function(iso2s = "EU",
   pwr <- entsoe.get_power_generation(date_from = date_from, use_cache = use_cache)
 
   # Get weather data (HDD and CDD)
-  weather_raw <- get_weather(variable = "HDD,CDD", region_id = iso2s)
+  weather_iso2s <- get_eu_iso2s(include_eu = F)
+  weather_raw <- get_weather(variable = "HDD,CDD", region_id = weather_iso2s, use_cache = use_cache)
   weather <- fill_weather(weather_raw)
 
   # Filter to requested date range
@@ -106,17 +108,27 @@ get_weather_correction_demand_elec <- function(iso2s = "EU",
     }
 
     # Get country-specific weather
-    country_weather <- weather %>%
-      filter(region_iso2 == iso2) %>%
-      select(date, variable, value) %>%
-      spread(variable, value)
+    country_weather <- if(iso2 == "EU"){
+      weather %>%
+        mutate(variable_iso2 = paste0(variable, "_", region_iso2)) %>%
+        select(date, variable_iso2, value) %>%
+        spread(variable_iso2, value)
+    }else{
+      weather %>%
+        filter(region_iso2 == iso2) %>%
+        select(date, variable, value) %>%
+        spread(variable, value)
+    }
+
+    formula_terms <- grep("^hdd|^cdd", names(country_weather), value = TRUE)
 
     # Merge power and weather data
     model_data <- country_pwr %>%
       left_join(country_weather, by = "date") %>%
-      filter(!is.na(hdd), !is.na(cdd), !is.na(value_mw)) %>%
+      filter_all(all_vars(!is.na(.))) %>%
       mutate(wday = lubridate::wday(date),
-             yday = lubridate::yday(date))
+             yday = lubridate::yday(date),
+             year_c = lubridate::year(date))
 
     # Check for sufficient merged data
     if (nrow(model_data) < 100) {
@@ -129,8 +141,12 @@ get_weather_correction_demand_elec <- function(iso2s = "EU",
       ))
     }
 
-    # Fit regression model: demand ~ HDD + CDD + day-of-week
-    model <- lm(value_mw ~ hdd + cdd + as.factor(wday), data = model_data)
+    # Fit regression model: demand ~ HDD + CDD + day-of-week + HDD:year + CDD:year
+    formula <- as.formula(paste("value_mw ~", paste(formula_terms, collapse = " + "),
+                                " + ",
+                                paste(paste0(formula_terms, ":year_c"), collapse = " + "),
+                                "+ as.factor(wday)"))
+    model <- lm(formula, data = model_data)
 
     # Show model summary
     # summary(model)
@@ -141,8 +157,7 @@ get_weather_correction_demand_elec <- function(iso2s = "EU",
     # Create weather-averaged data
     model_data_averaged <- model_data %>%
       group_by(yday) %>%
-      mutate(hdd = mean(hdd, na.rm = TRUE),
-             cdd = mean(cdd, na.rm = TRUE)) %>%
+      mutate_at(formula_terms, mean, na.rm = TRUE) %>%
       ungroup()
 
     # Predict at NORMAL weather (weather-averaged)
@@ -183,36 +198,44 @@ get_weather_correction_demand_gas <- function(iso2s = "EU",
   # Expand EU to member countries
   stopifnot("demand correction at country level is not supported yet" = all(iso2s == "EU"))
 
-  # Get CO2 data for gas demand (outside power sector)
-  co2 <- if (use_cache) {
-    download_co2()
-  } else {
-    get_co2(diagnostics_folder = diagnostics_folder, downscale_daily = TRUE)
-  }
 
-  # Extract gas demand (excluding power sector)
-  gas_demand <- co2 %>%
-    filter(fuel == FUEL_GAS,
-           !sector %in% c(SECTOR_ELEC, SECTOR_ALL)) %>%
-    group_by(iso2, date) %>%
-    summarise(value = sum(value, na.rm = TRUE), .groups = "drop") %>%
-    select(iso2, date, value) %>%
-    filter(date >= as.Date(date_from))
+  # co2 <- download_co2()
+  #
+  # # Extract gas demand (excluding power sector)
+  # gas_demand <- co2 %>%
+  #   filter(fuel == FUEL_GAS,
+  #          !sector %in% c(SECTOR_ELEC, SECTOR_ALL)) %>%
+  #   group_by(iso2, date) %>%
+  #   summarise(value = sum(value, na.rm = TRUE), .groups = "drop") %>%
+  #   select(iso2, date, value) %>%
+  #   filter(date >= as.Date(date_from))
+  #
+  # non_power_sectors <- co2 %>%
+  #   filter(
+  #     fuel == FUEL_GAS,
+  #     !sector %in% c(SECTOR_ELEC, SECTOR_ALL)) %>%
+  #   distinct(sector) %>%
+  #   pull(sector)
+  # }
 
-  non_power_sectors <- co2 %>%
-    filter(
-      fuel == FUEL_GAS,
-      !sector %in% c(SECTOR_ELEC, SECTOR_ALL)) %>%
-    distinct(sector) %>%
-    pull(sector)
-  
+  gas_demand <- download_gas_demand(iso2 = "EU")
+
+  # Get power generation data
+  pwr_gas <- entsoe.get_power_generation(date_from = date_from, use_cache = use_cache) %>%
+    filter(source=="Fossil Gas")
+
+  non_power_sectors <- SECTOR_OTHERS
+
   # Get weather data (HDD only for gas)
-  weather_raw <- get_weather(variable = "HDD", region_id = iso2s, use_cache = use_cache)
+  weather_iso2s <- get_eu_iso2s(include_eu = F)
+
+  weather_raw <- get_weather(variable = "HDD", region_id = weather_iso2s, use_cache = use_cache)
   weather <- fill_weather(weather_raw)
 
   # Filter to requested date range
   weather <- weather %>%
     filter(date >= as.Date(date_from), date <= as.Date(date_to))
+
 
   # Process each country separately
   correction_factors <- pblapply(iso2s, function(iso2) {
@@ -221,30 +244,47 @@ get_weather_correction_demand_gas <- function(iso2s = "EU",
     country_gas <- gas_demand %>%
       filter(iso2 == !!iso2) # date >= as.Date("2021-01-01")
 
+    country_pwr_gas <- pwr_gas %>%
+      filter(iso2 == !!iso2)
 
-    # Get country-specific weather
-    country_weather <- weather %>%
-      filter(region_id == !!iso2) %>%
-      select(date, variable, value) %>%
-      spread(variable, value)
+    # If this is EU, we take HDD from all countries separately
+    country_weather <- if(iso2 == "EU"){
+       weather %>%
+        mutate(variable_iso2 = paste0(variable, "_", region_iso2)) %>%
+        select(date, variable_iso2, value) %>%
+        spread(variable_iso2, value)
+    }else{
+      weather %>%
+        filter(region_iso2 == iso2) %>%
+        select(date, variable, value) %>%
+        spread(variable, value)
+    }
+
+    formula_terms <- grep("^hdd", names(country_weather), value = TRUE)
 
     # Merge gas and weather data
     model_data <- country_gas %>%
       left_join(country_weather, by = "date") %>%
-      filter(!is.na(hdd), !is.na(value)) %>%
+      filter_all(all_vars(!is.na(.))) %>%
       mutate(wday = lubridate::wday(date),
              yday = lubridate::yday(date)
+      ) %>%
+      left_join(
+        pwr_gas %>%
+          select(date, value_mw),
+        by="date"
       )
 
     # Gas demand derived from CO2 is monthly data before certain dates and daily after that
     # The date changes by country, and is based on when ENTSOG starts matching EUROSTAT data
     # To reduce biases, we use monthly data for the training
     # But keep daily records for convenience purposes
-    model_data <- model_data %>%
-      group_by(iso2, date_month = floor_date(date, "month")) %>%
-      mutate_at(vars(value, hdd), mean, na.rm = TRUE) %>%
-      ungroup() %>%
-      select(-date_month)
+    # Also, because we average monthly, we don't use wday anymore
+    # model_data <- model_data %>%
+    #   group_by(iso2, date_month = floor_date(date, "month")) %>%
+    #   mutate_at(c("value", formula_terms), mean, na.rm = TRUE) %>%
+    #   ungroup() %>%
+    #   select(-date_month)
 
     # Check for sufficient merged data
     if (nrow(model_data) < 100) {
@@ -253,7 +293,6 @@ get_weather_correction_demand_gas <- function(iso2s = "EU",
         iso2 = iso2,
         date = seq(as.Date(date_from), as.Date(date_to), by = "day"),
         fuel = "fossil_gas",
-        sector = "except_power",
         correction_factor = 1.0,
         hdd = NA_real_,
         cdd = NA_real_
@@ -261,28 +300,32 @@ get_weather_correction_demand_gas <- function(iso2s = "EU",
         tidyr::crossing(sector = non_power_sectors))
     }
 
-    # Fit regression model: gas demand ~ HDD + day-of-week
-    model <- lm(value ~ hdd + as.factor(wday), data = model_data)
+    # Fit regression model: gas demand ~ HDD:country
+    # We don't introduce a year interaction because we only have nyears * 12 data points
+    # and already n_countries predictors
+    formula <- as.formula( paste("value ~ as.factor(wday) + value_mw + ", paste(formula_terms, collapse = " + ")))
+    model <- lm(formula, data = model_data %>% group_by(floor_date(date,"month")) %>% filter(date==min(date)))
 
     # Show model summary
-    # summary(model)
+    summary(model)
 
-    # Predict at ACTUAL weather (fitted values)
-    model_data$fitted_actual <- predict(model, model_data)
+
+    # Predict at ACTUAL weather (fitted values) but no electricity
+    model_data$fitted_actual <- predict(model, model_data %>% mutate(value_mw=0))
 
     # Create weather-averaged data (normal weather conditions)
     model_data_averaged <- model_data %>%
       group_by(iso2, yday) %>%
-      mutate(hdd = mean(hdd, na.rm = TRUE)) %>%
+      mutate_at(formula_terms, mean, na.rm = TRUE) %>%
       ungroup()
 
     # Predict at NORMAL weather (weather-averaged)
-    model_data_averaged$fitted_normal <- predict(model, model_data_averaged)
+    model_data_averaged$fitted_normal <- predict(model, model_data_averaged %>% mutate(value_mw=0))
 
     # Calculate correction factor: 1 + (fitted_normal - fitted_actual) / value
     model_data_averaged <- model_data_averaged %>%
       mutate(correction_factor = 1 + (fitted_normal - fitted_actual) / value)
-    
+
     # Return correction factors
     model_data_averaged %>%
       select(date, correction_factor) %>%
