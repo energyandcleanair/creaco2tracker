@@ -8,12 +8,14 @@ select_if_exists <- function(data, ...) {
 
 
 
-download_co2 <- function(date_from="2015-01-01", use_cache = F, refresh_cache = F, version=NULL, iso2s=NULL){
+download_co2 <- function(date_from="2015-01-01", use_cache = F, version=NULL, iso2s=NULL){
 
   creahelpers::api.get("api.energyandcleanair.org/emission/co2",
                        date_from=date_from,
-                       use_cache = use_cache,
-                       refresh_cache = refresh_cache,
+                       # The meaning of use_cache is different
+                       # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means weather or not to invalidate it
+                       use_cache = TRUE,
+                       refresh_cache = !use_cache,
                        cache_folder = "cache",
                        region = iso2s,
                        version = version) %>%
@@ -43,8 +45,10 @@ download_gas_demand <- function(iso2=NULL,
 
   creahelpers::api.get("api.energyandcleanair.org/energy/demand",
                        params=params,
-                       use_cache = use_cache,
-                       refresh_cache = refresh_cache,
+                       # The meaning of use_cache is different
+                       # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means weather or not to invalidate it
+                       use_cache = TRUE,
+                       refresh_cache = !use_cache,
                        cache_folder = "cache") %>%
     select_if_exists(region_id, date, fuel, sector, unit, frequency, value) %>%
     rename(iso2=region_id)
@@ -55,8 +59,7 @@ download_gas_demand <- function(iso2=NULL,
 download_corrected_demand <- function(region_id=NULL,
                                       sector='total',
                                       date_from="2015-01-01",
-                                      use_cache = F,
-                                      refresh_cache = F){
+                                      use_cache = F){
 
   params <- list(
     fuel='electricity_temperature_corrected,fossil_gas_temperature_corrected',
@@ -71,8 +74,10 @@ download_corrected_demand <- function(region_id=NULL,
 
   creahelpers::api.get("api.energyandcleanair.org/energy/demand",
                        params=params,
-                       use_cache = use_cache,
-                       refresh_cache = refresh_cache,
+                       # The meaning of use_cache is different
+                       # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means weather or not to invalidate it
+                       use_cache = TRUE,
+                       refresh_cache = !use_cache,
                        cache_folder = "cache") %>%
     select_if_exists(region_id, date, fuel, sector, unit, frequency, value)
 }

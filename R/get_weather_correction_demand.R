@@ -119,7 +119,7 @@ get_weather_correction_demand_elec <- function(iso2s = "EU",
     # Get country-specific power generation (Total)
     country_pwr <- pwr %>%
       filter(iso2 == !!iso2, source == 'Total') %>%
-      select(date, value_mw)
+      select(date, value_mwh)
 
     # Check if we have sufficient data
     if (nrow(country_pwr) < 100) {
@@ -167,14 +167,15 @@ get_weather_correction_demand_elec <- function(iso2s = "EU",
     }
 
     # Fit regression model: demand ~ HDD + CDD + day-of-week + HDD:year + CDD:year
-    formula <- as.formula(paste("value_mw ~", paste(formula_terms, collapse = " + "),
+    formula <- as.formula(paste("value_mwh ~", paste(formula_terms, collapse = " + "),
                                 " + ",
                                 paste(paste0(formula_terms, ":year_c"), collapse = " + "),
                                 "+ as.factor(wday)"))
     model <- lm(formula, data = model_data)
 
     # Show model summary
-    # summary(model)
+    summary_file <- file.path(diagnostics_folder, paste0("demand_correction_elec_summary_", iso2, ".txt"))
+    writeLines(capture.output(summary(model)), summary_file)
 
     # Predict at ACTUAL weather (fitted values)
     model_data$fitted_actual <- predict(model, model_data)
@@ -190,14 +191,18 @@ get_weather_correction_demand_elec <- function(iso2s = "EU",
 
     # Calculate correction factor: 1 + (fitted_normal - fitted_actual) / value
     model_data_averaged <- model_data_averaged %>%
-      mutate(correction_factor = 1 + (fitted_normal - fitted_actual) / value_mw)
+      mutate(correction_factor = 1 + (fitted_normal - fitted_actual) / value_mwh,
+             value_mwh_corrected = value_mwh * correction_factor)
+
 
     # Return correction factors
     model_data_averaged %>%
-      select(date, correction_factor) %>%
+      select(date, correction_factor, value_actual=value_mwh, value_weather_corrected=value_mwh_corrected) %>%
+      mutate(unit="MWh") %>%
       tidyr::complete(
         date = seq(as.Date(date_from), as.Date(date_to), by = "day"),
         fill = list(correction_factor = 1.0)) %>%
+      mutate(value_weather_corrected = coalesce(value_weather_corrected, value_actual)) %>%
       tidyr::crossing(sector = SECTOR_ELEC,
                       fuel = FUEL_TOTAL,
                       iso2 = iso2)
@@ -226,7 +231,7 @@ get_weather_correction_demand_gas <- function(iso2s = "EU",
 
 
   # NEW APPROACH: We use daily gas demand
-  gas_demand <- download_gas_demand(iso2 = iso2s)
+  gas_demand <- download_gas_demand(iso2 = iso2s, use_cache=use_cache)
 
 
   # OLD APPROACH: We used gas-others derived from our previous co2 computations
@@ -254,8 +259,6 @@ get_weather_correction_demand_gas <- function(iso2s = "EU",
   # Get power generation data
   pwr_gas <- entsoe.get_power_generation(date_from = date_from, use_cache = use_cache) %>%
     filter(source=="Fossil Gas")
-
-  non_power_sectors <- SECTOR_OTHERS
 
   # Get weather data (HDD only for gas)
   weather_iso2s <- if("EU" %in% iso2s){
@@ -329,7 +332,9 @@ get_weather_correction_demand_gas <- function(iso2s = "EU",
     model <- lm(formula, data = model_data %>% group_by(floor_date(date,"month")) %>% filter(date==min(date)))
 
     # Show model summary
-    summary(model)
+    # summary(model)
+    summary_file <- file.path(diagnostics_folder, paste0("demand_correction_gas_summary_", iso2, ".txt"))
+    writeLines(capture.output(summary(model)), summary_file)
 
 
     # Predict at ACTUAL weather (fitted values) but no electricity
@@ -348,13 +353,14 @@ get_weather_correction_demand_gas <- function(iso2s = "EU",
     model_data_averaged <- model_data_averaged %>%
       mutate(correction_factor = 1 + (fitted_normal - fitted_actual) / value)
 
-    # Return correction factors
+    # Return correction factors and values
     model_data_averaged %>%
-      select(date, correction_factor) %>%
+      select(date, correction_factor, value_actual=value, unit) %>%
       tidyr::complete(
         date = seq(as.Date(date_from), as.Date(date_to), by = "day"),
         fill = list(correction_factor = 1.0)) %>%
-      tidyr::crossing(sector = non_power_sectors,
+      mutate(value_weather_corrected = value_actual * correction_factor) %>%
+      tidyr::crossing(sector = SECTOR_OTHERS,
                       iso2 = iso2,
                       fuel = FUEL_GAS)
   }) %>%

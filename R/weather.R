@@ -55,7 +55,6 @@ get_weather <- function(variable = "HDD,CDD",
                         date_to = NULL,
                         use_local = FALSE,
                         use_cache = TRUE,
-                        refresh_cache = !use_cache,
                         split_by = "year",
                         verbose = FALSE,
                         aggregate_by = NULL,
@@ -71,8 +70,10 @@ get_weather <- function(variable = "HDD,CDD",
     region_type = region_type,
     date_from = date_from,
     split_by = split_by,
-    use_cache = use_cache,
-    refresh_cache = refresh_cache,
+    # The meaning of use_cache is different
+    # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means weather or not to invalidate it
+    use_cache = TRUE,
+    refresh_cache = !use_cache,
     cache_folder = "cache",
     verbose = verbose
   )

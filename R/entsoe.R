@@ -1,4 +1,4 @@
-entsoe.get_power_generation <- function(date_from="2015-01-01", iso2s="EU", use_cache=T, refresh_cache=!use_cache, use_local=F) {
+entsoe.get_power_generation <- function(date_from="2015-01-01", iso2s="EU", use_cache=T, use_local=F) {
 
   if(all(iso2s=="EU")){
     iso2s <- get_eu_iso2s(include_eu = F)
@@ -10,8 +10,10 @@ entsoe.get_power_generation <- function(date_from="2015-01-01", iso2s="EU", use_
                               country=paste(iso2s, collapse=','),
                               data_source='entsoe',
                               split_by = 'year',
-                              use_cache = use_cache,
-                              refresh_cache = refresh_cache,
+                              # The meaning of use_cache is different
+                              # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means weather or not to invalidate it
+                              use_cache = TRUE,
+                              refresh_cache = !use_cache,
                               cache_folder = "cache",
                               verbose = T)
 
@@ -84,8 +86,10 @@ entsoe.get_installed_capacity <- function(date_from="2015-01-01", date_to=NULL, 
                                    country=paste(iso2s, collapse=','),
                                    data_source='entsoe',
                                    split_by = 'year',
-                                   use_cache = use_cache,
-                                   refresh_cache = refresh_cache,
+                                   # The meaning of use_cache is different
+                                   # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means weather or not to invalidate it
+                                   use_cache = TRUE,
+                                   refresh_cache = !use_cache,
                                    cache_folder = "cache",
                                    verbose = T)
 
