@@ -40,7 +40,9 @@ get_validation_data <- function(region="EU", source_name = NULL, ...) {
 
 load_gcb <- function(source_name, region, ...) {
 
-  filepath <- get_data_filepath("GCB2024v17_MtCO2_flat.csv")
+  # Downloaded from https://zenodo.org/records/17417124
+
+  filepath <- get_data_filepath("GCB2025v15_MtCO2_flat")
   raw <- read_csv(filepath)
   gcb <- raw %>%
     select(iso3=`ISO 3166-1 alpha-3`, Year, Total, Coal, Oil, Gas, Cement, Flaring, Other) %>%
@@ -51,7 +53,7 @@ load_gcb <- function(source_name, region, ...) {
     filter(fuel %in% c('Coal', 'Oil', 'Gas')) %>%
     mutate(iso2 = countrycode(iso3, "iso3c", "iso2c"),
       fuel=tolower(fuel),
-      source='GCB2024',
+      source='GCB2025',
       sector=SECTOR_ALL,
       unit='mt',
       # value = value * 44/12, #C to CO2
