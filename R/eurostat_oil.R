@@ -666,6 +666,7 @@ add_oil_transport <- function(monthly, yearly, plot_validation = F) {
 
 
 fill_oil_non_energy_use_yearly <- function(yearly) {
+
   # Austria, and maybe other countries have GD_PI but not GID_NE in yearly data.
   # We'll assume GID_NE=GD_PI for those
   yearly %>%

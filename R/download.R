@@ -30,12 +30,14 @@ download_co2 <- function(date_from="2015-01-01", use_cache = F, version=NULL, is
 download_gas_demand <- function(iso2=NULL,
                                 use_cache=F,
                                 refresh_cache=F,
-                                date_from="2015-01-01"){
+                                date_from="2015-01-01",
+                                date_to=NULL){
 
   params <- list(
     fuel='fossil_gas',
     data_source='crea',
     date_from=date_from,
+    date_to=date_to,
     format='csv',
     region_id=iso2
   )

@@ -7,6 +7,7 @@
 #' @param iso2s
 #' @param downscale_daily
 #' @param min_year
+#' @param date_to End date for filtering data (YYYY-MM-DD). If NULL, no upper date filter is applied.
 #' @param ncv_source iea, iea_shared, ipcc
 #' @param fill_mode one of "missing", "overwrite", or "ratio". Default is "missing".
 #'
@@ -19,14 +20,26 @@ get_co2 <- function(diagnostics_folder='diagnostics',
                     use_cache=F,
                     iso2s = get_eu_iso2s(include_eu = T),
                     min_year = NULL,
+                    date_to = NULL,
                     ncv_source = "iea",
-                    fill_mode=c("missing", "overwrite", "ratio")){
+                    fill_mode=c("missing", "overwrite", "ratio"),
+                    downscale_cut_latest_days = 3
+                    ){
 
   create_dir(diagnostics_folder)
 
+
+  # Add buffer to date_to if downscaling daily
+  if(downscale_daily & !is.null(date_to)){
+    date_to_cut <- as.Date(date_to) + downscale_cut_latest_days
+  } else {
+    date_to_cut <- date_to
+  }
+
+
   # Collect necessary data
-  gas_demand <- download_gas_demand(iso2 = NULL, use_cache = use_cache)
-  pwr_generation <- entsoe.get_power_generation(use_cache = use_cache)
+  gas_demand <- download_gas_demand(iso2 = NULL, use_cache = use_cache, date_to = date_to_cut)
+  pwr_generation <- entsoe.get_power_generation(use_cache = use_cache, date_to = date_to_cut)
 
   # Get fossil-fuel consumption based on Eurostat
   eurostat_cons <- get_eurostat_cons(
@@ -62,7 +75,8 @@ get_co2 <- function(diagnostics_folder='diagnostics',
                            pwr_generation=pwr_generation,
                            gas_demand=gas_demand,
                            eurostat_indprod=eurostat_indprod,
-                           fill_mode=fill_mode)
+                           fill_mode=fill_mode,
+                           date_to=date_to)
 
 
   if(!is_null_or_empty(diagnostics_folder)){
@@ -70,11 +84,10 @@ get_co2 <- function(diagnostics_folder='diagnostics',
       co2_unprojected = co2_unprojected,
       co2 = co2,
       pwr_generation = pwr_generation,
-      eurostat_cons = eurostat_cons %>% filter(time < "2025-01-01"),
+      eurostat_cons = eurostat_cons,
       diagnostics_folder = file.path(diagnostics_folder, 'eu_vs_countries')
       )
   }
-
 
   # Filter regions
   # Note: this need to be done after co2 estimates,
@@ -84,7 +97,10 @@ get_co2 <- function(diagnostics_folder='diagnostics',
 
   # Downscale to daily data
   if(downscale_daily){
-    co2 <- downscale_daily(co2 = co2, pwr_generation = pwr_generation, gas_demand = gas_demand)
+    co2 <- downscale_daily(co2 = co2,
+                           pwr_generation = pwr_generation,
+                           gas_demand = gas_demand,
+                           cut_latest_days = downscale_cut_latest_days)
   }
 
   # Resplit gas
