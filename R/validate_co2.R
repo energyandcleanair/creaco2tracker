@@ -11,7 +11,7 @@ validate_co2 <- function(co2,
 
   # Get validation data once
   validation_data <- get_validation_data(region=unique(co2$iso2))
-  valid_iso2s <- get_valid_countries(co2)
+  valid_iso2s <- get_valid_countries(co2, validation_data)
   latest_year <- max(lubridate::year(co2$date), na.rm = TRUE)
 
   # Run all validations with shared validation data
@@ -44,7 +44,8 @@ validate_co2_historical <- function(co2 = NULL,
                                     date_from = "1990-01-01",
                                     by_country = T,
                                     all_countries = T,
-                                    year_to = NULL
+                                    year_to = NULL,
+                                    exclude_international_aviation = TRUE
                                     ) {
 
 
@@ -58,6 +59,17 @@ validate_co2_historical <- function(co2 = NULL,
 
   if (is.null(year_to)) {
     year_to <- max(lubridate::year(co2$date), na.rm = TRUE)
+  }
+
+  if(exclude_international_aviation){
+    co2 <- co2 %>%
+      group_by(iso2, date, unit, estimate, region, version) %>%
+      mutate(value = case_when(
+        sector == SECTOR_ALL ~ value - value[sector == SECTOR_TRANSPORT_INTERNATIONAL_AVIATION ],
+        sector == SECTOR_TRANSPORT_INTERNATIONAL_AVIATION ~ 0,
+        TRUE ~ value
+      )) %>%
+      ungroup()
   }
 
   if(all_countries){
@@ -129,7 +141,7 @@ validate_co2_historical <- function(co2 = NULL,
               )
             }
           } +
-          labs(title=glue("CO2 emissions from fossil fuels"),
+          labs(title=glue("CO2 emissions from fossil fuels{if(exclude_international_aviation) ' (without international aviation)' else ''}"),
                subtitle="Comparison between CREA and Global Carbon Project estimates, in billion tonne CO2 per year",
                y=NULL,
                x=NULL,
@@ -137,7 +149,7 @@ validate_co2_historical <- function(co2 = NULL,
                linetype=NULL,
                alpha="Source",
                color="Source",
-               caption="Source: CREA analysis and Global Carbon Budget 2024 (Friedlingstein et al., 2024b, ESSD).")
+               caption="Source: CREA analysis and Global Carbon Budget 2025 (Friedlingstein et al., 2025, ESSD).")
       }
 
       plt <- plt_from_data(plot_data)
@@ -149,7 +161,7 @@ validate_co2_historical <- function(co2 = NULL,
                 logo = F)
 
       # Create a version for countries matching validation only (for the methodology doc)
-      valid_iso2s <- get_valid_countries(co2)
+      valid_iso2s <- get_valid_countries(co2, validation_data)
       plot_data <- plot_data %>%
         filter(iso2 %in% valid_iso2s)
 
@@ -485,6 +497,7 @@ validate_co2_timeseries <- function(co2, folder="diagnostics"){
     dir.create(folder, showWarnings = FALSE)
 
     iso2s <- unique(co2$iso2)
+    is_daily <- any(day(co2$date) != 1)
 
     lapply(iso2s, function(iso2){
       country <- countrycode::countrycode(iso2, "iso2c", "country.name", custom_match = c("EU"="European Union"))
@@ -493,8 +506,16 @@ validate_co2_timeseries <- function(co2, folder="diagnostics"){
         mutate(across(c(fuel, sector), tolower)) %>%
         group_by(sector, fuel, estimate) %>%
         arrange(date) %>%
-        mutate(value = zoo::rollapplyr(value, 30, mean, fill=NA),
-               year=as.factor(year(date)),
+        {
+          if(is_daily){
+            # Daily data: calculate rolling monthly average
+            mutate(., value = zoo::rollapplyr(value, 30, mean, fill=NA))
+          } else {
+            # Monthly data: aggregate to monthly sums
+            .
+          }
+        } %>%
+        mutate(year=as.factor(year(date)),
                plotdate=date %>% 'year<-'(2022)) %>%
         filter(year(date)>=2015) %>%
         select(plotdate, year, fuel, sector, estimate, value) %>%
@@ -527,7 +548,7 @@ validate_co2_timeseries <- function(co2, folder="diagnostics"){
           rcrea::scale_y_crea_zero() +
           theme(legend.position = "right") +
           labs(title=glue("{country} CO2 emissions"),
-               subtitle='Million tonne CO2 per day. 30-day moving average',
+               subtitle=paste0('Million tonne CO2 per day', if_else(is_daily, "30-day moving average","")),
                caption="Source: CREA analysis based on ENTSOG, ENTSOE, EUROSTAT and ASGI.",
                y=NULL,
                x=NULL,
