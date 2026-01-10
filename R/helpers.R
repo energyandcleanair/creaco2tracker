@@ -47,6 +47,46 @@ iso2_to_name <- function(x){
   countrycode(x, "iso2c", "country.name", custom_match = c("EU" = "EU"))
 }
 
+#' Exclude international aviation from CO2 data
+#'
+#' Removes international aviation emissions from sector totals by subtracting
+#' aviation values from SECTOR_ALL and setting aviation sector values to 0.
+#'
+#' @param co2 Data frame with CO2 emissions data containing columns:
+#'   iso2, date, unit, estimate, region, version, sector, value
+#'
+#' @return Data frame with international aviation excluded from totals
+#' @export
+exclude_international_aviation <- function(co2) {
+
+  # Validate required columns
+  required_cols <- c("iso2", "date", "unit", "estimate", "region", "version", "sector", "value")
+  missing_cols <- setdiff(required_cols, names(co2))
+  if (length(missing_cols) > 0) {
+    stop("Missing required columns: ", paste(missing_cols, collapse = ", "))
+  }
+
+  # Check if SECTOR_ALL exists in the data
+  if (!any(co2$sector == SECTOR_ALL)) {
+    stop("No SECTOR_ALL found in data. Cannot exclude international aviation from totals.")
+  }
+
+  # Check if SECTOR_TRANSPORT_INTERNATIONAL_AVIATION exists in the data
+  if (!any(co2$sector == SECTOR_TRANSPORT_INTERNATIONAL_AVIATION)) {
+    warning("No SECTOR_TRANSPORT_INTERNATIONAL_AVIATION found in data. Returning data unchanged.")
+    return(co2)
+  }
+
+  co2 %>%
+    group_by(iso2, date, unit, estimate, region, version) %>%
+    mutate(value = case_when(
+      sector == SECTOR_ALL ~ value - value[sector == SECTOR_TRANSPORT_INTERNATIONAL_AVIATION],
+      sector == SECTOR_TRANSPORT_INTERNATIONAL_AVIATION ~ 0,
+      TRUE ~ value
+    )) %>%
+    ungroup()
+}
+
 
 split_gas_to_elec_others <- function(co2) {
   # Quick return if no work needed

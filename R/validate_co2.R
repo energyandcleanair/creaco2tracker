@@ -62,14 +62,7 @@ validate_co2_historical <- function(co2 = NULL,
   }
 
   if(exclude_international_aviation){
-    co2 <- co2 %>%
-      group_by(iso2, date, unit, estimate, region, version) %>%
-      mutate(value = case_when(
-        sector == SECTOR_ALL ~ value - value[sector == SECTOR_TRANSPORT_INTERNATIONAL_AVIATION ],
-        sector == SECTOR_TRANSPORT_INTERNATIONAL_AVIATION ~ 0,
-        TRUE ~ value
-      )) %>%
-      ungroup()
+    co2 <- exclude_international_aviation(co2)
   }
 
   if(all_countries){
