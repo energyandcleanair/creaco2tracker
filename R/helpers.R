@@ -47,7 +47,7 @@ iso2_to_name <- function(x){
   countrycode(x, "iso2c", "country.name", custom_match = c("EU" = "EU"))
 }
 
-#' Exclude international aviation from CO2 data
+#' Remove international aviation from CO2 data
 #'
 #' Removes international aviation emissions from sector totals by subtracting
 #' aviation values from SECTOR_ALL and setting aviation sector values to 0.
@@ -57,7 +57,7 @@ iso2_to_name <- function(x){
 #'
 #' @return Data frame with international aviation excluded from totals
 #' @export
-exclude_international_aviation <- function(co2) {
+remove_international_aviation <- function(co2) {
 
   # Validate required columns
   required_cols <- c("iso2", "date", "unit", "estimate", "region", "version", "sector", "value")
@@ -324,4 +324,4 @@ fuel_label_to_code <- function(fuel_label){
   )
   if(any(is.na(code))) stop(glue("Unknown fuel label: {fuel_label}"))
   code
-} 
+}

@@ -62,7 +62,7 @@ validate_co2_historical <- function(co2 = NULL,
   }
 
   if(exclude_international_aviation){
-    co2 <- exclude_international_aviation(co2)
+    co2 <- remove_international_aviation(co2)
   }
 
   if(all_countries){
