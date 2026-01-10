@@ -149,14 +149,18 @@ collect_gas <- function(use_cache = FALSE) {
 #' @examples
 add_gas_non_energy <- function(cons_monthly_raw, cons_yearly_raw) {
 
+
+  #TODO Add diagnostic chart
   shares <- cons_yearly_raw %>%
     filter(time >= "1990-01-01") %>%
-    filter(siec_code == SIEC_NATURAL_GAS) %>%
-    filter(grepl("Terajoule", unit)) %>%
-    filter(nrg_bal %in% c(
-      "Inland consumption - observed",
-      "Final consumption - non-energy use"
-    )) %>%
+    filter(nrg_bal_code %in% c("IC_OBS", "FC_NE"),
+           siec_code == SIEC_NATURAL_GAS,
+           grepl("Terajoule", unit)) %>%
+    # Remove years with only NAs
+    # Important because last one could be 0
+    group_by(geo, time) %>%
+    filter(!all(is.na(values))) %>%
+    ungroup() %>%
     mutate(year = year(time)) %>%
     select(nrg_bal_code, siec, siec_code, geo, year, values) %>%
     tidyr::spread(nrg_bal_code, values) %>%
@@ -164,7 +168,7 @@ add_gas_non_energy <- function(cons_monthly_raw, cons_yearly_raw) {
     select(-c(FC_NE, IC_OBS))
 
   shares %>%
-    filter(geo=="Belgium") %>%
+    filter(geo=="Netherlands") %>%
     ggplot(aes(year, share_non_energy)) +
     geom_line()+
     rcrea::scale_y_crea_zero()
