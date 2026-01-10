@@ -8,7 +8,7 @@ get_validation_data <- function(region="EU", source_name = NULL, ...) {
     "UNFCCC" = load_climatewatch_csv,
     # "GCP" = load_climatewatch_csv,
     "PIK" = load_climatewatch_csv,
-    "Global Carbon Budget 2024" = load_gcb,
+    "Global Carbon Budget 2025" = load_gcb,
 
     # Diagnostic sources
     "Carbon Monitor" = load_carbonmonitor,
@@ -42,7 +42,7 @@ load_gcb <- function(source_name, region, ...) {
 
   # Downloaded from https://zenodo.org/records/17417124
 
-  filepath <- get_data_filepath("GCB2025v15_MtCO2_flat")
+  filepath <- get_data_filepath("GCB2025v15_MtCO2_flat.csv")
   raw <- read_csv(filepath)
   gcb <- raw %>%
     select(iso3=`ISO 3166-1 alpha-3`, Year, Total, Coal, Oil, Gas, Cement, Flaring, Other) %>%
