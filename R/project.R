@@ -10,11 +10,17 @@
 #' @export
 #'
 #' @examples
-project_until_now <- function(co2, pwr_generation, gas_demand, eurostat_indprod, fill_mode=c("missing", "overwrite", "ratio")){
+project_until_now <- function(
+  co2,
+  pwr_generation,
+  gas_demand,
+  eurostat_indprod,
+  fill_mode=c("missing", "overwrite", "ratio"),
+  date_to=NULL){
 
   fill_mode <- match.arg(fill_mode) # Takes the first one by default i.e. missing
 
-  dts_month <- seq.Date(min(co2$date), today() %>% 'day<-'(1), by='month')
+  dts_month <- seq.Date(min(co2$date), if(is.null(date_to)) today() %>% 'day<-'(1) else as.Date(date_to), by='month')
 
   co2 %>%
     split_gas_to_elec_all() %>%
