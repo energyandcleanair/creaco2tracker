@@ -94,20 +94,21 @@ get_weather_corrected_co2 <- function(co2,
       diagnostics_folder = diagnostics_folder
     )
 
+    result[["weather_correction_demand"]] <- wc_demand
+
     # Expand fuel total to all fuels
     fuels_total <- c(FUEL_COAL, FUEL_OIL, FUEL_GAS, FUEL_OIL)
-    wc_demand <- wc_demand %>%
+    wc_demand_w_fuels <- wc_demand %>%
       full_join(tibble(fuel = FUEL_TOTAL, fuels = fuels_total), by = "fuel", relationship = "many-to-many") %>%
       mutate(fuel = coalesce(fuels, fuel)) %>%
       select(-fuels)
 
-    result[["weather_correction_demand"]] <- wc_demand
 
-    if (nrow(wc_demand) > 0) {
+    if (nrow(wc_demand_w_fuels) > 0) {
       # Join on date, iso2, fuel, sector (demand is daily)
       result_co2 <- result_co2 %>%
         left_join(
-          wc_demand %>%
+          wc_demand_w_fuels %>%
             select(iso2, date, fuel, sector, correction_factor_demand = correction_factor),
           by = c("iso2", "date", "fuel", "sector")
         ) %>%
