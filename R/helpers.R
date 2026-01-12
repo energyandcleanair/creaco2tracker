@@ -52,15 +52,15 @@ iso2_to_name <- function(x){
 #' Removes international aviation emissions from sector totals by subtracting
 #' aviation values from SECTOR_ALL and setting aviation sector values to 0.
 #'
-#' @param co2 Data frame with CO2 emissions data containing columns:
-#'   iso2, date, unit, estimate, region, version, sector, value
+#' @param co2 Data frame with CO2 emissions data. Required columns:
+#'   iso2, date, unit, estimate, sector, value. Optional columns: region, version
 #'
 #' @return Data frame with international aviation excluded from totals
 #' @export
 remove_international_aviation <- function(co2) {
 
   # Validate required columns
-  required_cols <- c("iso2", "date", "unit", "estimate", "region", "version", "sector", "value")
+  required_cols <- c("iso2", "date", "unit", "estimate", "sector", "value")
   missing_cols <- setdiff(required_cols, names(co2))
   if (length(missing_cols) > 0) {
     stop("Missing required columns: ", paste(missing_cols, collapse = ", "))
@@ -77,8 +77,13 @@ remove_international_aviation <- function(co2) {
     return(co2)
   }
 
+  # Build grouping columns dynamically based on what's available
+  grouping_cols <- c("iso2", "date", "unit", "estimate")
+  optional_cols <- c("region", "version")
+  grouping_cols <- c(grouping_cols, intersect(optional_cols, names(co2)))
+
   co2 %>%
-    group_by(iso2, date, unit, estimate, region, version) %>%
+    group_by(across(all_of(grouping_cols))) %>%
     mutate(value = case_when(
       sector == SECTOR_ALL ~ value - value[sector == SECTOR_TRANSPORT_INTERNATIONAL_AVIATION],
       sector == SECTOR_TRANSPORT_INTERNATIONAL_AVIATION ~ 0,
