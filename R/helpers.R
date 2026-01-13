@@ -83,13 +83,20 @@ remove_international_aviation <- function(co2) {
   grouping_cols <- c(grouping_cols, intersect(optional_cols, names(co2)))
 
   co2 %>%
-    group_by(across(all_of(grouping_cols))) %>%
-    mutate(value = case_when(
-      sector == SECTOR_ALL ~ value - value[sector == SECTOR_TRANSPORT_INTERNATIONAL_AVIATION],
-      sector == SECTOR_TRANSPORT_INTERNATIONAL_AVIATION ~ 0,
-      TRUE ~ value
-    )) %>%
-    ungroup()
+    left_join(
+      co2 %>%
+        filter(sector == SECTOR_TRANSPORT_INTERNATIONAL_AVIATION) %>%
+        select(all_of(grouping_cols), aviation_value = value),
+      by = grouping_cols
+    ) %>%
+    mutate(
+      value = case_when(
+        sector == SECTOR_ALL ~ value - coalesce(aviation_value, 0),
+        sector == SECTOR_TRANSPORT_INTERNATIONAL_AVIATION ~ 0,
+        TRUE ~ value
+      )
+    ) %>%
+    select(-aviation_value)
 }
 
 

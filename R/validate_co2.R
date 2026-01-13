@@ -62,7 +62,12 @@ validate_co2_historical <- function(co2 = NULL,
   }
 
   if(exclude_international_aviation){
+
     co2 <- remove_international_aviation(co2)
+
+    # Because international aviation is only available after 2010, we remove prior data for oil and total
+    co2 <- co2 %>%
+      filter(!(fuel %in% c(FUEL_OIL, FUEL_TOTAL) & year(date) < 2010))
   }
 
   if(all_countries){
