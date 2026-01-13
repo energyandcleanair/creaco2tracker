@@ -1,13 +1,13 @@
 validate_power <- function(pwr_generation=entsoe.get_power_generation(), folder="validation"){
 
-  ember_explorer <- ember.get_power_generation(iso2s=="EU")
+  ember_explorer <- ember.get_power_generation(iso2s=get_eu_iso2s())
   ember_1 <- ember_explorer %>%
     mutate(source=recode(source,
                          Gas='Fossil Gas',
                          Bioenergy='Other',
                          `Other Fossil`='Other',
                          `Other Renewables`='Other')) %>%
-    group_by(year=as.numeric(date), source) %>%
+    group_by(year=year(date), source) %>%
     summarise(value_twh=sum(value_mwh)/1e6,
               data_source='EMBER (Data Explorer)')
 
@@ -21,7 +21,9 @@ validate_power <- function(pwr_generation=entsoe.get_power_generation(), folder=
 
   ember_catalogue <- read_csv(filepath)
   ember_2 <- ember_catalogue %>%
-    filter(`Area type`=='Country',
+    rename(iso3 = `ISO 3 code`) %>%
+    mutate(iso2=countrycode::countrycode(iso3, 'iso3c', 'iso2c')) %>%
+    filter(iso2 %in% get_eu_iso2s(),
            EU==1,
            Unit=='TWh',
            Category=='Electricity generation') %>%
@@ -51,13 +53,11 @@ validate_power <- function(pwr_generation=entsoe.get_power_generation(), folder=
     ember_2 %>% group_by(year, data_source) %>%
       summarise(value_twh=sum(value_twh), source='Total'),
 
-
-
-  pwr_generation %>%
-    filter(country=="EU total", date < "2024-01-01") %>%
-    group_by(year=year(date), source) %>%
-    summarise(value_twh=sum(value_mwh, na.rm=T) / 1e6,
-              data_source='ENTSOE')
+    pwr_generation %>%
+      filter(country=="EU total", date < "2026-01-01") %>%
+      group_by(year=year(date), source) %>%
+      summarise(value_twh=sum(value_mwh, na.rm=T) / 1e6,
+                data_source='ENTSOE')
   )
 
   # EU Comparison
@@ -89,5 +89,36 @@ validate_power <- function(pwr_generation=entsoe.get_power_generation(), folder=
     ggplot() +
     geom_col(aes(iso2, value_twh, fill=data_source),
              position='dodge')
+
+
+  # Compare countries
+  ember_1_per_country <- ember_explorer %>%
+    mutate(source=recode(source,
+                         Gas='Fossil Gas',
+                         Bioenergy='Other',
+                         `Other Fossil`='Other',
+                         `Other Renewables`='Other')) %>%
+    group_by(iso2, year=year(date)) %>%
+    summarise(value_twh=sum(value_mwh)/1e6,
+              data_source='EMBER (Data Explorer)')
+
+  bind_rows(
+
+    ember_1_per_country,
+    pwr_generation %>%
+      filter(date < "2026-01-01", source=="Total") %>%
+      group_by(iso2, year=year(date)) %>%
+      summarise(value_twh=sum(value_mwh, na.rm=T) / 1e6,
+                data_source='ENTSOE')
+  ) %>%
+    ggplot() +
+    geom_line(aes(year, value_twh, col=data_source)) +
+    facet_wrap(~iso2, scales='free_y') +
+    rcrea::scale_y_crea_zero() +
+    labs(title='Comparison of EU power generation per country',
+         subtitle="TWh",
+         x=NULL,
+         y=NULL)
+
 
 }

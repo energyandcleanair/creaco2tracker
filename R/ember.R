@@ -6,7 +6,7 @@ ember.get_power_generation <- function(frequency='yearly', iso2s="EU"){
 
     # To get entities
     # glue("https://api.ember-energy.org/options/electricity-generation/yearly/entity?api_key={key}")
-    lapply(iso2s, function(iso2){
+    pbapply::pblapply(iso2s, function(iso2){
       base_url <- "https://api.ember-energy.org"
       entity_field <- ifelse(iso2=="EU", "entity", "entity_code")
       entity_value <- ifelse(iso2=="EU", "EU", countrycode::countrycode(iso2, "iso2c", "iso3c"))
