@@ -52,7 +52,14 @@ project_until_now <- function(
 #' @export
 #'
 #' @examples
-project_until_now_lm <- function(x, proxy, dts_month, min_r2=0.9, fill_mode=c("overwrite", "missing", "ratio"), verbose=F){
+project_until_now_lm <- function(
+  x,
+  proxy,
+  dts_month,
+  min_r2=0.9,
+  fill_mode=c("overwrite", "missing", "ratio"),
+  allow_intercept=FALSE,
+  verbose=F){
 
   fill_mode <- match.arg(fill_mode)
 
@@ -146,15 +153,18 @@ project_until_now_lm <- function(x, proxy, dts_month, min_r2=0.9, fill_mode=c("o
         }
 
         formula_cols <- grep('value_proxy', colnames(data_training), value=T)
+        formula_prefix <- if(allow_intercept) 'value ~ ' else 'value ~ 0 + '
+        formula <- paste0(formula_prefix, paste0(formula_cols, collapse=' + '))
+
         if(data_training %>% select_at(formula_cols) %>% filter_all(any_vars(!is.na(.))) %>% nrow > 0){
-          lm(data=data_training, formula= paste0('value ~ 0+', paste0(formula_cols, collapse=' + ')))
+          lm(data=data_training, formula= formula)
         }else{
           NULL
         }
       }
 
       # We automatically determine the number of years to consider based on adjusted R2
-      n_years <- seq(1,10)
+      n_years <- seq(2,10)
       r2s <- lapply(n_years, function(n_year){
         model <- get_trained_model(data, n_year)
         if(!is.null(model)){
