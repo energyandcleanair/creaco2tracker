@@ -111,9 +111,10 @@ validate_power <- function(pwr_generation=entsoe.get_power_generation(), folder=
       summarise(value_twh=sum(value_mwh, na.rm=T) / 1e6,
                 data_source='ENTSOE')
   ) %>%
+    filter(iso2 != "EU") %>%
     ggplot() +
     geom_line(aes(year, value_twh, col=data_source)) +
-    facet_wrap(~iso2, scales='free_y') +
+    facet_wrap(~iso2) +
     rcrea::scale_y_crea_zero() +
     labs(title='Comparison of EU power generation per country',
          subtitle="TWh",
