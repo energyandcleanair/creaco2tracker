@@ -6,7 +6,9 @@ entsoe.get_power_generation <- function(
   use_local=F) {
 
   if(all(iso2s=="EU")){
-    iso2s <- get_eu_iso2s(include_eu = F)
+    iso2s_fetch <- get_eu_iso2s(include_eu = F)
+  }else{
+    iso2s_fetch <- iso2s
   }
 
   base_url <- ifelse(use_local, "http://localhost:8080", "https://api.energyandcleanair.org")
@@ -14,7 +16,7 @@ entsoe.get_power_generation <- function(
                               date_from=date_from,
                               date_to=date_to,
                               aggregate_by='country,source,date',
-                              country=paste(iso2s, collapse=','),
+                              country=paste(sort(iso2s_fetch), collapse=','),
                               data_source='entsoe',
                               split_by = 'year',
                               # The meaning of use_cache is different
@@ -74,6 +76,9 @@ entsoe.get_power_generation <- function(
       bind_rows(pwr %>% filter(iso2 != 'EU')) %>%
       ungroup()
   }
+
+  pwr <- pwr %>%
+    filter(iso2 %in% iso2s)
 
   return(pwr)
 }
