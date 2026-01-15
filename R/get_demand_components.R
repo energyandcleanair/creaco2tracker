@@ -35,6 +35,7 @@ get_demand_components <- function(iso2s = "EU",
                                   date_from = "2015-01-01",
                                   date_to = Sys.Date(),
                                   use_cache = TRUE,
+                                  correct_gas_to_eurostat = TRUE,
                                   include_time_interaction = TRUE,
                                   diagnostics_folder = "diagnostics/demand_components") {
 
@@ -42,10 +43,10 @@ get_demand_components <- function(iso2s = "EU",
   date_from <- as.Date(date_from)
   date_to <- as.Date(date_to)
 
-  gas_demand <- download_gas_demand(
+  gas_demand <- get_gas_demand(
     iso2 = iso2s,
     use_cache = use_cache,
-    date_from = date_from
+    correct_to_eurostat = correct_gas_to_eurostat
   ) %>%
     filter(date >= date_from, date <= date_to) %>%
     mutate(date = as.Date(date)) %>%

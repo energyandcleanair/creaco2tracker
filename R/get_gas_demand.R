@@ -24,11 +24,13 @@
 #' Computes apparent gas consumption from ENTSOG data. Optionally corrects
 #' historical data to match Eurostat monthly totals using simple monthly scaling.
 #'
+#' @param iso2s Character vector of ISO2 country codes to include. If NULL (default),
+#'   returns all available countries.
+#' @param date_to End date for data. If NULL (default), returns all available dates.
 #' @param diagnostics_folder Folder path for diagnostics outputs. Set to NULL
 #'   to disable diagnostics. Default is "diagnostics/gas_demand".
 #' @param verbose Whether to print verbose output. Default is FALSE.
-#' @param use_cache Whether to use cached data. Default is FALSE.
-#' @param refresh_cache Whether to refresh the cache. Default is FALSE.
+#' @param use_cache Whether to use cached data. Default is TRUE.
 #' @param correct_to_eurostat Whether to correct ENTSOG daily data to match
 #'   Eurostat monthly totals. Default is FALSE for backward compatibility.
 #'
@@ -42,11 +44,29 @@
 #'   scale factor is carried forward.
 #'
 #' @export
-get_gas_demand <- function(diagnostics_folder='diagnostics/gas_demand',
+get_gas_demand <- function(iso2s = NULL,
+                           date_to = NULL,
+                           diagnostics_folder='diagnostics/gas_demand',
                            verbose=FALSE,
-                           use_cache=FALSE,
-                           refresh_cache=FALSE,
+                           use_cache=TRUE,
                            correct_to_eurostat=FALSE){
+
+  # Generate a hash of the parameters for caching
+  param_hash <- digest::digest(list(
+    iso2s = if (!is.null(iso2s)) sort(iso2s) else NULL,
+    date_to = as.character(date_to),
+    correct_to_eurostat = correct_to_eurostat
+  ))
+
+  # Create a filename using the hash
+  cache_dir <- "cache"
+  filepath <- file.path(cache_dir, paste0("gas_demand_", param_hash, ".RDS"))
+
+  # Check if the file exists in cache and use_cache is TRUE
+  if (use_cache && file.exists(filepath)) {
+    message("Loading cached gas demand data...")
+    return(readRDS(filepath))
+  }
 
   years <- seq(2015, lubridate::year(lubridate::today()))
 
@@ -59,8 +79,8 @@ get_gas_demand <- function(diagnostics_folder='diagnostics/gas_demand',
                                      type='consumption,distribution,storage,crossborder,production',
                                      split_by='year',
                                      verbose=verbose,
-                                     use_cache=use_cache,
-                                     refresh_cache=refresh_cache)
+                                     use_cache=TRUE,
+                                     refresh_cache=!use_cache)
 
   # Estimate with two different methods
   message('Getting gas demand from Consumption + Distribution ENTSOG points')
@@ -101,14 +121,30 @@ get_gas_demand <- function(diagnostics_folder='diagnostics/gas_demand',
   }
 
   # Keep the longest one per country
-  gas_demand %>%
-    select(region_id=iso2, date, value=value_m3) %>%
+  result <- gas_demand %>%
+    select(iso2, date, value=value_m3) %>%
     mutate(fuel='fossil_gas',
            sector='total',
            data_source=ifelse(correct_to_eurostat, 'crea_eurostat_corrected', 'crea'),
            unit='m3',
            frequency='daily',
-           region_type=case_when(region_id=='EU' ~ 'region', T ~ 'iso2'))
+           region_type=case_when(iso2=='EU' ~ 'region', T ~ 'iso2'))
+
+  # Apply filters if specified
+  if (!is.null(iso2s)) {
+    result <- result %>% filter(iso2 %in% iso2s)
+  }
+  if (!is.null(date_to)) {
+    result <- result %>% filter(date <= as.Date(date_to))
+  }
+
+  # Save the result to cache
+  if (!dir.exists(cache_dir)) {
+    dir.create(cache_dir, recursive = TRUE)
+  }
+  saveRDS(result, filepath)
+
+  return(result)
 }
 
 

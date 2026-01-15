@@ -23,7 +23,8 @@ get_co2 <- function(diagnostics_folder='diagnostics',
                     date_to = NULL,
                     ncv_source = "iea",
                     fill_mode=c("missing", "overwrite", "ratio"),
-                    downscale_cut_latest_days = 3
+                    downscale_cut_latest_days = 3,
+                    correct_gas_demand_to_eurostat = TRUE
                     ){
 
   create_dir(diagnostics_folder)
@@ -36,10 +37,19 @@ get_co2 <- function(diagnostics_folder='diagnostics',
     date_to_cut <- date_to
   }
 
-
   # Collect necessary data
-  gas_demand <- download_gas_demand(iso2 = NULL, use_cache = use_cache, date_to = date_to_cut)
-  pwr_generation <- entsoe.get_power_generation(use_cache = use_cache, date_to = date_to_cut)
+  gas_demand <- get_gas_demand(
+    iso2s = iso2s,
+    date_to = date_to_cut,
+    correct_to_eurostat = correct_gas_demand_to_eurostat,
+    use_cache = use_cache
+    )
+
+  pwr_generation <- get_power_generation(
+    iso2s = iso2s,
+    date_to = date_to_cut,
+    use_cache = use_cache)
+
 
   # Get fossil-fuel consumption based on Eurostat
   eurostat_cons <- get_eurostat_cons(
