@@ -98,7 +98,7 @@ get_weather_correction_demand_elec <- function(iso2s = "EU",
                                                diagnostics_folder = NULL) {
 
   # Get power generation data
-  pwr <- entsoe.get_power_generation(date_from = date_from, use_cache = use_cache)
+  pwr <- get_power_generation(date_from = date_from, use_cache = use_cache)
 
   # Get weather data (HDD and CDD)
   weather_iso2s <- if("EU" %in% iso2s){
@@ -254,10 +254,8 @@ get_weather_correction_demand_gas <- function(iso2s = "EU",
   #   pull(sector)
   # }
 
-
-
   # Get power generation data
-  pwr_gas <- entsoe.get_power_generation(date_from = date_from, use_cache = use_cache) %>%
+  pwr_gas <- get_power_generation(date_from = date_from, use_cache = use_cache) %>%
     filter(source=="Fossil Gas")
 
   # Get weather data (HDD only for gas)

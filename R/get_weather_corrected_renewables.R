@@ -482,7 +482,7 @@ get_weather_corrected_solar <- function(iso2s = "EU",
 #'
 #' @param iso2s Character vector of ISO2 country codes. Use "EU" for all EU countries,
 #'   or specify individual countries like c("DE", "FR"). Default is "EU".
-#' @param pwr_generation Data frame with power generation data from entsoe.get_power_generation
+#' @param pwr_generation Data frame with power generation data from get_power_generation
 #' @param date_from Start date for analysis (default: "2015-01-01")
 #' @param diagnostics_folder Path to save diagnostic plots and outputs
 #' @param use_cache Logical, whether to use cached data (default: TRUE)

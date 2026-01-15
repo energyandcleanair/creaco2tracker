@@ -55,7 +55,7 @@ get_weather_correction_powermix <- function(iso2s = "EU",
 
   # Get power generation once
   message("Getting power generation data...")
-  pwr_generation <- entsoe.get_power_generation(
+  pwr_generation <- get_power_generation(
     iso2s = iso2s,
     date_from = date_from,
     use_cache = use_cache

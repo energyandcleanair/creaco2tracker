@@ -56,7 +56,7 @@ get_demand_components <- function(iso2s = "EU",
   gas_demand <- gas_demand %>%
     filter(iso2 %in% iso2s)
 
-  pwr_generation <- entsoe.get_power_generation(
+  pwr_generation <- get_power_generation(
     date_from = date_from,
     iso2s = iso2s,
     use_cache = use_cache
