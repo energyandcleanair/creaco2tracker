@@ -17,6 +17,10 @@
 #' @param use_cache Whether to use cached data. Default is TRUE.
 #' @param tier_threshold Numeric vector of length 2 defining the ratio bounds
 #'   for Tier 1 vs Tier 2. Default is c(0.7, 1.3).
+#' @param replace_entsoe_others_with_ember Whether to replace ENTSOE "Other"
+#'   category with EMBER-only sources (Bioenergy, Other renewables, Other fossil).
+#'   When TRUE, removes ENTSOE "Other" and adds these EMBER sources distributed
+#'   to daily assuming constant production within each month. Default is TRUE.
 #' @param diagnostics_folder Folder path for diagnostics outputs. Set to NULL
 #'   to disable diagnostics. Default is "diagnostics/power_generation".
 #'
@@ -51,6 +55,7 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
                                  corrected_sources = c("Wind", "Solar", "Fossil Gas", "Hydro"),
                                  use_cache = TRUE,
                                  tier_threshold = c(0.7, 1.3),
+                                 replace_entsoe_others_with_ember = TRUE,
                                  diagnostics_folder = "diagnostics/power_generation") {
 
   date_from <- as.Date(date_from)
@@ -63,6 +68,7 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
     date_to = as.character(date_to),
     corrected_sources = sort(corrected_sources),
     tier_threshold = tier_threshold,
+    replace_entsoe_others_with_ember = replace_entsoe_others_with_ember,
     diagnostics_folder = diagnostics_folder
   ))
 
@@ -127,6 +133,12 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
     "Hydro",          "Hydro"
   )
 
+  # EMBER-only sources (not in ENTSOE or replacing ENTSOE "Other")
+  ember_only_sources <- c("Bioenergy", "Other renewables", "Other fossil")
+
+  # ENTSOE source to exclude when replacing with EMBER
+  entsoe_others_to_replace <- "Other"
+
   # Determine which EMBER sources we need
   ember_sources_needed <- source_mapping %>%
     filter(entsoe_source %in% corrected_sources) %>%
@@ -148,21 +160,28 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
     filter(!(source %in% corrected_sources | source %in% c("Wind Onshore", "Wind Offshore"))) %>%
     filter(source != "Total")  # Don't pass through Total, we'll recalculate
 
-  ember_monthly <- ember_monthly %>%
+  # If replacing ENTSOE others with EMBER, filter them out from passthrough
+  if (replace_entsoe_others_with_ember) {
+    entsoe_passthrough <- entsoe_passthrough %>%
+      filter(!(source %in% entsoe_others_to_replace))
+  }
+
+  # Prepare EMBER monthly for corrected sources
+  ember_monthly_for_correction <- ember_monthly %>%
     filter(source %in% ember_sources_needed) %>%
     rename(source_std = source)
 
   # Calculate monthly scaling factors (using data to be corrected)
   scaling_factors <- .calculate_monthly_scaling_factors(
     entsoe_daily = entsoe_to_correct,
-    ember_monthly = ember_monthly,
+    ember_monthly = ember_monthly_for_correction,
     tier_threshold = tier_threshold
   )
 
   # Apply corrections to sources that need correction
   result_corrected <- .apply_power_corrections(
     entsoe_daily = entsoe_to_correct,
-    ember_monthly = ember_monthly,
+    ember_monthly = ember_monthly_for_correction,
     scaling_factors = scaling_factors,
     date_from = date_from,
     date_to = date_to
@@ -184,15 +203,28 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
       value_mw_raw, value_mwh_raw, correction_tier, correction_ratio
     )
 
-  # Combine corrected and passthrough results
-  result <- bind_rows(result_corrected, result_passthrough) %>%
+  # Add EMBER-only sources if replacing ENTSOE others
+  result_ember_only <- NULL
+  if (replace_entsoe_others_with_ember) {
+    result_ember_only <- .distribute_ember_to_daily(
+      ember_monthly = ember_monthly,
+      ember_only_sources = ember_only_sources,
+      date_from = date_from,
+      date_to = date_to,
+      iso2s = iso2s,
+      entsoe_daily = entsoe_daily_full  # For getting region/country info
+    )
+  }
+
+  # Combine corrected, passthrough, and EMBER-only results
+  result <- bind_rows(result_corrected, result_passthrough, result_ember_only) %>%
     arrange(iso2, date, source)
 
   # Recalculate Total if it was in ENTSOE originally
   if (any(entsoe_daily_full$source == "Total", na.rm = TRUE)) {
     total_recalculated <- result %>%
       filter(source != "Total") %>%  # Exclude any existing Total
-      group_by(iso2, region, country, date, frequency) %>%
+      group_by(iso2, region, country, date) %>%
       summarise(
         value_mw = sum(value_mw, na.rm = TRUE),
         value_mwh = sum(value_mwh, na.rm = TRUE),
@@ -208,7 +240,7 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
       ) %>%
       select(
         date, source, data_source, iso2, region, country,
-        value_mw, value_mwh, frequency,
+        value_mw, value_mwh,
         value_mw_raw, value_mwh_raw, correction_tier, correction_ratio
       )
 
@@ -216,13 +248,13 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
       arrange(iso2, date, source)
   }
 
-  # Generate diagnostics (only for corrected sources)
+  # Generate diagnostics
   if (!is.null(diagnostics_folder)) {
     .generate_power_diagnostics(
       entsoe_daily = entsoe_to_correct,
-      ember_monthly = ember_monthly,
+      ember_monthly = ember_monthly_for_correction,
       scaling_factors = scaling_factors,
-      result = result_corrected,
+      result = result,  # Pass all results for complete diagnostics
       diagnostics_folder = diagnostics_folder
     )
   }
@@ -230,6 +262,12 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
   # Only select useful columns
   result <- result %>%
     select(iso2, country, region, date, source, value_mw, value_mwh)
+
+
+  # Check that iso2-fuel-date is unique
+  if (any(duplicated(result %>% select(iso2, source, date)))) {
+    stop("Duplicate iso2-source-date combinations found in the result")
+  }
 
   # Save the fetched data to cache
   if (!dir.exists(cache_dir)) {
@@ -361,35 +399,49 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
   # Apply Tier 2: Distribute EMBER monthly using ENTSOE daily pattern
 
   # First, calculate daily share within each month for Tier 2
+  # Also track if ENTSOE has valid (non-NA) data for the month
   daily_shares <- entsoe_daily %>%
     group_by(iso2, source_std, year, month) %>%
     mutate(
       monthly_total = sum(value_mwh, na.rm = TRUE),
-      daily_share = if_else(monthly_total > 0, value_mwh / monthly_total, 1 / n())
+      n_valid_days = sum(!is.na(value_mwh)),
+      # If ENTSOE has valid data, use its pattern; otherwise use equal distribution
+      daily_share = case_when(
+        monthly_total > 0 & !is.na(value_mwh) ~ value_mwh / monthly_total,
+        n_valid_days == 0 ~ 1 / n(),  # All NA: use equal distribution
+        TRUE ~ 0  # This day is NA but others aren't - give it 0 share
+      ),
+      entsoe_all_na = (n_valid_days == 0)
     ) %>%
     ungroup() %>%
-    select(iso2, date, source_std, daily_share, monthly_total)
+    select(iso2, date, source_std, daily_share, monthly_total, entsoe_all_na)
 
   # Join daily shares
   daily_with_factors <- daily_with_factors %>%
     left_join(
-      daily_shares %>% select(iso2, date, source_std, daily_share),
+      daily_shares %>% select(iso2, date, source_std, daily_share, entsoe_all_na),
       by = c("iso2", "date", "source_std")
     )
 
   # Apply corrections
 
-result <- daily_with_factors %>%
+  result <- daily_with_factors %>%
     mutate(
       # Store raw values before correction
       value_mwh_raw = value_mwh,
       value_mw_raw = value_mw,
+      # Calculate days in month for constant distribution fallback
+      days_in_month = lubridate::days_in_month(date),
       # Apply corrections
       value_mwh = case_when(
-        # Tier 1: Scale ENTSOE by monthly factor
-        tier == 1 & !is.na(scale_factor) ~ value_mwh_raw * scale_factor,
+        # Tier 1: Scale ENTSOE by monthly factor (only if ENTSOE has data)
+        tier == 1 & !is.na(scale_factor) & !is.na(value_mwh_raw) & !entsoe_all_na ~ value_mwh_raw * scale_factor,
+        # Tier 1 but ENTSOE is all NA for month: use EMBER with constant distribution
+        tier == 1 & !is.na(ember_mwh) & entsoe_all_na ~ ember_mwh / days_in_month,
         # Tier 2: Distribute EMBER monthly by daily share
-        tier == 2 & !is.na(ember_mwh) & !is.na(daily_share) ~ ember_mwh * daily_share,
+        tier == 2 & !is.na(ember_mwh) & !is.na(daily_share) & !entsoe_all_na ~ ember_mwh * daily_share,
+        # Tier 2 but ENTSOE is all NA for month: use EMBER with constant distribution
+        tier == 2 & !is.na(ember_mwh) & entsoe_all_na ~ ember_mwh / days_in_month,
         # Fallback: use raw ENTSOE if no correction available
         TRUE ~ value_mwh_raw
       ),
@@ -538,6 +590,124 @@ result <- daily_with_factors %>%
   message(sprintf("Filled %d monthly observations from yearly data", n_filled))
 
   return(result)
+}
+
+
+#' Distribute EMBER monthly data to daily for EMBER-only sources
+#'
+#' For sources that only exist in EMBER (Bioenergy, Other renewables, Other fossil),
+#' distribute monthly values to daily assuming constant production within each month.
+#' For months beyond EMBER coverage, the last available monthly value is carried forward.
+#'
+#' @param ember_monthly EMBER monthly data
+#' @param ember_only_sources Character vector of EMBER source names to distribute
+#' @param date_from Start date
+#' @param date_to End date
+#' @param iso2s Country codes to include
+#' @param entsoe_daily ENTSOE daily data (for getting region/country metadata)
+#'
+#' @return Daily data in the same format as result_corrected/result_passthrough
+#' @keywords internal
+.distribute_ember_to_daily <- function(ember_monthly,
+                                        ember_only_sources,
+                                        date_from,
+                                        date_to,
+                                        iso2s,
+                                        entsoe_daily) {
+
+  # Filter EMBER to only the sources we want
+  ember_subset <- ember_monthly %>%
+    filter(source %in% ember_only_sources, iso2 %in% iso2s)
+
+  if (nrow(ember_subset) == 0) {
+    message("No EMBER-only sources found for the requested countries")
+    return(NULL)
+  }
+
+  # Get region/country mapping from ENTSOE
+  country_info <- entsoe_daily %>%
+    select(iso2, region, country) %>%
+    distinct()
+
+  # Extend EMBER data forward to date_to by carrying forward last monthly value
+  # Get the last available month for each iso2/source
+  last_ember_values <- ember_subset %>%
+    group_by(iso2, source) %>%
+    filter(date == max(date)) %>%
+    ungroup() %>%
+    select(iso2, source, last_value_mwh = value_mwh, last_date = date)
+
+  # Generate months to fill (from last EMBER month + 1 to date_to)
+  months_to_fill <- last_ember_values %>%
+    rowwise() %>%
+    reframe(
+      iso2 = iso2,
+      source = source,
+      last_value_mwh = last_value_mwh,
+      date = seq.Date(
+        from = lubridate::ceiling_date(last_date, "month"),
+        to = lubridate::floor_date(as.Date(date_to), "month"),
+        by = "month"
+      )
+    ) %>%
+    filter(date <= date_to) %>%
+    rename(value_mwh = last_value_mwh)
+
+  # Combine original EMBER data with extended data
+  ember_extended <- bind_rows(
+    ember_subset %>% select(iso2, source, date, value_mwh),
+    months_to_fill
+  ) %>%
+    distinct(iso2, source, date, .keep_all = TRUE)
+
+  # Generate daily dates for each month
+  # For each monthly value, distribute evenly across days in that month
+  daily_data <- ember_extended %>%
+    mutate(
+      year = year(date),
+      month = month(date),
+      days_in_month = lubridate::days_in_month(date)
+    ) %>%
+    # Create daily value (constant within month)
+    mutate(
+      daily_mwh = value_mwh / days_in_month,
+      daily_mw = daily_mwh / 24
+    ) %>%
+    # Expand to daily rows
+    group_by(iso2, source, year, month) %>%
+    reframe(
+      date = seq.Date(
+        from = lubridate::floor_date(date, "month"),
+        to = lubridate::ceiling_date(date, "month") - days(1),
+        by = "day"
+      ),
+      value_mwh = daily_mwh,
+      value_mw = daily_mw
+    ) %>%
+    ungroup() %>%
+    # Filter to requested date range
+    filter(date >= date_from, date <= date_to) %>%
+    # Add metadata
+    left_join(country_info, by = "iso2") %>%
+    mutate(
+      value_mw_raw = value_mw,
+      value_mwh_raw = value_mwh,
+      correction_tier = NA_integer_,
+      correction_ratio = NA_real_,
+      data_source = "ember",
+      frequency = "daily"
+    ) %>%
+    select(
+      date, source, data_source, iso2, region, country,
+      value_mw, value_mwh, frequency,
+      value_mw_raw, value_mwh_raw, correction_tier, correction_ratio
+    )
+
+  message(sprintf("Added %d daily observations from EMBER-only sources (%s)",
+                  nrow(daily_data),
+                  paste(ember_only_sources, collapse = ", ")))
+
+  return(daily_data)
 }
 
 

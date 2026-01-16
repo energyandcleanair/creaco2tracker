@@ -129,4 +129,5 @@ importFrom(tidyr,replace_na)
 importFrom(tidyr,unite)
 importFrom(tidyr,unnest_wider)
 importFrom(tidyr,complete)
+importFrom(tidyr,crossing)
 

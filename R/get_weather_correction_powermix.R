@@ -206,8 +206,8 @@ calculate_powermix_correction_factors <- function(
   # And we keep the same thermal generation mix
   add_source_category <- function(source) {
     x = case_when(
-      source %in% c("Wind", "Solar", "Hydro") ~ "renewable",
-      source %in% c("Coal", "Fossil Gas") ~ "thermal",
+      source %in% c("Wind", "Solar", "Hydro", "Bioenergy", "Other renewables") ~ "renewable",
+      source %in% c("Coal", "Fossil Gas", "Other fossil") ~ "thermal",
       source == "Nuclear" ~ "nuclear",
       source %in% c("Storage", "Other") ~ "other",
       source == "Total" ~ "Total",
