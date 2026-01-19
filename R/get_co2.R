@@ -63,13 +63,6 @@ get_co2 <- function(diagnostics_folder='diagnostics',
     diagnostics_folder = file.path(diagnostics_folder, 'eurostat')
     )
 
-  # Quick sanity checks on power generation
-  if(!is_null_or_empty(diagnostics_folder)){
-    diagnostic_pwr(pwr_generation,
-                   diagnostics_folder = file.path(diagnostics_folder, "pwr"))
-  }
-
-
   # Compute CO2 emissions based on Eurostat fossil-fuel consumption/oxydation
   co2_unprojected <- get_co2_from_eurostat_cons(eurostat_cons,
                                                 ncv_source = ncv_source,
