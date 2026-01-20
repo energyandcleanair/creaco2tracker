@@ -11,7 +11,7 @@
 #'
 #' @examples
 project_until_now <- function(
-  co2,
+  co2_unprojected,
   pwr_generation,
   gas_demand,
   eurostat_indprod,
@@ -20,9 +20,9 @@ project_until_now <- function(
 
   fill_mode <- match.arg(fill_mode) # Takes the first one by default i.e. missing
 
-  dts_month <- seq.Date(min(co2$date), if(is.null(date_to)) today() %>% 'day<-'(1) else as.Date(date_to), by='month')
+  dts_month <- seq.Date(min(co2_unprojected$date), if(is.null(date_to)) today() %>% 'day<-'(1) else as.Date(date_to), by='month')
 
-  co2 %>%
+  co2_unprojected %>%
     split_gas_to_elec_all() %>%
     project_until_now_elec(pwr_generation=pwr_generation, dts_month=dts_month, fill_mode=fill_mode) %>%
     project_until_now_gas(gas_demand=gas_demand, dts_month=dts_month, fill_mode=fill_mode) %>%
@@ -362,14 +362,19 @@ project_until_now_elec <- function(x, pwr_generation, dts_month, min_r2=0.7, fil
 
   fill_mode <- match.arg(fill_mode)
 
+  # Convert fuel from Eurostat to EMBER
+  # We'll downscale Peat and Oil elec with other fossil
+  source_fuel <- tibble(
+    source = c('Fossil Gas', 'Coal', 'Other fossil'),
+    fuel = c(list(FUEL_GAS), list(FUEL_COAL), list(c(FUEL_PEAT, FUEL_OIL)))
+  ) %>%
+    tidyr::unnest(fuel)
+
+
   proxy <- pwr_generation %>%
     filter(iso2 %in% x$iso2) %>%
     ungroup() %>%
-    mutate(fuel=case_when(
-      source=='Coal' ~ 'coal',
-      source=='Fossil Gas' ~ 'gas',
-      T ~ NA_character_
-    )) %>%
+    left_join(source_fuel, by='source', relationship = "many-to-many") %>%
     filter(!is.na(fuel)) %>%
     # Important: We take average generation per day in any given month
     # => The last month data doesn't reflect emissions so far (e.g. if we're on the 15th of the month)
@@ -378,7 +383,8 @@ project_until_now_elec <- function(x, pwr_generation, dts_month, min_r2=0.7, fil
     # BUT we also want to account for number of days in the month to avoid 28-31 stuff
     group_by(iso2) %>%
     tidyr::complete(
-      source, date=seq.Date(min(date), max(date), by='day'),
+      nesting(source, fuel),
+      date=seq.Date(min(date), max(date), by='day'),
       fill=list(value_mwh=0)
     ) %>%
     group_by(iso2, sector=SECTOR_ELEC, fuel, date=floor_date(as.Date(date), 'month')) %>%
@@ -551,10 +557,20 @@ project_until_now_forecast <- function(co2, dts_month, last_years=10, conf_level
   #   geom_line(aes(date, value, col=estimate)) +
   #   facet_wrap(sector~fuel + iso2)
 
-  res %>%
+
+
+  res_long <- res %>%
     fill_lower_upper() %>%
     pivot_longer(cols=starts_with('value_'), names_to='estimate', values_to='value',
                  names_prefix='value_')
+
+
+  # When values were >0 in the past and 0 for a while, sometimes the forecasts yields negative values
+  # Ideally, we would add a heuristic to avoid that, but for now we just set them to zero
+  # TODO implement project_until_now_zeros that works without proxy. In a rush right now.
+  res_long$value <- pmax(0, res_long$value)
+
+  return(res_long)
 }
 
 fill_lower_upper <- function(df) {
