@@ -171,6 +171,30 @@ split_gas_to_elec_all <- function(co2){
   bind_rows(gas_result, non_gas_data)
 }
 
+
+#' Recombine fuels e.g. peat -> coal
+#'
+#' @param co2
+#'
+#' @returns
+#' @export
+#'
+#' @examples
+recombine_fuels <- function(co2){
+
+  co2 %>%
+    mutate(fuel = case_when(
+      fuel == FUEL_PEAT ~ FUEL_COAL,
+      TRUE ~ fuel
+    )) %>%
+    group_by(across(c(-value))) %>%
+    summarise(
+      value = sum(value, na.rm = TRUE),
+      .groups = "drop"
+    )
+}
+
+
 #' This computes total co2, while properly aggregating uncertainty
 #'
 #' @param co2 dataframe with columns iso2, geo, date, fuel, estimate, value
