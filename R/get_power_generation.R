@@ -639,17 +639,24 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
 
   # Generate months to fill (from last EMBER month + 1 to date_to)
   months_to_fill <- last_ember_values %>%
-    rowwise() %>%
-    reframe(
-      iso2 = iso2,
-      source = source,
-      last_value_mwh = last_value_mwh,
-      date = seq.Date(
-        from = lubridate::ceiling_date(last_date, "month"),
+    group_by(iso2, source) %>%
+    group_modify(function(df, keys){
+
+      need_new_months <- lubridate::ceiling_date(df$last_date, "month") <= as.Date(date_to)
+      missing_months <- if(need_new_months){
+        seq.Date(
+        from = lubridate::ceiling_date(df$last_date, "month"),
         to = lubridate::floor_date(as.Date(date_to), "month"),
-        by = "month"
+        by = "month")
+      }else{
+        df$last_date
+      }
+      tibble(
+        last_value_mwh = df$last_value_mwh,
+        last_date = df$last_date,
+        date = missing_months
       )
-    ) %>%
+    }) %>%
     filter(date <= date_to) %>%
     rename(value_mwh = last_value_mwh)
 
