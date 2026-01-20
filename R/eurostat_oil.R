@@ -72,7 +72,7 @@ process_oil <- function(x) {
   # 1. Initial filtering matrix - which combinations to keep
   filter_matrix <- tribble(
     ~siec_code, ~ nrg_bal_code, ~ keep,
-  # Oil products: SECTOR_TOTAL
+    # Oil products: SECTOR_TOTAL
     SIEC_OIL_PRODUCTS, "GID_OBS", TRUE,
     SIEC_OIL_PRODUCTS, "GID_NE", TRUE,
     SIEC_FUEL_OIL, "GID_OBS", TRUE,
@@ -84,16 +84,31 @@ process_oil <- function(x) {
     SIEC_BIODIESEL, "GID_OBS", TRUE,
     SIEC_BIODIESEL, "GID_NE", TRUE,
 
-  # SECTOR_TRANSPORT: Road diesel and gasoline
+    # SECTOR_TRANSPORT: Road diesel and gasoline
     SIEC_ROAD_DIESEL, "FC_TRA_E", TRUE,
     SIEC_MOTOR_GASOLINE_XBIO, "FC_TRA_E", TRUE,
     SIEC_BIODIESEL, "FC_TRA_E", TRUE,
 
-  # SECTOR_TRANSPORT: Aviation
+    # SECTOR_TRANSPORT: Aviation
     SIEC_KEROSENE_XBIO, "FC_TRA_DAVI_E", TRUE,
     SIEC_KEROSENE_XBIO, "INTAVI_E", TRUE,
     SIEC_AVIATION_GASOLINE, "FC_TRA_DAVI_E", TRUE,
-    SIEC_AVIATION_GASOLINE, "INTAVI_E", TRUE
+    SIEC_AVIATION_GASOLINE, "INTAVI_E", TRUE,
+
+    # SECTOR_ELEC
+    # Monthly has TI_EHG_MAP
+    SIEC_OIL_PRODUCTS, "TI_EHG_MAP", TRUE,
+    SIEC_FUEL_OIL, "TI_EHG_MAP", TRUE,
+    SIEC_HEATING_GASOIL, "TI_EHG_MAP", TRUE,
+
+    # Yealry has TI_EHG_MAPE and TI_EHG_MAPCHP
+    SIEC_OIL_PRODUCTS, "TI_EHG_MAPE", TRUE,
+    SIEC_FUEL_OIL, "TI_EHG_MAPE", TRUE,
+    SIEC_HEATING_GASOIL, "TI_EHG_MAPE", TRUE,
+
+    SIEC_OIL_PRODUCTS, "TI_EHG_MAPCHP", TRUE,
+    SIEC_FUEL_OIL, "TI_EHG_MAPCHP", TRUE,
+    SIEC_HEATING_GASOIL, "TI_EHG_MAPCHP", TRUE,
   )
 
   # 2. Deduction rules - which fuels to subtract from which base fuels
@@ -102,6 +117,9 @@ process_oil <- function(x) {
     SIEC_OIL_PRODUCTS, "GID_OBS", list(c(SIEC_FUEL_OIL, SIEC_HEATING_GASOIL, SIEC_BIOGASOLINE, SIEC_BIODIESEL)),
     SIEC_OIL_PRODUCTS, "GID_NE", list(c(SIEC_FUEL_OIL, SIEC_HEATING_GASOIL, SIEC_BIOGASOLINE, SIEC_BIODIESEL)),
     SIEC_ROAD_DIESEL, "FC_TRA_E", list(c(SIEC_BIODIESEL)),
+    SIEC_OIL_PRODUCTS, "TI_EHG_MAP", list(c(SIEC_FUEL_OIL, SIEC_HEATING_GASOIL)),
+    SIEC_OIL_PRODUCTS, "TI_EHG_MAPE", list(c(SIEC_FUEL_OIL, SIEC_HEATING_GASOIL)),
+    SIEC_OIL_PRODUCTS, "TI_EHG_MAPCHP", list(c(SIEC_FUEL_OIL, SIEC_HEATING_GASOIL))
   )
 
   # Fuels to exclude after deduction
@@ -114,7 +132,10 @@ process_oil <- function(x) {
     "GID_OBS", 1, SECTOR_ALL,
     "FC_TRA_E", 1, SECTOR_TRANSPORT_DOMESTIC,
     "FC_TRA_DAVI_E", 1, SECTOR_TRANSPORT_DOMESTIC,
-    "INTAVI_E", 1, SECTOR_TRANSPORT_INTERNATIONAL_AVIATION
+    "INTAVI_E", 1, SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,
+    "TI_EHG_MAP", 1, SECTOR_ELEC,
+    "TI_EHG_MAPE", 1, SECTOR_ELEC,
+    "TI_EHG_MAPCHP", 1, SECTOR_ELEC
   )
 
 
@@ -240,9 +261,9 @@ process_oil <- function(x) {
 }
 
 
-check_eurostat_oil_completeness <- function(processed_data) {
+check_eurostat_oil_completeness <- function(x_processed) {
 
-  sector_counts <- processed_data %>%
+  sector_counts <- x_processed %>%
     distinct(siec_code, nrg_bal_code, sector) %>%
     count(sector) %>%
     spread(sector, n, fill = 0)
@@ -250,7 +271,9 @@ check_eurostat_oil_completeness <- function(processed_data) {
   stopifnot(
     "Fix oil" = sector_counts[SECTOR_ALL] == 6,
     "Fix oil" = sector_counts[SECTOR_TRANSPORT_DOMESTIC] == 4,
-    "Fix oil" = sector_counts[SECTOR_TRANSPORT_INTERNATIONAL_AVIATION] == 2
+    "Fix oil" = sector_counts[SECTOR_TRANSPORT_INTERNATIONAL_AVIATION] == 2,
+    # 3 for monthly, 6 for yearly
+    "Fix oil" = sector_counts[SECTOR_ELEC] %in% c(3, 6)
   )
 }
 
@@ -336,7 +359,7 @@ add_oil_transport <- function(monthly, yearly, plot_validation = F) {
   }
 
 
-  # Assumption 1: Constant share of motor gasoline (that doesn't go to petro industry) goes to road energy use
+  # Assumption 1: Constant share of motor gasoline (that doesn't go to petro industry or electricity) goes to road energy use
   # Compute share
   share_motor_gasoline_road <- yearly %>%
     filter(siec_code == SIEC_MOTOR_GASOLINE_XBIO,
