@@ -141,7 +141,7 @@ process_solid_monthly <- function(x, pwr_generation) {
     min_countries = 25,
     max_rel_diff = 0.05
   ) %>%
-    mutate(fuel = ifelse(siec_code == SIEC_COKE_OVEN_COKE, FUEL_COKE, FUEL_COAL))
+    mutate(fuel = siec_to_fuel(siec_code))
 
 
   # Remove part of the coal that is used to produced coke to avoid double counting
@@ -172,7 +172,8 @@ process_solid_monthly <- function(x, pwr_generation) {
     filter(!is.na(values)) %>%
     group_by(iso2, fuel, time) %>%
     summarise(n = n_distinct(sector)) %>%
-    mutate(keep = n == max(n) | time < max(time) - months(36))
+    mutate(keep = n == max(n) | time < max(time) - months(36)) %>%
+    ungroup()
 
   result <- result %>%
     add_iso2() %>%
@@ -210,20 +211,31 @@ process_solid_yearly <- function(x) {
             (nrg_bal_code == NRG_FINAL_IRON_STEEL & siec_code == SIEC_COKE_OVEN_COKE)) %>%
         mutate(
             sector = ifelse(grepl("electricity", nrg_bal), SECTOR_ELEC, SECTOR_ALL),
-            fuel = ifelse(siec_code == SIEC_COKE_OVEN_COKE, FUEL_COKE, FUEL_COAL)
+            fuel = siec_to_fuel(siec_code)
         ) %>%
 
-  # Remove MOST OF coal used to produce coke to avoid double counting
-  # We find in investigate_coking_emissions that we can approximate that
-  # coke oven gas emissions represent roughly 8% of the equivalent
-  # of hard coal emissions. So we keep some of it to account for it
-  # (coke oven gas will then be under Coal category)
-  mutate(factor = case_when(
-      nrg_bal_code == NRG_TRANS_COKING ~ -1 + HARDCOAL_COKING_RATE_FACTOR,
-      TRUE ~ 1)
-      ) %>%
-    group_by(iso2, time, siec_code, sector, fuel, unit) %>%
-    summarise(values = sum(values * factor, na.rm = T), .groups = "drop")
+    # Remove MOST OF coal used to produce coke to avoid double counting
+    # We find in investigate_coking_emissions that we can approximate that
+    # coke oven gas emissions represent roughly 8% of the equivalent
+    # of hard coal emissions. So we keep some of it to account for it
+    # (coke oven gas will then be under Coal category)
+    mutate(factor = case_when(
+        nrg_bal_code == NRG_TRANS_COKING ~ -1 + HARDCOAL_COKING_RATE_FACTOR,
+        TRUE ~ 1)
+        ) %>%
+      group_by(iso2, time, siec_code, sector, fuel, unit) %>%
+      summarise(values = sum(values * factor, na.rm = T), .groups = "drop")
 
   return(result)
+}
+
+siec_to_fuel <- function(siec_code) {
+  dplyr::case_when(
+    siec_code %in% c(SIEC_BROWN_COAL, SIEC_HARD_COAL, SIEC_BROWN_COAL_BRIQUETTES, SIEC_OIL_SHALE) ~ FUEL_COAL,
+    siec_code == SIEC_COKE_OVEN_COKE ~ FUEL_COKE,
+    siec_code == SIEC_PEAT ~ FUEL_PEAT,
+    TRUE ~ NA_character_
+  ) %>%
+    # Raise error if unknown siec_code
+    {if(any(is.na(.))) stop("Unknown SIEC code in siec_to_fuel") else .}
 }

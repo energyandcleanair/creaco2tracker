@@ -70,7 +70,6 @@ get_co2 <- function(diagnostics_folder='diagnostics',
                                                 use_cache = use_cache
                                                 )
 
-
   # Project and impute data until now using various methods
   # We need to have all EU countries there as some EU imputation
   # relies on its member states
@@ -108,6 +107,9 @@ get_co2 <- function(diagnostics_folder='diagnostics',
 
   # Resplit gas
   co2 <- split_gas_to_elec_others(co2)
+
+  # Re-combine fuels e.g. peat goes to coal
+  co2 <- recombine_fuels(co2)
 
   # Add total
   co2 <- add_total_co2(co2)
