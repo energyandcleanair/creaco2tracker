@@ -37,7 +37,10 @@ Imports:
     httr,
     ggrepel,
     forecast
+Suggests:
+    testthat (>= 3.0.0)
 Remotes:
     energyandcleanair/creahelpers,
     energyandcleanair/rcrea
 RoxygenNote: 7.2.3
+Config/testthat/edition: 3

@@ -3,8 +3,6 @@ library(dplyr)
 library(tibble)
 library(creahelpers)
 
-devtools::load_all(".")
-
 make_co2 <- function(dates, values){
   tibble(
     iso2 = "BE",

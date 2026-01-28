@@ -56,7 +56,7 @@ create_pwr_generation_mock <- function(value_init = 0, add_daily = 10,
       value_mwh = value,
       value_mw = value
     ) %>%
-    select(-value) %>%
+    select(-value, -fuel) %>%
     arrange(iso2, source, date)
 }
 
@@ -197,14 +197,21 @@ test_that("Projection and downscaling work well together", {
 
   ggplot(bind_rows(co2_gas_projected %>% mutate(type='projected'),
                    co2_unprojected %>% mutate(type='unprojected')),
-         aes(x = date, y = value, color = fuel, linetype=type)) + geom_line() + geom_point() + facet_wrap(~sector)
-
+         aes(x = date, y = value, color = fuel, linetype=type, size=type)) +
+    geom_line() +
+    geom_point() +
+    facet_wrap(~sector) +
+    scale_size_manual(values=c('projected'=0.5, 'unprojected'=1))
 
   # Combine the projected results
   co2_monthly <- bind_rows(
     co2_elec_projected,
     co2_gas_projected
   ) %>%
+    # We remove duplicates that are due to using both methods in parallel
+    # rather than sequentially
+    # For some reasons, there is an epsilon diff, hence our rounding
+    mutate(value = round(value, digits=2)) %>%
     dplyr::distinct(iso2, date, fuel, sector, unit, value, .keep_all = TRUE) %>%
     mutate(estimate = "central")
 

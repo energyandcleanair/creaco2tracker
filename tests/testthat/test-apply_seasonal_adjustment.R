@@ -1,3 +1,5 @@
+library(testthat)
+
 test_that("apply_seasonal_adjustment works correctly with valid data", {
   # Create test data with complete monthly data for seasonal pattern calculation
   cons_monthly <- tribble(
