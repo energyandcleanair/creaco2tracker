@@ -1,6 +1,6 @@
 entsoe.get_power_generation <- function(
   date_from="2015-01-01",
-  date_to=NULL,
+  date_to=today(),
   iso2s="EU",
   use_cache=T,
   use_local=F) {
@@ -84,7 +84,7 @@ entsoe.get_power_generation <- function(
 }
 
 
-entsoe.get_installed_capacity <- function(date_from="2015-01-01", date_to=NULL, iso2s="EU", use_cache=T, refresh_cache=!use_cache, use_local=F) {
+entsoe.get_installed_capacity <- function(date_from="2015-01-01", date_to=today(), iso2s="EU", use_cache=T, refresh_cache=!use_cache, use_local=F) {
 
   if(all(iso2s=="EU")){
     iso2s <- get_eu_iso2s(include_eu = F)
