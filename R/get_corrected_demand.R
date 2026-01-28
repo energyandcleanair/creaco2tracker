@@ -1,3 +1,67 @@
+# get_corrected_demand <- function(diagnostics_folder = 'diagnostics',
+#                                  use_co2_in_db = TRUE,
+#                                  use_cache = TRUE) {
+#   create_dir(diagnostics_folder)
+#
+#   # Get correction factors from new function
+#   correction_factors <- get_weather_correction_demand(
+#     iso2s = "EU",
+#     date_from = "2019-01-01",
+#     date_to = Sys.Date(),
+#     demand_fuels = c("electricity", "fossil_gas"),
+#     use_cache = use_cache,
+#     diagnostics_folder = diagnostics_folder
+#   )
+#
+#   # load data
+#   co2 <- if(use_co2_in_db){
+#     download_co2()
+#   }else{
+#     get_co2(diagnostics_folder=diagnostics_folder, downscale_daily=T) %>%
+#       filter(estimate=="central")
+#   }
+#
+#   co2_wc <- co2 %>%
+#     select(iso2, date, fuel, sector, value) %>%
+#     inner_join(
+#       correction_factors %>% select(
+#         date, iso2, fuel, sector, correction_factor
+#       )) %>%
+#     mutate(
+#       value_weather_corrected = value * correction_factor
+#     )
+#
+#
+#   corrected_gas_demand <- co2_wc %>%
+#     filter(fuel == FUEL_GAS, sector == SECTOR_OTHERS) %>%
+#     mutate(unit = "TWh/day",
+#            value = value_weather_corrected / 55 / 3.6 / 1000) %>%
+#     mutate(fuel = "fossil_gas_temperature_corrected",
+#            sector = "except_power",
+#            data_source = "crea",
+#            frequency = "daily",
+#            region_id = iso2,
+#            region_type = "region") %>%
+#     select(date, unit, value, fuel, sector, data_source, frequency, region_id, region_type)
+#
+#   corrected_electricity_demand <- correction_factors %>%
+#     filter(sector==SECTOR_ELEC, unit=="MWh", fuel==FUEL_TOTAL) %>%
+#     mutate(unit = "GW",
+#            value = value_weather_corrected / 24 / 1000) %>%
+#     mutate(fuel = "electricity_temperature_corrected",
+#            sector = "total",
+#            data_source = "crea",
+#            frequency = "daily",
+#            region_id = iso2,
+#            region_type = "region") %>%
+#     select(date, unit, value, fuel, sector, data_source, frequency, region_id, region_type)
+#
+#   return(bind_rows(corrected_gas_demand,
+#                    corrected_electricity_demand))
+# }
+
+
+
 get_corrected_demand <- function(diagnostics_folder='diagnostics',
                                  use_co2_in_db=T){
 
@@ -13,15 +77,15 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
 
 
   gas_demand <- co2 %>%
-    filter(sector=='Others', fuel=='Gas') %>%
+    filter(sector==SECTOR_OTHERS, fuel==FUEL_GAS) %>%
     mutate(value_TWh = value / 55 / 3.6 / 1000) %>%
     select(date, value_TWh)
 
   pwr <- entsoe.get_power_generation(use_cache = F)
 
   pwr_generation <- pwr %>%
-    filter(region=='EU', source=='Total') %>%
-    group_by(source, region, date) %>%
+    filter(iso2=='EU', source=='Total') %>%
+    group_by(source, iso2, date) %>%
     dplyr::summarise(across(value_mw, sum, na.rm=T)) %>%
     mutate(country='EU')
 
@@ -80,7 +144,8 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
       mutate(across(value, zoo::rollapplyr, FUN=mean, width=plot_moving_average_days, fill=NA, na.rm=T)) %>%
       ungroup() %>%
       filter(measure=='value_temperature_corrected') %>%
-      ggplot(aes(plotdate, value, col=as.factor(year))) + geom_line(linewidth=1) +
+      ggplot(aes(plotdate, value, col=as.factor(year))) +
+      geom_line(linewidth=1) +
       labs(title=paste('EU temperature corrected', unique(data$name)),
            y=paste0(unique(data$unit), ', ', plot_moving_average_days, '-day mean'),
            x='', col='year') +
@@ -103,7 +168,7 @@ get_corrected_demand <- function(diagnostics_folder='diagnostics',
       geom_col() +
       labs(title=paste('EU temperature corrected anomaly', unique(data$name)),
            y=paste0(unique(data$unit), ', ', plot_moving_average_days, '-day mean'),
-           x='', col='year') +
+           x='') +
       theme_crea_new() +
       scale_color_crea_d('change', col.index = c(1:3,5:7)) +
       scale_y_continuous(labels=scales::comma) -> p
