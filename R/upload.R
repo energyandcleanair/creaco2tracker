@@ -61,7 +61,7 @@ upload_gas_demand <- function(gas_demand, production=T, clear_all_first=F){
   unique_cols <-  c('region_id', 'date', 'fuel', 'data_source', 'sector', 'unit', 'frequency')
 
   p <- gas_demand %>%
-    select(region_id, region_type, date, fuel, data_source, sector, unit, frequency, value)
+    select(region_id=iso2, region_type, date, fuel, data_source, sector, unit, frequency, value)
 
   db <- dbx::dbxConnect(adapter="postgres",
                         url=get_pg_url(production=production))

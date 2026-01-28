@@ -13,6 +13,7 @@ get_co2_from_eurostat_cons <- function(eurostat_cons,
   # Choose NCV method based on source parameter
   add_ncv_fn <- switch(ncv_source,
                        "iea" = add_ncv_iea,
+                       "iea_shared" = add_ncv_iea_shared,
                        "ipcc" = add_ncv_ipcc,
                        add_ncv_iea) # Default to IEA if invalid source
 
@@ -26,11 +27,9 @@ get_co2_from_eurostat_cons <- function(eurostat_cons,
     filter(!is.na(value_co2_tonne)) %>%
     group_by_at(group_by_cols) %>%
     summarise(value = sum(value_co2_tonne, na.rm=T),
-              unit='t',
+              unit="t",
               .groups="drop"
-    ) %>%
-    # Remove those with only partial data
-    ungroup()
+    )
 }
 
 #' Get emission factors from IPCC

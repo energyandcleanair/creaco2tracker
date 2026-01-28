@@ -78,28 +78,38 @@ downscale_daily <- function(co2, pwr_generation, gas_demand, cut_latest_days=3){
 get_daily_proxy <- function(pwr_generation, gas_demand, cut_latest_days=3){
 
   #aggregate daily power and gas data
-  pwr_generation %>%
-    filter(source %in% c('Coal', 'Fossil Gas')) %>%
+  pwr_proxy <- pwr_generation %>%
+    filter(source %in% c('Coal', 'Fossil Gas', 'Other fossil')) %>%
     group_by(iso2, source) %>%
-    mutate(fuel = recode(source, 'Fossil Gas'='gas', 'Coal'='coal'),
-           sector=SECTOR_ELEC) %>%
-    rename(value=value_mw) ->
-    pwr_yoy
+    mutate(sector=SECTOR_ELEC) %>%
+    rename(value=value_mw) %>%
+    ungroup()
 
-  gas_demand %>%
+
+  # Convert fuel from Eurostat to EMBER
+  # We'll downscale Peat and Oil elec with other fossil
+  source_fuel <- tibble(
+    source = c('Fossil Gas', 'Coal', 'Other fossil'),
+    fuel = c(list(FUEL_GAS), list(FUEL_COAL), list(c(FUEL_PEAT, FUEL_OIL)))
+  ) %>%
+    tidyr::unnest(fuel)
+
+  pwr_proxy <- pwr_proxy %>%
+    left_join(source_fuel, by='source', relationship = "many-to-many") %>%
+    select(-source)
+
+  gas_proxy <- gas_demand %>%
     filter(unit=='m3') %>%
     group_by(iso2, date) %>%
     summarise(across(value, sum), .groups="drop") %>%
     mutate(fuel='gas',
-           sector=SECTOR_ALL) ->
-    gas_yoy
+           sector=SECTOR_ALL)
 
-  bind_rows(pwr_yoy, gas_yoy) %>%
+  daily_proxy <- bind_rows(pwr_proxy, gas_proxy) %>%
     ungroup %>%
     mutate(date=as.Date(date)) %>%
-    filter(date<=max(gas_yoy$date) - lubridate::days(cut_latest_days)) %>%
-    select(iso2, date, fuel, sector, proxy_value=value) ->
-    daily_proxy
+    filter(date<=max(gas_proxy$date) - lubridate::days(cut_latest_days)) %>%
+    select(iso2, date, fuel, sector, proxy_value=value)
 
   return(daily_proxy)
 }

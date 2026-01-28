@@ -11,6 +11,7 @@ SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING <- "transport_international_shipping"
 # Fuel families
 FUEL_COAL <- "coal"
 FUEL_COKE <- "coke"
+FUEL_PEAT <- "peat"
 FUEL_OIL <- "oil"
 FUEL_GAS <- "gas"
 FUEL_TOTAL <- "total"

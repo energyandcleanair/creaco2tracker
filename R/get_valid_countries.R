@@ -1,21 +1,26 @@
 get_valid_countries <- function(co2,
+                                validation_data=NULL,
                                 min_year=2020,
                                 min_correlation=0.9,
                                 max_mae=0.03) {
 
-  get_validity_metrics(co2, min_year, min_correlation, max_mae) %>%
+  get_validity_metrics(co2, validation_data, min_year, min_correlation, max_mae) %>%
     filter(ok) %>%
     pull(iso2)
 }
 
 get_validity_metrics <- function(
     co2,
-  min_year=2020,
-  min_correlation=0.9,
-  max_mae=0.03) {
+    validation_data=NULL,
+    min_year=2020,
+    min_correlation=0.9,
+    max_mae=0.03) {
 
   # Get validation data first (similar to validate_co2 function)
-  validation <- get_validation_data(region=unique(co2$iso2))
+  if (is.null(validation_data) | !all(unique(co2$iso2) %in% unique(validation_data$iso2))){
+    validation_data <- get_validation_data(region=unique(co2$iso2))
+  }
+
 
   # Calculate yearly totals for CREA data
   co2_crea <- co2 %>%
@@ -28,8 +33,8 @@ get_validity_metrics <- function(
               .groups = "drop")
 
   # Filter GCP2 data from validation
-  co2_gcp <- validation %>%
-    filter(source == "Global Carbon Budget 2024",
+  co2_gcp <- validation_data %>%
+    filter(source == "Global Carbon Budget 2025",
            sector == SECTOR_ALL,
            fuel == FUEL_TOTAL)
 
@@ -59,10 +64,10 @@ get_validity_metrics <- function(
     pivot_wider(names_from = source, values_from = yoy) %>%
     group_by(iso2) %>%
     summarise(
-      rmse = sqrt(mean((CREA - `Global Carbon Budget 2024`)^2, na.rm = TRUE)),  # Root Mean Square Error
-      mae = mean(abs(CREA - `Global Carbon Budget 2024`), na.rm = TRUE),        # Mean Absolute Error
-      correlation = cor(CREA, `Global Carbon Budget 2024`, use = "complete.obs"), # Correlation
-      n_years = sum(!is.na(CREA) & !is.na(`Global Carbon Budget 2024`)),        # Number of comparable years
+      rmse = sqrt(mean((CREA - `Global Carbon Budget 2025`)^2, na.rm = TRUE)),  # Root Mean Square Error
+      mae = mean(abs(CREA - `Global Carbon Budget 2025`), na.rm = TRUE),        # Mean Absolute Error
+      correlation = cor(CREA, `Global Carbon Budget 2025`, use = "complete.obs"), # Correlation
+      n_years = sum(!is.na(CREA) & !is.na(`Global Carbon Budget 2025`)),        # Number of comparable years
       .groups = "drop"
     ) %>%
     mutate(

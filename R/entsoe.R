@@ -1,14 +1,28 @@
-entsoe.get_power_generation <- function(date_from="2015-01-01", region="EU", use_cache=T, refresh_cache=!use_cache, use_local=F) {
+entsoe.get_power_generation <- function(
+  date_from="2015-01-01",
+  date_to=today(),
+  iso2s="EU",
+  use_cache=T,
+  use_local=F) {
+
+  if(all(iso2s=="EU")){
+    iso2s_fetch <- get_eu_iso2s(include_eu = F)
+  }else{
+    iso2s_fetch <- iso2s
+  }
 
   base_url <- ifelse(use_local, "http://localhost:8080", "https://api.energyandcleanair.org")
-  pwr <- creahelpers::api.get(glue('{base_url}/power/generation'),
+  pwr <- creahelpers::api.get(glue('{base_url}/energy/power_generation'),
                               date_from=date_from,
+                              date_to=date_to,
                               aggregate_by='country,source,date',
-                              region=region,
+                              country=paste(sort(iso2s_fetch), collapse=','),
                               data_source='entsoe',
                               split_by = 'year',
-                              use_cache = use_cache,
-                              refresh_cache = refresh_cache,
+                              # The meaning of use_cache is different
+                              # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means weather or not to invalidate it
+                              use_cache = TRUE,
+                              refresh_cache = !use_cache,
                               cache_folder = "cache",
                               verbose = T)
 
@@ -51,17 +65,57 @@ entsoe.get_power_generation <- function(date_from="2015-01-01", region="EU", use
     ungroup()
 
 
-  #add EU total
-  pwr <- pwr %>%
-    filter(country!='EU total') %>%
-    group_by(date, source) %>%
-    filter(region=='EU') %>%
-    dplyr::summarise_at(c("value_mw", "value_mwh"), sum, na.rm=T) %>%
-    mutate(country='EU total',
-           iso2='EU') %>%
-    bind_rows(pwr %>% filter(country!='EU total')) %>%
-    ungroup()
+  # add EU total if we have all EU countries, except Cyprus and Malta that are missing from ENTSOE
+  if(all(setdiff(get_eu_iso2s(include_eu = F), c("CY", "MT")) %in% pwr$iso2)) {
+    pwr <- pwr %>%
+      filter(iso2 %in% get_eu_iso2s(include_eu = F)) %>%
+      group_by(date, source) %>%
+      dplyr::summarise_at(c("value_mw", "value_mwh"), sum, na.rm=T) %>%
+      mutate(country='EU total',
+             iso2='EU') %>%
+      bind_rows(pwr %>% filter(iso2 != 'EU')) %>%
+      ungroup()
+  }
 
+  pwr <- pwr %>%
+    filter(iso2 %in% iso2s)
 
   return(pwr)
+}
+
+
+entsoe.get_installed_capacity <- function(date_from="2015-01-01", date_to=today(), iso2s="EU", use_cache=T, refresh_cache=!use_cache, use_local=F) {
+
+  if(all(iso2s=="EU")){
+    iso2s <- get_eu_iso2s(include_eu = F)
+  }
+
+  base_url <- ifelse(use_local, "http://localhost:8080", "https://api.energyandcleanair.org")
+  capacity <- creahelpers::api.get(glue('{base_url}/power/installed_capacity'),
+                                   date_from=date_from,
+                                   date_to=date_to,
+                                   aggregate_by='country,source,date',
+                                   country=paste(iso2s, collapse=','),
+                                   data_source='entsoe',
+                                   split_by = 'year',
+                                   # The meaning of use_cache is different
+                                   # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means weather or not to invalidate it
+                                   use_cache = TRUE,
+                                   refresh_cache = !use_cache,
+                                   cache_folder = "cache",
+                                   verbose = T)
+
+  # Add EU total if we have all EU countries, except Cyprus and Malta that are missing from ENTSOE
+  if(all(setdiff(get_eu_iso2s(include_eu = F), c("CY", "MT")) %in% capacity$iso2)) {
+    capacity <- capacity %>%
+      filter(iso2 %in% get_eu_iso2s(include_eu = F)) %>%
+      group_by(date, source) %>%
+      summarise(value_mw = sum(value_mw, na.rm = TRUE), .groups = "drop") %>%
+      mutate(country = 'EU total',
+             iso2 = 'EU',
+             data_source = 'entsoe') %>%
+      bind_rows(capacity %>% filter(iso2 != 'EU'))
+  }
+
+  return(capacity)
 }

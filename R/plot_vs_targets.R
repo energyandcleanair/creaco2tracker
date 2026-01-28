@@ -2,6 +2,7 @@ plot_vs_targets <- function(co2,
                           iso2s = "EU",
                           colors,
                           filepath,
+                          year_f,
                           min_year = 2010,
                           title = "EU CO2 emissions vs. 2030 and 2050 reduction targets",
                           width = 8,
@@ -37,7 +38,7 @@ plot_vs_targets <- function(co2,
 
   # Historical emissions by sector
   historical <- co2_filtered %>%
-    filter(year >= min_year, year <= 2024)
+    filter(year >= min_year, year <= year_f)
 
   # Remove one day to the last value to avoid overlapping with the target projection
   historical <- historical %>%
@@ -45,20 +46,20 @@ plot_vs_targets <- function(co2,
 
   # Create target projection data
   latest_total <- co2_filtered %>%
-    filter(year==2024) %>%
+    filter(year==year_f) %>%
     summarise(value=sum(value, na.rm=T)) %>%
     pull(value)
 
   target_projection_2030 <- tibble(
-    year = 2024:2030,
-    value = seq(latest_total, target_2030, length.out=7),
+    year = year_f:2030,
+    value = seq(latest_total, target_2030, length.out=length(year_f:2030)),
     sector = "Target"
   ) %>%
     mutate(date=as.Date(paste0(year, "-01-01")))
 
   target_projection_2050 <- tibble(
     year = 2030:2050,
-    value = seq(target_2030, target_2050, length.out=21),
+    value = seq(target_2030, target_2050, length.out=length(2030:2050)),
     sector = "Target"
   ) %>%
     mutate(date=as.Date(paste0(year, "-01-01")))
@@ -70,7 +71,7 @@ plot_vs_targets <- function(co2,
   )
 
   labels <- plt_data %>%
-    filter(year==2024) %>%
+    filter(year==year_f) %>%
     arrange(value) %>%
     pull(sector)
 

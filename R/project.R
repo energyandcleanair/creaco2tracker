@@ -3,23 +3,33 @@
 #' @param co2
 #' @param pwr_generation
 #' @param gas_demand
+#' @param eurostat_indprod
+#' @param fill_mode one of "overwrite", "missing", or "ratio". Default is "missing".
 #'
 #' @return
 #' @export
 #'
 #' @examples
-project_until_now <- function(co2, pwr_generation, gas_demand, eurostat_indprod){
+project_until_now <- function(
+  co2_unprojected,
+  pwr_generation,
+  gas_demand,
+  eurostat_indprod,
+  fill_mode=c("missing", "overwrite", "ratio"),
+  date_to=NULL){
 
-  dts_month <- seq.Date(min(co2$date), today() %>% 'day<-'(1), by='month')
+  fill_mode <- match.arg(fill_mode) # Takes the first one by default i.e. missing
 
-  co2 %>%
+  dts_month <- seq.Date(min(co2_unprojected$date), if(is.null(date_to)) today() %>% 'day<-'(1) else as.Date(date_to), by='month')
+
+  co2_unprojected %>%
     split_gas_to_elec_all() %>%
-    project_until_now_elec(pwr_generation=pwr_generation, dts_month=dts_month) %>%
-    project_until_now_gas(gas_demand=gas_demand, dts_month=dts_month) %>%
-    project_eu_from_countries(dts_month=dts_month) %>%
+    project_until_now_elec(pwr_generation=pwr_generation, dts_month=dts_month, fill_mode=fill_mode) %>%
+    project_until_now_gas(gas_demand=gas_demand, dts_month=dts_month, fill_mode=fill_mode) %>%
+    project_eu_from_countries(dts_month=dts_month, fill_mode=fill_mode) %>%
 
     # We use industry for coal others
-    project_until_now_coal_others(eurostat_indprod=eurostat_indprod, dts_month=dts_month) %>%
+    project_until_now_coal_others(eurostat_indprod=eurostat_indprod, dts_month=dts_month, fill_mode=fill_mode) %>%
 
     # Then run projections
     project_until_now_forecast(dts_month=dts_month) %>%
@@ -36,18 +46,43 @@ project_until_now <- function(co2, pwr_generation, gas_demand, eurostat_indprod)
 #' @param dts_month
 #' @param last_years number of years to use for training the model
 #' @param min_r2 minimum R2 for model to be considered good enough. If not good enough, data is left as NA
-#' @param force_overwrite if TRUE, overwrite existing data with predicted one. Mostly for debugging.
+#' @param fill_mode one of "overwrite", "missing", or "ratio". If NULL, uses force_overwrite to choose.
 #'
 #' @return
 #' @export
 #'
 #' @examples
-project_until_now_lm <- function(co2, proxy, dts_month, min_r2=0.9, force_overwrite=F, verbose=F){
+project_until_now_lm <- function(
+  x,
+  proxy,
+  dts_month,
+  min_r2=0.9,
+  fill_mode=c("overwrite", "missing", "ratio"),
+  allow_intercept=FALSE,
+  verbose=F){
 
-  co2_untouched <- co2 %>% anti_join(proxy %>% distinct(iso2, fuel, sector),
+  fill_mode <- match.arg(fill_mode)
+
+  log_warn_safe <- function(msg){
+    if(exists("log_warn", mode="function")){
+      log_warn(msg)
+    }else{
+      warning(msg)
+    }
+  }
+
+  log_success_safe <- function(msg){
+    if(exists("log_success", mode="function")){
+      log_success(msg)
+    }else{
+      message(msg)
+    }
+  }
+
+  co2_untouched <- x %>% anti_join(proxy %>% distinct(iso2, fuel, sector),
                                       by=c('iso2', 'fuel', 'sector')
                                      )
-  co2_touched <- co2 %>%
+  co2_touched <- x %>%
     inner_join(proxy %>% distinct(iso2, fuel, sector),
                by=c('iso2', 'fuel', 'sector')) %>%
     group_by(iso2, fuel, sector, unit) %>%
@@ -55,6 +90,7 @@ project_until_now_lm <- function(co2, proxy, dts_month, min_r2=0.9, force_overwr
     arrange(desc(date)) %>%
     ungroup() %>%
     group_by(iso2, fuel, sector, unit) %>%
+
     group_modify(function(df, keys, ...) {
 
       iso2 <- keys %>% add_iso2() %>% pull(iso2)
@@ -73,10 +109,23 @@ project_until_now_lm <- function(co2, proxy, dts_month, min_r2=0.9, force_overwr
                               by=c('iso2', 'fuel', 'sector')),
                   by=c('date'))
 
+      model_adj_r2 <- function(model){
+        r2 <- summary(model)$adj.r.squared
+        if(is.na(r2)){
+          0
+        }else{
+          r2
+        }
+      }
+
+      model_predict <- function(model, data){
+        predict(model, data)
+      }
+
       get_trained_model <- function(data, n_year){
 
         data_training <- data %>%
-          filter(value>0,
+          filter(value>=0,
                  date >= max(date) - lubridate::years(n_year))
 
         if(nrow(data_training)==0){
@@ -89,8 +138,9 @@ project_until_now_lm <- function(co2, proxy, dts_month, min_r2=0.9, force_overwr
 
           # Only rows with non nas
           filter_all(all_vars(!is.na(.))) %>%
+
           # Only positive values
-          filter_all(~all(.>0))
+          filter_all(all_vars(. >= 0))
 
         # If all value_proxy_cols are NA, stop
         if(length(intersect(value_proxy_cols, colnames(data_training)))==0){
@@ -103,51 +153,160 @@ project_until_now_lm <- function(co2, proxy, dts_month, min_r2=0.9, force_overwr
         }
 
         formula_cols <- grep('value_proxy', colnames(data_training), value=T)
+        formula_prefix <- if(allow_intercept) 'value ~ ' else 'value ~ 0 + '
+        formula <- paste0(formula_prefix, paste0(formula_cols, collapse=' + '))
+
         if(data_training %>% select_at(formula_cols) %>% filter_all(any_vars(!is.na(.))) %>% nrow > 0){
-          lm(data=data_training, formula= paste0('value ~ 0+', paste0(formula_cols, collapse=' + ')))
+          lm(data=data_training, formula= formula)
         }else{
           NULL
         }
       }
 
       # We automatically determine the number of years to consider based on adjusted R2
-      n_years <- seq(1,10)
+      n_years <- seq(2,10)
       r2s <- lapply(n_years, function(n_year){
         model <- get_trained_model(data, n_year)
         if(!is.null(model)){
-          summary(model)$adj.r.squared
+          model_adj_r2(model)
         }else{
           0
         }
       })
 
-
       # Best R2
       if(all(r2s==0)){
-        log_warn(glue("{iso2} - {fuel} {sector}: No proxy data. Leaving as such."))
+        log_warn_safe(glue::glue("{iso2} - {fuel} {sector}: No proxy data. Leaving as such."))
         return(df)
       }
 
       n_year <- n_years[which.max(r2s)]
       model <- get_trained_model(data, n_year)
 
-      r2 <- summary(model)$adj.r.squared
+      r2 <- model_adj_r2(model)
       if(r2 < min_r2){
-        log_warn(glue("{iso2} - {fuel} {sector}: Model CO2 ~ proxy not good enough (R2={round(r2,2)}). Leaving as NA."))
+        log_warn_safe(glue::glue("{iso2} - {fuel} {sector}: Model CO2 ~ proxy not good enough (R2={round(r2,2)}). Leaving as NA."))
         return(df)
-      }else{
-        log_success(glue("{iso2} - {fuel} {sector}: Model CO2 ~ proxy OK (R2={round(r2,2)}). Using {n_year} years for training."))
       }
+      log_success_safe(glue::glue("{iso2} - {fuel} {sector}: Model CO2 ~ proxy OK (R2={round(r2,2)}). Using {n_year} years for training."))
 
-      if(force_overwrite){
-        df$value <- predict(model, data)
-      }else{
-        df$value <- coalesce(df$value, predict(model, data))
+      if(is.null(fill_mode)){
+        fill_mode <- if(force_overwrite) "overwrite" else "missing"
+      }
+      fill_mode <- match.arg(fill_mode, c("overwrite", "missing", "ratio"))
+
+      if(fill_mode == "overwrite"){
+        df$value <- model_predict(model, data)
+      }else if(fill_mode == "missing"){
+        df$value <- coalesce(df$value, model_predict(model, data))
+      }else if(fill_mode == "ratio"){
+        data_ordered <- data %>% arrange(date)
+        preds <- model_predict(model, data_ordered)
+        ratio <- preds / dplyr::lag(preds)
+        ratio[dplyr::lag(preds) == 0 & preds == 0] <- 1
+        ratio[!is.finite(ratio)] <- NA
+
+        filled <- data_ordered$value
+        for(i in seq_along(filled)){
+          if(is.na(filled[i]) && i > 1 && !is.na(filled[i-1]) && !is.na(ratio[i])){
+            filled[i] <- filled[i-1] * ratio[i]
+          }
+        }
+
+        df <- df %>%
+          left_join(tibble::tibble(date = data_ordered$date, value_filled = filled), by="date") %>%
+          mutate(value = value_filled) %>%
+          select(-value_filled)
       }
       df
     }) %>%
     ungroup()
 
+
+  bind_rows(
+    co2_untouched,
+    co2_touched
+  )
+}
+
+
+#' Project til now assuming zeros when proxy stays at zero
+#'
+#' @param x
+#' @param proxy a data frame with iso2, date, value_proxy (optional value_proxy2, etc.), fuel, sector
+#' @param dts_month
+#' @param force_overwrite if TRUE, overwrite existing data with zeros.
+#' @param verbose
+#'
+#' @return
+#' @export
+#'
+#' @examples
+project_until_now_zeros <- function(x, proxy, dts_month, verbose=F){
+
+  co2_untouched <- x %>% anti_join(proxy %>% distinct(iso2, fuel, sector),
+                                      by=c('iso2', 'fuel', 'sector')
+                                     )
+  co2_touched <- x %>%
+    inner_join(proxy %>% distinct(iso2, fuel, sector),
+               by=c('iso2', 'fuel', 'sector')) %>%
+    group_by(iso2, fuel, sector, unit) %>%
+    expand_dates('date', dts_month) %>%
+    arrange(desc(date)) %>%
+    ungroup() %>%
+    group_by(iso2, fuel, sector, unit) %>%
+
+    group_modify(function(df, keys, ...) {
+
+      iso2 <- keys %>% add_iso2() %>% pull(iso2)
+      fuel <- unique(keys$fuel)
+      sector <- unique(keys$sector)
+
+      if(verbose){
+        print(keys)
+      }
+
+      value_proxy_cols <- grep('value_proxy', colnames(proxy), value=T)
+      data <- df %>%
+        left_join(keys %>%
+                    left_join(proxy %>%
+                                select_at(c('iso2', 'date', value_proxy_cols, 'fuel', 'sector')),
+                              by=c('iso2', 'fuel', 'sector')),
+                  by=c('date'))
+
+      latest_data <- data$date[!is.na(data$value)]
+      latest_data <- if(length(latest_data) > 0) max(latest_data) else as.Date(NA)
+
+      if(is.na(latest_data)){
+        return(df)
+      }
+
+      latest_row <- data %>% filter(date == latest_data)
+      if(nrow(latest_row) == 0 || latest_row$value[1] != 0){
+        return(df)
+      }
+
+      latest_proxy <- latest_row %>% select_at(value_proxy_cols)
+      latest_proxy_zero <- all(vapply(latest_proxy, function(x) any(!is.na(x)) && all(x[!is.na(x)] == 0), logical(1)))
+      if(!latest_proxy_zero){
+        return(df)
+      }
+
+      future_proxy <- data %>%
+        filter(date > latest_data) %>%
+        select_at(value_proxy_cols)
+      if(nrow(future_proxy) == 0){
+        return(df)
+      }
+
+      future_proxy_zero <- all(vapply(future_proxy, function(x) any(!is.na(x)) && all(x[!is.na(x)] == 0), logical(1)))
+      if(!future_proxy_zero){
+        return(df)
+      }
+      df$value <- ifelse(df$date > latest_data, 0, df$value)
+      df
+    }) %>%
+    ungroup()
 
   bind_rows(
     co2_untouched,
@@ -199,16 +358,23 @@ project_until_now_yoy <- function(co2, dts_month, last_years=3, last_months=3){
     ungroup()
 }
 
-project_until_now_elec <- function(co2, pwr_generation, dts_month, min_r2=0.85, force_overwrite=F){
+project_until_now_elec <- function(x, pwr_generation, dts_month, min_r2=0.7, fill_mode=c("overwrite", "missing", "ratio")){
+
+  fill_mode <- match.arg(fill_mode)
+
+  # Convert fuel from Eurostat to EMBER
+  # We'll downscale Peat and Oil elec with other fossil
+  source_fuel <- tibble(
+    source = c('Fossil Gas', 'Coal', 'Other fossil'),
+    fuel = c(list(FUEL_GAS), list(FUEL_COAL), list(c(FUEL_PEAT, FUEL_OIL)))
+  ) %>%
+    tidyr::unnest(fuel)
+
 
   proxy <- pwr_generation %>%
-    filter(iso2 %in% co2$iso2) %>%
+    filter(iso2 %in% x$iso2) %>%
     ungroup() %>%
-    mutate(fuel=case_when(
-      source=='Coal' ~ 'coal',
-      source=='Fossil Gas' ~ 'gas',
-      T ~ NA_character_
-    )) %>%
+    left_join(source_fuel, by='source', relationship = "many-to-many") %>%
     filter(!is.na(fuel)) %>%
     # Important: We take average generation per day in any given month
     # => The last month data doesn't reflect emissions so far (e.g. if we're on the 15th of the month)
@@ -217,7 +383,8 @@ project_until_now_elec <- function(co2, pwr_generation, dts_month, min_r2=0.85, 
     # BUT we also want to account for number of days in the month to avoid 28-31 stuff
     group_by(iso2) %>%
     tidyr::complete(
-      source, date=seq.Date(min(date), max(date), by='day'),
+      nesting(source, fuel),
+      date=seq.Date(min(date), max(date), by='day'),
       fill=list(value_mwh=0)
     ) %>%
     group_by(iso2, sector=SECTOR_ELEC, fuel, date=floor_date(as.Date(date), 'month')) %>%
@@ -225,13 +392,16 @@ project_until_now_elec <- function(co2, pwr_generation, dts_month, min_r2=0.85, 
               .groups = 'drop') %>%
     arrange(desc(date))
 
+  project_until_now_zeros(x, proxy, dts_month=dts_month) %>%
+  project_until_now_lm(., proxy, dts_month=dts_month, min_r2=min_r2, fill_mode=fill_mode)
 
-  project_until_now_lm(co2, proxy, dts_month=dts_month, min_r2=min_r2, force_overwrite=force_overwrite)
 
 }
 
 
-project_until_now_gas <- function(co2, gas_demand, dts_month, min_r2=0.85){
+project_until_now_gas <- function(co2, gas_demand, dts_month, min_r2=0.7, fill_mode=c("overwrite", "missing", "ratio")){
+
+  fill_mode <- match.arg(fill_mode)
 
   proxy <- gas_demand %>%
     # filter(iso2 %in% co2$iso2) %>%
@@ -253,11 +423,13 @@ project_until_now_gas <- function(co2, gas_demand, dts_month, min_r2=0.85){
     arrange(desc(date)) %>%
     mutate(fuel='gas', sector=SECTOR_ALL)
 
-  project_until_now_lm(co2, proxy, dts_month=dts_month, min_r2=min_r2)
+  project_until_now_lm(co2, proxy, dts_month=dts_month, min_r2=min_r2, fill_mode=fill_mode)
 }
 
 
-project_until_now_coal_others <- function(co2, eurostat_indprod, dts_month, min_r2=0.85){
+project_until_now_coal_others <- function(co2, eurostat_indprod, dts_month, min_r2=0.7, fill_mode=c("overwrite", "missing", "ratio")){
+
+  fill_mode <- match.arg(fill_mode)
 
   # Cement, Steel, Glass, Coke
   products_ind <-
@@ -316,7 +488,7 @@ project_until_now_coal_others <- function(co2, eurostat_indprod, dts_month, min_
   #   geom_line() +
   #   scale_x_date(date_minor_breaks = "1 year", date_labels = "%Y") +
   #   rcrea::scale_y_crea_zero()
-  project_until_now_lm(co2, proxy, dts_month=dts_month, min_r2=min_r2)
+  project_until_now_lm(co2, proxy, dts_month=dts_month, min_r2=min_r2, fill_mode=fill_mode)
 
 }
 
@@ -385,10 +557,20 @@ project_until_now_forecast <- function(co2, dts_month, last_years=10, conf_level
   #   geom_line(aes(date, value, col=estimate)) +
   #   facet_wrap(sector~fuel + iso2)
 
-  res %>%
+
+
+  res_long <- res %>%
     fill_lower_upper() %>%
     pivot_longer(cols=starts_with('value_'), names_to='estimate', values_to='value',
                  names_prefix='value_')
+
+
+  # When values were >0 in the past and 0 for a while, sometimes the forecasts yields negative values
+  # Ideally, we would add a heuristic to avoid that, but for now we just set them to zero
+  # TODO implement project_until_now_zeros that works without proxy. In a rush right now.
+  res_long$value <- pmax(0, res_long$value)
+
+  return(res_long)
 }
 
 fill_lower_upper <- function(df) {
@@ -410,7 +592,9 @@ fill_lower_upper <- function(df) {
 #' @return Updated CO2 emissions dataframe with projected EU values
 #' @export
 project_eu_from_countries <- function(co2, dts_month, min_countries = 20,
-                                    sectors = NULL, fuels = NULL) {
+                                    sectors = NULL, fuels = NULL, fill_mode=c("overwrite", "missing", "ratio")) {
+
+  fill_mode <- match.arg(fill_mode)
 
   # Apply sector and fuel filters if provided
   co2_filtered <- co2
@@ -478,7 +662,8 @@ project_eu_from_countries <- function(co2, dts_month, min_countries = 20,
       co2_eu,
       proxy,
       dts_month = dts_month,
-      min_r2 = 0.95
+      min_r2 = 0.95,
+      fill_mode = fill_mode
     ) %>%
       mutate(order = i)  # Add order based on country set size (1 = largest set)
 
@@ -499,6 +684,3 @@ project_eu_from_countries <- function(co2, dts_month, min_countries = 20,
     final_projection
   )
 }
-
-
-

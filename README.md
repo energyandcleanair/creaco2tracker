@@ -7,7 +7,21 @@ The project welcomes collaboration with partners—be they government bodies, th
 Live charts are available on [CREA's website](https://energyandcleanair.org/product/eu-co2-emission-tracker/).
 
 
+## TO DO
+[ ] scale monthly power generation data to yearly values (the latter is more accurate and can be significantly different)
+
 ## Release Notes
+
+### Version 1.1
+Version used for January 2026 Report.
+
+#### Changes
+- Power generation now taken as a mix of ENTSOE and EMBER
+- Peat and oil for electriciy are now considered
+- EMBER Other fossil used for as potential predictor and downscaler for peat/oil electricity
+- added a IEA shared NCV option (all countries sharing the same NCV values)
+- International transport excluded from comparison with GCB
+
 
 ### Version 0.9
 Version used for 31 March 2025 Report.

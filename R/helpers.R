@@ -47,6 +47,58 @@ iso2_to_name <- function(x){
   countrycode(x, "iso2c", "country.name", custom_match = c("EU" = "EU"))
 }
 
+#' Remove international aviation from CO2 data
+#'
+#' Removes international aviation emissions from sector totals by subtracting
+#' aviation values from SECTOR_ALL and setting aviation sector values to 0.
+#'
+#' @param co2 Data frame with CO2 emissions data. Required columns:
+#'   iso2, date, unit, estimate, sector, value. Optional columns: region, version
+#'
+#' @return Data frame with international aviation excluded from totals
+#' @export
+remove_international_aviation <- function(co2) {
+
+  # Validate required columns
+  required_cols <- c("iso2", "date", "unit", "estimate", "sector", "value")
+  missing_cols <- setdiff(required_cols, names(co2))
+  if (length(missing_cols) > 0) {
+    stop("Missing required columns: ", paste(missing_cols, collapse = ", "))
+  }
+
+  # Check if SECTOR_ALL exists in the data
+  if (!any(co2$sector == SECTOR_ALL)) {
+    stop("No SECTOR_ALL found in data. Cannot exclude international aviation from totals.")
+  }
+
+  # Check if SECTOR_TRANSPORT_INTERNATIONAL_AVIATION exists in the data
+  if (!any(co2$sector == SECTOR_TRANSPORT_INTERNATIONAL_AVIATION)) {
+    warning("No SECTOR_TRANSPORT_INTERNATIONAL_AVIATION found in data. Returning data unchanged.")
+    return(co2)
+  }
+
+  # Build grouping columns dynamically based on what's available
+  grouping_cols <- c("iso2", "date", "unit", "estimate")
+  optional_cols <- c("region", "version")
+  grouping_cols <- c(grouping_cols, intersect(optional_cols, names(co2)))
+
+  co2 %>%
+    left_join(
+      co2 %>%
+        filter(sector == SECTOR_TRANSPORT_INTERNATIONAL_AVIATION) %>%
+        select(all_of(grouping_cols), aviation_value = value),
+      by = grouping_cols
+    ) %>%
+    mutate(
+      value = case_when(
+        sector == SECTOR_ALL ~ value - coalesce(aviation_value, 0),
+        sector == SECTOR_TRANSPORT_INTERNATIONAL_AVIATION ~ 0,
+        TRUE ~ value
+      )
+    ) %>%
+    select(-aviation_value)
+}
+
 
 split_gas_to_elec_others <- function(co2) {
   # Quick return if no work needed
@@ -118,6 +170,30 @@ split_gas_to_elec_all <- function(co2){
   gas_result <- gas_result[, names(co2)]
   bind_rows(gas_result, non_gas_data)
 }
+
+
+#' Recombine fuels e.g. peat -> coal
+#'
+#' @param co2
+#'
+#' @returns
+#' @export
+#'
+#' @examples
+recombine_fuels <- function(co2){
+
+  co2 %>%
+    mutate(fuel = case_when(
+      fuel == FUEL_PEAT ~ FUEL_COAL,
+      TRUE ~ fuel
+    )) %>%
+    group_by(across(c(-value))) %>%
+    summarise(
+      value = sum(value, na.rm = TRUE),
+      .groups = "drop"
+    )
+}
+
 
 #' This computes total co2, while properly aggregating uncertainty
 #'
@@ -204,7 +280,8 @@ format_co2_for_db <- function(co2, cut_tail_days=3){
     ungroup() %>%
     # Combine coal and coke
     combine_coke_coal() %>%
-    mutate(across(c(fuel, sector), stringr::str_to_title),
+    mutate(fuel=fuel_code_to_label(fuel),
+           sector=sector_code_to_label(sector),
            frequency='daily',
            region=iso2,
            version=as.character(packageVersion("creaco2tracker"))) %>%
@@ -248,4 +325,39 @@ create_dir <- function(folder){
 
 is_null_or_empty <- function(x){
   is.null(x) | (length(x)==0)
+}
+
+sector_code_to_label <- function(sector_code){
+  stringr::str_to_title(sector_code)
+}
+
+sector_label_to_code <- function(sector_label){
+  code = case_when(sector_label == str_to_title(SECTOR_ALL) ~ SECTOR_ALL,
+    sector_label == str_to_title(SECTOR_ELEC) ~ SECTOR_ELEC,
+    sector_label == str_to_title(SECTOR_TRANSPORT) ~ SECTOR_TRANSPORT,
+    sector_label == str_to_title(SECTOR_TRANSPORT_DOMESTIC) ~ SECTOR_TRANSPORT_DOMESTIC,
+    sector_label == str_to_title(SECTOR_TRANSPORT_INTERNATIONAL_AVIATION) ~ SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,
+    sector_label == str_to_title(SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING) ~ SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING,
+    sector_label == str_to_title(SECTOR_OTHERS) ~ SECTOR_OTHERS,
+    sector_label == str_to_title(SECTOR_ALL) ~ SECTOR_ALL,
+    TRUE ~ NA_character_
+  )
+  if(any(is.na(code))) stop(glue("Unknown sector label: {sector_label}"))
+  code
+}
+
+fuel_code_to_label <- function(fuel_code){
+  stringr::str_to_title(fuel_code)
+}
+
+fuel_label_to_code <- function(fuel_label){
+  code = case_when(fuel_label == str_to_title(FUEL_COAL) ~ FUEL_COAL,
+    fuel_label == str_to_title(FUEL_COKE) ~ FUEL_COKE,
+    fuel_label == str_to_title(FUEL_OIL) ~ FUEL_OIL,
+    fuel_label == str_to_title(FUEL_GAS) ~ FUEL_GAS,
+    fuel_label == str_to_title(FUEL_TOTAL) ~ FUEL_TOTAL,
+    TRUE ~ NA_character_
+  )
+  if(any(is.na(code))) stop(glue("Unknown fuel label: {fuel_label}"))
+  code
 }

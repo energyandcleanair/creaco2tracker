@@ -3,8 +3,8 @@ get_colors <- function() {
 
   colors_fuel <- c(
     Coal = rcrea::pal_crea[["Black"]],
-    Gas = "#666666",
-    `Fossil Gas` = "#666666",
+    Gas = rcrea::pal_crea[["Orange"]],
+    `Fossil Gas` = rcrea::pal_crea[["Orange"]],
     Oil = rcrea::pal_crea[["Dark.purple"]],
 
     # Electricity

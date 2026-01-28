@@ -11,13 +11,15 @@ validate_co2 <- function(co2,
 
   # Get validation data once
   validation_data <- get_validation_data(region=unique(co2$iso2))
-  valid_iso2s <- get_valid_countries(co2)
+  valid_iso2s <- get_valid_countries(co2, validation_data)
+  latest_year <- max(lubridate::year(co2$date), na.rm = TRUE)
 
   # Run all validations with shared validation data
   validate_co2_historical(co2,
                           validation_data,
                           folder = file.path(diagnostics_folder, "co2_historical"),
-                          date_from = date_from)
+                          date_from = date_from,
+                          year_to = latest_year)
 
   validate_co2_timeseries(co2,
                           folder = file.path(diagnostics_folder, "co2_timeseries")
@@ -28,7 +30,8 @@ validate_co2 <- function(co2,
                        )
 
   validate_co2_transport(co2,
-                         folder = file.path(diagnostics_folder, "co2_transport")
+                         folder = file.path(diagnostics_folder, "co2_transport"),
+                         year_to = latest_year
                          )
 }
 
@@ -40,7 +43,9 @@ validate_co2_historical <- function(co2 = NULL,
                                     folder = "diagnostics",
                                     date_from = "1990-01-01",
                                     by_country = T,
-                                    all_countries = T
+                                    all_countries = T,
+                                    year_to = NULL,
+                                    exclude_international_aviation = TRUE
                                     ) {
 
 
@@ -50,6 +55,19 @@ validate_co2_historical <- function(co2 = NULL,
 
   if(is.null(iso2s)){
     iso2s <- unique(co2$iso2)
+  }
+
+  if (is.null(year_to)) {
+    year_to <- max(lubridate::year(co2$date), na.rm = TRUE)
+  }
+
+  if(exclude_international_aviation){
+
+    co2 <- remove_international_aviation(co2)
+
+    # Because international aviation is only available after 2010, we remove prior data for oil and total
+    co2 <- co2 %>%
+      filter(!(fuel %in% c(FUEL_OIL, FUEL_TOTAL) & year(date) < 2010))
   }
 
   if(all_countries){
@@ -68,7 +86,7 @@ validate_co2_historical <- function(co2 = NULL,
       summarise(value = sum(value)/1e6,
                 unit = "mt",
                 source = 'CREA') %>%
-      filter(year < 2025) %>%
+      filter(year <= year_to) %>%
       filter(year >= year(date_from))
 
     # Load validation data
@@ -76,7 +94,8 @@ validate_co2_historical <- function(co2 = NULL,
       filter(iso2 %in% unique(co2_crea$iso2),
              sector == SECTOR_ALL,
              fuel == FUEL_TOTAL) %>%
-      filter(grepl("Global Carbon Budget", source))
+      filter(grepl("Global Carbon Budget", source)) %>%
+      filter(year <= year_to)
 
 
     plot_data <- bind_rows(
@@ -86,6 +105,12 @@ validate_co2_historical <- function(co2 = NULL,
       mutate(
         source=factor(source, levels=c("CREA", unique(co2_validate$source)))
       )
+
+    min_year <- min(co2_crea$year)
+    x_breaks <- seq(min_year, year_to, by = 10)
+    if (length(x_breaks) == 0) {
+      x_breaks <- unique(c(min_year, year_to))
+    }
 
     n_sources <- n_distinct(plot_data$source)
     alphas <- c(0.9, rep(1, n_sources-1))
@@ -97,8 +122,9 @@ validate_co2_historical <- function(co2 = NULL,
       plt_from_data <- function(plt_data){
         ggplot(plot_data) +
           geom_line(aes(year, value/1e3, col=source, linewidth=source, alpha=source)) +
-          scale_x_continuous(limits=c(min(co2_crea$year), NA),
-                             breaks=seq(min(co2_crea$year), 2025, 10)
+          scale_x_continuous(limits=c(min_year, year_to),
+                             breaks=x_breaks,
+                             expand = expansion(mult = c(0, 0.02))
           ) +
           scale_alpha_manual(values=alphas) +
           scale_linewidth_manual(values=linewidths) +
@@ -113,7 +139,7 @@ validate_co2_historical <- function(co2 = NULL,
               )
             }
           } +
-          labs(title=glue("CO2 emissions from fossil fuels"),
+          labs(title=glue("CO2 emissions from fossil fuels{if(exclude_international_aviation) ' (without international aviation)' else ''}"),
                subtitle="Comparison between CREA and Global Carbon Project estimates, in billion tonne CO2 per year",
                y=NULL,
                x=NULL,
@@ -121,7 +147,7 @@ validate_co2_historical <- function(co2 = NULL,
                linetype=NULL,
                alpha="Source",
                color="Source",
-               caption="Source: CREA analysis and Global Carbon Budget 2024 (Friedlingstein et al., 2024b, ESSD).")
+               caption="Source: CREA analysis and Global Carbon Budget 2025 (Friedlingstein et al., 2025, ESSD).")
       }
 
       plt <- plt_from_data(plot_data)
@@ -133,7 +159,7 @@ validate_co2_historical <- function(co2 = NULL,
                 logo = F)
 
       # Create a version for countries matching validation only (for the methodology doc)
-      valid_iso2s <- get_valid_countries(co2)
+      valid_iso2s <- get_valid_countries(co2, validation_data)
       plot_data <- plot_data %>%
         filter(iso2 %in% valid_iso2s)
 
@@ -164,14 +190,15 @@ validate_co2_historical <- function(co2 = NULL,
         summarise(value = sum(value)/1e6,
                   unit = "mt",
                   source = 'CREA') %>%
-        filter(year < 2025)
+        filter(year <= year_to)
 
       # Load validation data
       co2_validate <- validation_data %>%
         filter(iso2 %in% unique(co2_crea$iso2),
                sector == SECTOR_ALL,
                fuel == FUEL_TOTAL) %>%
-        filter(source != "Carbon Monitor")
+        filter(source != "Carbon Monitor") %>%
+        filter(year <= year_to)
 
       # co2_extended <- extend_validation_data(co2_crea = co2_crea,
       #                                        co2_validate = co2_validate)
@@ -181,6 +208,7 @@ validate_co2_historical <- function(co2 = NULL,
         co2_validate %>% mutate(type='estimated')
         # co2_extended %>% mutate(type='projected')
       ) %>%
+          filter(year <= year_to) %>%
           write_csv(file.path(folder, "validation.csv")) %>%
           # filter(type=="estimated") %>%
           mutate(
@@ -195,7 +223,7 @@ validate_co2_historical <- function(co2 = NULL,
 
       ggplot(plot_data) +
           geom_line(aes(year, value/1e3, col=source, linewidth=source, alpha=source, linetype=type)) +
-          scale_x_continuous(limits=c(min(co2_crea$year), NA)) +
+          scale_x_continuous(limits=c(min(co2_crea$year), year_to)) +
           scale_alpha_manual(values=alphas) +
           scale_linewidth_manual(values=linewidths) +
           scale_color_manual(values=colors) +
@@ -257,7 +285,7 @@ validate_co2_historical <- function(co2 = NULL,
         summarise(value = sum(value, na.rm=T)/1e6,
                   unit = "mt",
                   source = 'CREA') %>%
-        filter(year < 2025)
+        filter(year <= year_to)
 
       # Load validation data
       co2_validate <- validation_data %>%
@@ -265,7 +293,8 @@ validate_co2_historical <- function(co2 = NULL,
                sector == SECTOR_ALL,
                ) %>%
         group_by(source) %>%
-        filter(any(fuel != FUEL_TOTAL))
+        filter(any(fuel != FUEL_TOTAL)) %>%
+        filter(year <= year_to)
 
       # co2_extended <- extend_validation_data(co2_crea = co2_crea,
       #                                        co2_validate = co2_validate)
@@ -275,6 +304,7 @@ validate_co2_historical <- function(co2 = NULL,
         co2_validate %>% mutate(type='estimated')
         # co2_extended %>% mutate(type='projected')
       ) %>%
+        filter(year <= year_to) %>%
         write_csv(file.path(folder, "validation.csv")) %>%
         # filter(type=="estimated") %>%
         mutate(
@@ -289,7 +319,7 @@ validate_co2_historical <- function(co2 = NULL,
 
       ggplot(plot_data) +
         geom_line(aes(year, value/1e3, col=source, linewidth=source, alpha=source)) +
-        scale_x_continuous(limits=c(min(co2_crea$year), NA)) +
+        scale_x_continuous(limits=c(min(co2_crea$year), year_to)) +
         scale_alpha_manual(values=alphas) +
         scale_linewidth_manual(values=linewidths) +
         scale_color_manual(values=colors) +
@@ -465,6 +495,7 @@ validate_co2_timeseries <- function(co2, folder="diagnostics"){
     dir.create(folder, showWarnings = FALSE)
 
     iso2s <- unique(co2$iso2)
+    is_daily <- any(day(co2$date) != 1)
 
     lapply(iso2s, function(iso2){
       country <- countrycode::countrycode(iso2, "iso2c", "country.name", custom_match = c("EU"="European Union"))
@@ -473,8 +504,16 @@ validate_co2_timeseries <- function(co2, folder="diagnostics"){
         mutate(across(c(fuel, sector), tolower)) %>%
         group_by(sector, fuel, estimate) %>%
         arrange(date) %>%
-        mutate(value = zoo::rollapplyr(value, 30, mean, fill=NA),
-               year=as.factor(year(date)),
+        {
+          if(is_daily){
+            # Daily data: calculate rolling monthly average
+            mutate(., value = zoo::rollapplyr(value, 30, mean, fill=NA))
+          } else {
+            # Monthly data: aggregate to monthly sums
+            .
+          }
+        } %>%
+        mutate(year=as.factor(year(date)),
                plotdate=date %>% 'year<-'(2022)) %>%
         filter(year(date)>=2015) %>%
         select(plotdate, year, fuel, sector, estimate, value) %>%
@@ -507,7 +546,7 @@ validate_co2_timeseries <- function(co2, folder="diagnostics"){
           rcrea::scale_y_crea_zero() +
           theme(legend.position = "right") +
           labs(title=glue("{country} CO2 emissions"),
-               subtitle='Million tonne CO2 per day. 30-day moving average',
+               subtitle=paste0('Million tonne CO2 per day', if_else(is_daily, "30-day moving average","")),
                caption="Source: CREA analysis based on ENTSOG, ENTSOE, EUROSTAT and ASGI.",
                y=NULL,
                x=NULL,
@@ -633,10 +672,15 @@ validate_co2_monthly <- function(co2, folder="diagnostics"){
 
 validate_co2_transport <- function(co2,
                                    folder="diagnostics",
-                                   date_from = "1990-01-01"){
+                                   date_from = "1990-01-01",
+                                   year_to = NULL){
 
 
   dir.create(folder, showWarnings = FALSE, recursive = T)
+
+  if (is.null(year_to)) {
+    year_to <- max(lubridate::year(co2$date), na.rm = TRUE)
+  }
 
   climatewatch <- load_climatewatch_csv("climatewatch-transport") %>%
     mutate(source="Climate Watch")
@@ -687,7 +731,7 @@ validate_co2_transport <- function(co2,
       summarise(value = sum(value)/1e6,
                 unit = "mt",
                 source = 'CREA') %>%
-      filter(year < 2025)
+      filter(year <= year_to)
 
     co2_crea_domestic <- co2 %>%
       filter(
@@ -700,7 +744,7 @@ validate_co2_transport <- function(co2,
       summarise(value = sum(value)/1e6,
                 unit = "mt",
                 source = 'CREA (domestic only)') %>%
-      filter(year < 2025)
+      filter(year <= year_to)
 
     # Load validation data
     co2_validate <- bind_rows(climatewatch, eea, eea_w_international) %>%
@@ -712,6 +756,7 @@ validate_co2_transport <- function(co2,
       co2_crea_domestic %>% filter(year >= 1990),
       co2_validate
     ) %>%
+      filter(year <= year_to) %>%
       # write_csv(file.path(folder, "validation_transport.csv")) %>%
       # filter(type=="estimated") %>%
       mutate(

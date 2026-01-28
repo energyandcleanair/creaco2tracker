@@ -1,3 +1,5 @@
+library(testthat)
+
 # Setup constants for testing
 SIEC_NATURAL_GAS <- "G3000"
 SIEC_COKE_OVEN_COKE <- "C0311"

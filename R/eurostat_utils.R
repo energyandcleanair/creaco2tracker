@@ -343,6 +343,9 @@ eurostat_split_elec_others <- function(x) {
   if(setequal(sectors, c(SECTOR_ELEC, SECTOR_OTHERS))) {
     return(x)
   }
+  if(!all(sectors %in% c(SECTOR_ALL, SECTOR_ELEC, SECTOR_OTHERS))) {
+    stop("eurostat_split_elec_others shouldn't be applied to datasets with more than all, elec, and others")
+  }
 
   group_cols <- intersect(names(x), c("iso2", "time", "unit", "siec_code", "fuel"))
 
@@ -365,6 +368,17 @@ eurostat_split_elec_others <- function(x) {
       electricity = case_when(
         !is.na(all) & electricity == 0 ~ all - others,
         TRUE ~ electricity
+      ),
+      # Cases where all is 0 (probably because of an earlier fill), but electricity has a >0 value
+      # it probably means other should be 0 (rather than - elec...)
+      # happens e.g. in IE peat
+      others = case_when(
+        all == 0 & electricity > 0 ~ 0,
+        TRUE ~ others
+      ),
+      all = case_when(
+        all == 0 & electricity > 0 ~ electricity + others,
+        TRUE ~ all
       )
     ) %>%
     select(-all) %>%

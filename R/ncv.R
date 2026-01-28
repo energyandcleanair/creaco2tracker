@@ -185,6 +185,19 @@ make_ncv_time_insensitive <- function(x_with_ncv) {
     mutate(ncv_kjkg=mean(ncv_kjkg, na.rm=T))
 }
 
+
+#' Add ncv values from IEA, using country-specific and year-specific values where available,
+#' Fills with weighted averages where missing
+#'
+#' @param x
+#' @param diagnostics_folder
+#' @param use_cache
+#' @param ...
+#'
+#' @returns
+#' @export
+#'
+#' @examples
 add_ncv_iea <- function(x, diagnostics_folder=NULL, use_cache=TRUE, ...){
 
   conversion_raw <- iea.get_conversion_factors(iso2=c(get_eu_iso2s(), "EU"), use_cache=use_cache)
@@ -214,6 +227,57 @@ add_ncv_iea <- function(x, diagnostics_folder=NULL, use_cache=TRUE, ...){
 
   x_with_ncv
 }
+
+
+#' Add ncv values from IEA, but this time, apply the same ncv to all EU countries / all years per siec.
+#'
+#' @param x
+#' @param diagnostics_folder
+#' @param use_cache
+#' @param ...
+#'
+#' @returns
+#' @export
+#'
+#' @examples
+add_ncv_iea_shared <- function(x, diagnostics_folder=NULL, use_cache=TRUE, ...){
+
+  conversion_raw <- iea.get_conversion_factors(iso2=get_eu_iso2s(include_eu = F), use_cache=use_cache)
+
+  # Process conversion factors
+  conversion <- process_conversion_factors(conversion_raw)
+
+  # Calculate weighted means for missing values
+  conversion_wmean <- calculate_weighted_means(conversion, x)
+
+  # It still has a year argument. Let's take latest value
+  conversion_wmean <- conversion_wmean %>%
+    arrange(year) %>%
+    group_by(siec_code) %>%
+    summarise(ncv_kjkg=last(ncv_kjkg_wmean),
+              .groups="drop")
+
+  # Create all combinations
+  conversion_filled <- x %>%
+    distinct(iso2, siec_code, year=year(time)) %>%
+    left_join(conversion_wmean) %>%
+    mutate(source="IEA (shared EU average)")
+
+  # Run comprehensive diagnostics if folder is provided
+  if(!is_null_or_empty(diagnostics_folder)){
+    diagnose_ncv_data(conversion_filled, x, diagnostics_folder)
+  }
+
+  # Add ncv
+  x_with_ncv <- add_ncv_to_data(x, conversion_filled)
+
+  # Validate NCV completeness with detailed diagnostics
+  validate_ncv_completeness(x_with_ncv)
+
+  x_with_ncv
+}
+
+
 
 # New function to get SIEC fuel mapping
 get_siec_ipcc_fuel_mapping <- function() {

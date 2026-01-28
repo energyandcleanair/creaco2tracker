@@ -196,6 +196,11 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s=NULL, diagnostics_fold
           aes(label=max_date),
           size=3,
         ) +
+        geom_text(
+          data=function(x) filter(x, iso2!="EU"),
+          aes(label=lubridate::month(max_date)),
+          size=3,
+        ) +
         rcrea::scale_fill_crea_d() +
         rcrea::theme_crea_new() +
         labs(
@@ -284,7 +289,6 @@ diagnose_eu_vs_countries <- function(
     plt_data <- pwr_generation %>%
       filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
       mutate(is_eu=case_when(iso2=="EU" ~ "EU", TRUE ~ "EU member states")) %>%
-      filter(date < "2025-01-01") %>%
       filter(date >= "2015-01-01") %>%
       group_by(
         source,
@@ -334,7 +338,6 @@ diagnose_eu_vs_countries <- function(
     plt_data <- eurostat_cons %>%
       filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
       mutate(is_eu=case_when(iso2=="EU" ~ "EU", TRUE ~ "EU member states")) %>%
-      filter(time < "2025-01-01") %>%
       filter(time >= "2015-01-01") %>%
       group_by(
         siec,
@@ -389,7 +392,6 @@ diagnose_eu_vs_countries <- function(
       detotalise_co2() %>%
       filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
       mutate(is_eu=case_when(iso2=="EU" ~ "EU", TRUE ~ "EU member states")) %>%
-      filter(date < "2025-01-01") %>%
       filter(date >= "2015-01-01") %>%
       group_by(
         fuel,
@@ -482,7 +484,6 @@ diagnose_eu_vs_countries <- function(
          .
        } %>%
        mutate(is_eu=case_when(iso2=="EU" ~ "EU", TRUE ~ "EU member states")) %>%
-       filter(date < "2025-01-01") %>%
        filter(date >= "2020-01-01") %>%
        group_by(
          fuel,

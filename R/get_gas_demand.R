@@ -19,9 +19,56 @@
 ##
 ## ---------------------------
 
-get_gas_demand <- function(diagnostics_folder='diagnostics/gas_demand', verbose=F){
+#' Get gas demand data with optional Eurostat correction
+#'
+#' Computes apparent gas consumption from ENTSOG data. Optionally corrects
+#' historical data to match Eurostat monthly totals using simple monthly scaling.
+#'
+#' @param iso2s Character vector of ISO2 country codes to include. If NULL (default),
+#'   returns all available countries.
+#' @param date_to End date for data. If NULL (default), returns all available dates.
+#' @param diagnostics_folder Folder path for diagnostics outputs. Set to NULL
+#'   to disable diagnostics. Default is "diagnostics/gas_demand".
+#' @param verbose Whether to print verbose output. Default is FALSE.
+#' @param use_cache Whether to use cached data. Default is TRUE.
+#' @param correct_to_eurostat Whether to correct ENTSOG daily data to match
+#'   Eurostat monthly totals. Default is FALSE for backward compatibility.
+#'
+#' @return Tibble with daily gas demand data
+#'
+#' @details
+#' When correct_to_eurostat=TRUE:
+#' - For months where Eurostat data is available: ENTSOG daily values are scaled
+#'   so that monthly totals match Eurostat exactly.
+#' - For recent months without Eurostat: The most recent available monthly
+#'   scale factor is carried forward.
+#'
+#' @export
+get_gas_demand <- function(iso2s = NULL,
+                           date_to = NULL,
+                           diagnostics_folder='diagnostics/gas_demand',
+                           verbose=FALSE,
+                           use_cache=TRUE,
+                           correct_to_eurostat=FALSE){
 
-  years <- seq(2018, lubridate::year(lubridate::today()))
+  # Generate a hash of the parameters for caching
+  param_hash <- digest::digest(list(
+    iso2s = if (!is.null(iso2s)) sort(iso2s) else NULL,
+    date_to = as.character(date_to),
+    correct_to_eurostat = correct_to_eurostat
+  ))
+
+  # Create a filename using the hash
+  cache_dir <- "cache"
+  filepath <- file.path(cache_dir, paste0("gas_demand_", param_hash, ".RDS"))
+
+  # Check if the file exists in cache and use_cache is TRUE
+  if (use_cache && file.exists(filepath)) {
+    message("Loading cached gas demand data...")
+    return(readRDS(filepath))
+  }
+
+  years <- seq(2015, lubridate::year(lubridate::today()))
 
   create_dir(diagnostics_folder)
 
@@ -31,7 +78,9 @@ get_gas_demand <- function(diagnostics_folder='diagnostics/gas_demand', verbose=
                                      date_to=glue("{max(years)}-12-31}"),
                                      type='consumption,distribution,storage,crossborder,production',
                                      split_by='year',
-                                     verbose=verbose)
+                                     verbose=verbose,
+                                     use_cache=TRUE,
+                                     refresh_cache=!use_cache)
 
   # Estimate with two different methods
   message('Getting gas demand from Consumption + Distribution ENTSOG points')
@@ -51,16 +100,51 @@ get_gas_demand <- function(diagnostics_folder='diagnostics/gas_demand', verbose=
             min_r2=0.95,
             max_rrse=0.3)
 
+  # Store raw gas demand for diagnostics
+  gas_demand_raw <- gas_demand
+
+  # Apply Eurostat correction if requested
+  if (correct_to_eurostat) {
+    message("Applying Eurostat correction to gas demand...")
+    gas_demand <- .apply_eurostat_gas_correction(
+      gas_demand = gas_demand
+    )
+  }
+
+  # Generate diagnostics
+  if (!is.null(diagnostics_folder)) {
+    .generate_gas_diagnostics(
+      gas_demand_raw = gas_demand_raw,
+      gas_demand_corrected = if (correct_to_eurostat) gas_demand else NULL,
+      diagnostics_folder = diagnostics_folder
+    )
+  }
 
   # Keep the longest one per country
-  gas_demand %>%
-    select(region_id=iso2, date, value=value_m3) %>%
+  result <- gas_demand %>%
+    select(iso2, date, value=value_m3) %>%
     mutate(fuel='fossil_gas',
            sector='total',
-           data_source='crea',
+           data_source=ifelse(correct_to_eurostat, 'crea_eurostat_corrected', 'crea'),
            unit='m3',
            frequency='daily',
-           region_type=case_when(region_id=='EU' ~ 'region', T ~ 'iso2'))
+           region_type=case_when(iso2=='EU' ~ 'region', T ~ 'iso2'))
+
+  # Apply filters if specified
+  if (!is.null(iso2s)) {
+    result <- result %>% filter(iso2 %in% iso2s)
+  }
+  if (!is.null(date_to)) {
+    result <- result %>% filter(date <= as.Date(date_to))
+  }
+
+  # Save the result to cache
+  if (!dir.exists(cache_dir)) {
+    dir.create(cache_dir, recursive = TRUE)
+  }
+  saveRDS(result, filepath)
+
+  return(result)
 }
 
 
@@ -295,67 +379,210 @@ keep_best<- function(consumption,
     # Sometimes apparent strictly equivalent to apparent_asgi
     distinct(iso2, .keep_all = T)
 
-  if(!is_null_or_empty(diagnostics_folder)){
-
-    plt_data <- best %>%
-      ungroup() %>%
-      left_join(consumption_monthly) %>%
-      filter(date >= date_from) %>%
-      bind_rows(eurostat %>%
-                  filter(date <= max(consumption_monthly$date),
-                         iso2 %in% best$iso2)) %>%
-      group_by(iso2) %>%
-      filter(date >= min(date_from, na.rm=T)) %>%
-      ungroup() %>%
-      mutate(country = countrycode::countrycode(iso2, 'iso2c', 'country.name',
-                                                custom_match = c('EU'='EU'))) %>%
-      mutate(method=factor(method,
-                           levels=c('apparent', 'apparent_agsi', 'consdist', 'eurostat'),
-                           labels=c('CREA estimate',
-                                    'CREA estimate',
-                                    'CREA estimate',
-                                    'Eurostat')))
-    plt <- ggplot(plt_data) +
-      geom_line(aes(date, value_m3/1e6, col=method, size=method)) +
-      facet_wrap(~country, scales='free_y',
-                 ncol=3) +
-      rcrea::scale_y_crea_zero() +
-      scale_color_manual(values=c('Apparent consumption'=rcrea::pal_crea[['Turquoise']],
-                                  'Reported consumtion'=rcrea::pal_crea[['Blue']],
-                                  'CREA estimate'=rcrea::pal_crea[['Blue']],
-                                  'Eurostat'=rcrea::pal_crea[['Red']]
-                                     )) +
-      scale_size_manual(values=c('Apparent consumption'=1,
-                                  'Reported consumtion'=1,
-                                 'CREA estimate'=1,
-                                  'Eurostat'=0.3
-      )) +
-      labs(title='Fossil gas consumption - CREA estimate vs Eurostat',
-           subtitle='Million cubic meter per month',
-           x=NULL,
-           y=NULL,
-           color=NULL,
-           size=NULL,
-           caption='Note: Only the best estimate is shown for each country.') +
-      rcrea::theme_crea() +
-      theme(legend.position = 'bottom') +
-      guides(size=guide_legend(nrow=1),
-             color=guide_legend(nrow=1))
-    plt
-    ggsave(filename=file.path(diagnostics_folder, 'gas_consumption_estimates.png'),
-           plot=plt, width=10, height=10, bg='white')
-
-    # Export a version for Flourish
-    plt_data %>%
-      tidyr::spread(method, value_m3) %>%
-      write_csv(file.path(diagnostics_folder, 'gas_consumption_estimates_wide.csv'))
-  }
-
   best %>%
     filter(valid) %>%
     select(-c(r2, rrse)) %>%
     left_join(consumption) %>%
     ungroup()
+}
+
+
+#' Apply Eurostat correction to gas demand data
+#'
+#' Scales daily ENTSOG gas demand so that monthly totals match Eurostat.
+#' For months without Eurostat data, carries forward the last available ratio.
+#'
+#' @param gas_demand Daily gas demand data from keep_best
+#'
+#' @return Corrected gas demand data with same structure
+#' @keywords internal
+.apply_eurostat_gas_correction <- function(gas_demand) {
+
+  # Get Eurostat monthly consumption data
+  eurostat <- get_eurostat_gas() %>%
+    filter(type == 'consumption') %>%
+    select(iso2, date, eurostat_m3 = value_m3)
+
+  # Aggregate ENTSOG to monthly for comparison
+  entsog_monthly <- gas_demand %>%
+    mutate(
+      year = lubridate::year(date),
+      month = lubridate::month(date),
+      month_date = lubridate::floor_date(date, 'month')
+    ) %>%
+    group_by(iso2, year, month, month_date) %>%
+    summarise(
+      entsog_m3 = sum(value_m3, na.rm = TRUE),
+      n_days = n(),
+      .groups = "drop"
+    )
+
+  # Join with Eurostat and calculate scaling factors
+  monthly_factors <- entsog_monthly %>%
+    left_join(
+      eurostat %>% mutate(
+        year = lubridate::year(date),
+        month = lubridate::month(date)
+      ) %>% select(iso2, year, month, eurostat_m3),
+      by = c("iso2", "year", "month")
+    ) %>%
+    mutate(
+      ratio = entsog_m3 / eurostat_m3,
+      scale_factor = eurostat_m3 / entsog_m3,
+      # Handle edge cases
+      scale_factor = if_else(
+        is.finite(scale_factor) & entsog_m3 > 0,
+        scale_factor,
+        NA_real_
+      )
+    )
+
+  # For each country, get the last available scale factor to carry forward
+  last_factors <- monthly_factors %>%
+    filter(!is.na(scale_factor)) %>%
+    group_by(iso2) %>%
+    filter(month_date == max(month_date)) %>%
+    ungroup() %>%
+    select(iso2, last_scale_factor = scale_factor, last_eurostat_month = month_date)
+
+  # Fill forward the scale factor for months without Eurostat data
+  monthly_factors <- monthly_factors %>%
+    left_join(last_factors, by = "iso2") %>%
+    mutate(
+      scale_factor_filled = if_else(
+        is.na(scale_factor) & month_date > last_eurostat_month,
+        last_scale_factor,
+        scale_factor
+      ),
+      is_extrapolated = is.na(scale_factor) & !is.na(scale_factor_filled)
+    )
+
+  # Join scale factors back to daily data and apply correction
+  result <- gas_demand %>%
+    mutate(
+      year = lubridate::year(date),
+      month = lubridate::month(date)
+    ) %>%
+    left_join(
+      monthly_factors %>%
+        select(iso2, year, month, scale_factor = scale_factor_filled,
+               ratio, is_extrapolated),
+      by = c("iso2", "year", "month")
+    ) %>%
+    mutate(
+      value_m3_raw = value_m3,
+      value_m3 = if_else(
+        !is.na(scale_factor),
+        value_m3_raw * scale_factor,
+        value_m3_raw
+      )
+    ) %>%
+    select(-year, -month)
+
+  return(result)
+}
+
+
+#' Generate diagnostics for gas demand
+#'
+#' Creates a plot showing Eurostat vs CREA estimate. If correction was applied,
+#' also shows the corrected values.
+#'
+#' @param gas_demand_raw Raw gas demand data (before correction)
+#' @param gas_demand_corrected Corrected gas demand data (NULL if no correction)
+#' @param diagnostics_folder Folder for diagnostics output
+#'
+#' @keywords internal
+.generate_gas_diagnostics <- function(gas_demand_raw,
+                                       gas_demand_corrected,
+                                       diagnostics_folder) {
+
+  message("Generating gas demand diagnostics...")
+  create_dir(diagnostics_folder)
+
+  # Get Eurostat data
+ eurostat <- get_eurostat_gas() %>%
+    filter(type == 'consumption')
+
+  # Aggregate raw data to monthly
+  raw_monthly <- gas_demand_raw %>%
+    mutate(date = lubridate::floor_date(date, 'month')) %>%
+    group_by(iso2, date) %>%
+    summarise(value_m3 = sum(value_m3, na.rm = TRUE), .groups = "drop") %>%
+    mutate(method = "CREA estimate")
+
+  # Start with raw + eurostat
+  plot_data <- bind_rows(
+    raw_monthly,
+    eurostat %>%
+      filter(iso2 %in% unique(gas_demand_raw$iso2)) %>%
+      select(iso2, date, value_m3) %>%
+      mutate(method = "Eurostat")
+  )
+
+  # Add corrected if available
+  if (!is.null(gas_demand_corrected)) {
+    corrected_monthly <- gas_demand_corrected %>%
+      mutate(date = lubridate::floor_date(date, 'month')) %>%
+      group_by(iso2, date) %>%
+      summarise(value_m3 = sum(value_m3, na.rm = TRUE), .groups = "drop") %>%
+      mutate(method = "Corrected")
+
+    plot_data <- bind_rows(plot_data, corrected_monthly)
+    method_levels <- c("CREA estimate", "Corrected", "Eurostat")
+    color_values <- c(
+      "CREA estimate" = rcrea::pal_crea[["Dark.blue"]],
+      "Corrected" = rcrea::pal_crea[["Turquoise"]],
+      "Eurostat" = rcrea::pal_crea[["Red"]]
+    )
+    size_values <- c("CREA estimate" = 0.3, "Corrected" = 0.5, "Eurostat" = 0.3)
+    subtitle <- "Million cubic meters per month. Corrected = scaled to match Eurostat."
+  } else {
+    method_levels <- c("CREA estimate", "Eurostat")
+    color_values <- c(
+      "CREA estimate" = rcrea::pal_crea[["Dark.blue"]],
+      "Eurostat" = rcrea::pal_crea[["Red"]]
+    )
+    size_values <- c("CREA estimate" = 0.5, "Eurostat" = 0.3)
+    subtitle <- "Million cubic meters per month"
+  }
+
+  plot_data <- plot_data %>%
+    filter(iso2 %in% unique(gas_demand_raw$iso2)) %>%
+    mutate(
+      country = countrycode::countrycode(iso2, 'iso2c', 'country.name',
+                                          custom_match = c('EU' = 'EU')),
+      method = factor(method, levels = method_levels)
+    )
+
+  plt <- plot_data %>%
+    filter(!is.na(value_m3)) %>%
+    ggplot(aes(x = date, y = value_m3 / 1e6, color = method, size = method)) +
+    geom_line() +
+    facet_wrap(~country, scales = "free_y", ncol = 3) +
+    rcrea::scale_y_crea_zero() +
+    scale_color_manual(values = color_values) +
+    scale_size_manual(values = size_values) +
+    labs(
+      title = "Fossil gas consumption - CREA estimate vs Eurostat",
+      subtitle = subtitle,
+      x = NULL,
+      y = NULL,
+      color = NULL,
+      size = NULL,
+      caption = "Note: Only the best estimate is shown for each country."
+    ) +
+    rcrea::theme_crea() +
+    theme(legend.position = "bottom") +
+    guides(size = guide_legend(nrow = 1),
+           color = guide_legend(nrow = 1))
+
+  ggsave(
+    file.path(diagnostics_folder, "gas_consumption_estimates.png"),
+    plt, width = 10, height = 10, bg = "white"
+  )
+
+  message("Gas demand diagnostics saved to: ", diagnostics_folder)
 }
 
 
