@@ -37,7 +37,8 @@ Imports:
     httr,
     ggrepel,
     forecast,
-    mgcv
+    mgcv,
+    progress
 Suggests:
     testthat (>= 3.0.0)
 Remotes:
