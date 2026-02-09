@@ -36,7 +36,8 @@ Imports:
     tidytext,
     httr,
     ggrepel,
-    forecast
+    forecast,
+    mgcv
 Suggests:
     testthat (>= 3.0.0)
 Remotes:
