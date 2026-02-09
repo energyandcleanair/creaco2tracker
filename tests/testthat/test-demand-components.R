@@ -1,6 +1,5 @@
 test_that("get_demand_components with LM returns expected structure", {
   skip_if_offline()
-  skip_on_cran()
 
   result <- get_demand_components(
     iso2s = "EU",
@@ -35,7 +34,6 @@ test_that("get_demand_components with LM returns expected structure", {
 
 test_that("get_demand_components with GAM returns expected structure", {
   skip_if_offline()
-  skip_on_cran()
 
   result <- get_demand_components(
     iso2s = "EU",
@@ -149,7 +147,6 @@ test_that("value_weather_corrected differs from value for heating component", {
 
 test_that("both model types return same column structure", {
   skip_if_offline()
-  skip_on_cran()
 
   lm_result <- get_demand_components(
     iso2s = "EU",
@@ -176,7 +173,6 @@ test_that("both model types return same column structure", {
 
 test_that("heating is positive in winter months", {
   skip_if_offline()
-  skip_on_cran()
 
   result <- get_demand_components(
     iso2s = "EU",
@@ -201,7 +197,6 @@ test_that("heating is positive in winter months", {
 
 test_that("others baseline is positive", {
   skip_if_offline()
-  skip_on_cran()
 
   result <- get_demand_components(
     iso2s = "EU",
