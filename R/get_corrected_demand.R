@@ -1,238 +1,70 @@
-# get_corrected_demand <- function(diagnostics_folder = 'diagnostics',
-#                                  use_co2_in_db = TRUE,
-#                                  use_cache = TRUE) {
-#   create_dir(diagnostics_folder)
-#
-#   # Get correction factors from new function
-#   correction_factors <- get_weather_correction_demand(
-#     iso2s = "EU",
-#     date_from = "2019-01-01",
-#     date_to = Sys.Date(),
-#     demand_fuels = c("electricity", "fossil_gas"),
-#     use_cache = use_cache,
-#     diagnostics_folder = diagnostics_folder
-#   )
-#
-#   # load data
-#   co2 <- if(use_co2_in_db){
-#     download_co2()
-#   }else{
-#     get_co2(diagnostics_folder=diagnostics_folder, downscale_daily=T) %>%
-#       filter(estimate=="central")
-#   }
-#
-#   co2_wc <- co2 %>%
-#     select(iso2, date, fuel, sector, value) %>%
-#     inner_join(
-#       correction_factors %>% select(
-#         date, iso2, fuel, sector, correction_factor
-#       )) %>%
-#     mutate(
-#       value_weather_corrected = value * correction_factor
-#     )
-#
-#
-#   corrected_gas_demand <- co2_wc %>%
-#     filter(fuel == FUEL_GAS, sector == SECTOR_OTHERS) %>%
-#     mutate(unit = "TWh/day",
-#            value = value_weather_corrected / 55 / 3.6 / 1000) %>%
-#     mutate(fuel = "fossil_gas_temperature_corrected",
-#            sector = "except_power",
-#            data_source = "crea",
-#            frequency = "daily",
-#            region_id = iso2,
-#            region_type = "region") %>%
-#     select(date, unit, value, fuel, sector, data_source, frequency, region_id, region_type)
-#
-#   corrected_electricity_demand <- correction_factors %>%
-#     filter(sector==SECTOR_ELEC, unit=="MWh", fuel==FUEL_TOTAL) %>%
-#     mutate(unit = "GW",
-#            value = value_weather_corrected / 24 / 1000) %>%
-#     mutate(fuel = "electricity_temperature_corrected",
-#            sector = "total",
-#            data_source = "crea",
-#            frequency = "daily",
-#            region_id = iso2,
-#            region_type = "region") %>%
-#     select(date, unit, value, fuel, sector, data_source, frequency, region_id, region_type)
-#
-#   return(bind_rows(corrected_gas_demand,
-#                    corrected_electricity_demand))
-# }
+#' Get Weather-Corrected Demand for Gas and Electricity
+#'
+#' Computes weather-corrected gas demand (excluding power sector) and
+#' electricity demand using demand component decomposition. Replaces actual
+#' HDD/CDD with day-of-year climatological means to produce corrected values.
+#'
+#' @param diagnostics_folder Folder for diagnostic outputs.
+#' @param use_cache Whether to use cached data.
+#' @param model_type Model type for demand decomposition: "lm" or "gam".
+#'
+#' @return Tibble formatted for DB upload with columns:
+#'   date, unit, value, fuel, sector, data_source, frequency, region_id, region_type
+#'
+#' @export
+get_corrected_demand <- function(diagnostics_folder = "diagnostics",
+                                 use_cache = TRUE,
+                                 model_type = c("gam", "lm")) {
 
-
-
-get_corrected_demand <- function(diagnostics_folder='diagnostics',
-                                 use_co2_in_db=T){
-
+  model_type <- match.arg(model_type)
   create_dir(diagnostics_folder)
-  eu_members <- get_eu_iso2s()
 
-  # load data
-  co2 <- if(use_co2_in_db){
-    download_co2()
-  }else{
-    get_co2(diagnostics_folder=diagnostics_folder, downscale_daily=T)
-  }
+  # Get demand components with weather correction
+  components <- get_demand_components(
+    iso2s = "EU",
+    date_from = "2015-01-01",
+    date_to = Sys.Date(),
+    use_cache = use_cache,
+    model_type = model_type,
+    diagnostics_folder = file.path(diagnostics_folder, "demand_components")
+  )
 
+  # Gas: sum heating + others (exclude "electricity" = gas-to-power component)
+  # to get total gas demand excluding power sector
+  corrected_gas_demand <- components %>%
+    filter(fuel == "fossil_gas", component != "electricity") %>%
+    filter(!is.na(value_weather_corrected)) %>%
+    group_by(date) %>%
+    summarise(value = sum(value_weather_corrected, na.rm = TRUE), .groups = "drop") %>%
+    mutate(
+      # Convert from m3 to TWh/day
+      value = value / 55 / 3.6 / 1000,
+      fuel = "fossil_gas_temperature_corrected",
+      sector = "except_power",
+      data_source = "crea",
+      unit = "TWh/day",
+      frequency = "daily",
+      region_id = "EU",
+      region_type = "region"
+    )
 
-  gas_demand <- co2 %>%
-    filter(sector==SECTOR_OTHERS, fuel==FUEL_GAS) %>%
-    mutate(value_TWh = value / 55 / 3.6 / 1000) %>%
-    select(date, value_TWh)
+  # Electricity: sum all components (heating + cooling + others)
+  corrected_electricity_demand <- components %>%
+    filter(fuel == "electricity") %>%
+    filter(!is.na(value_weather_corrected)) %>%
+    group_by(date) %>%
+    summarise(value = sum(value_weather_corrected, na.rm = TRUE), .groups = "drop") %>%
+    mutate(
+      # Convert from MW to GW
+      value = value / 1e3,
+      fuel = "electricity_temperature_corrected",
+      sector = "total",
+      data_source = "crea",
+      unit = "GW",
+      frequency = "daily",
+      region_id = "EU",
+      region_type = "region"
+    )
 
-  pwr <- entsoe.get_power_generation(use_cache = F)
-
-  pwr_generation <- pwr %>%
-    filter(iso2=='EU', source=='Total') %>%
-    group_by(source, iso2, date) %>%
-    dplyr::summarise(across(value_mw, sum, na.rm=T)) %>%
-    mutate(country='EU')
-
-  # hdd and cdd
-  weather_raw <- get_weather(variable = "HDD,CDD", region_id = "EU")
-
-  # Fill missing values
-  weather <- fill_weather(weather_raw)
-
-  # Run weather diagnostics
-  weather_diagnostics <- diagnose_weather(weather, weather_raw, diagnostics_folder)
-
-  # Use centralized quicksave function from utils.R
-
-  #function to fit model for energy demand vs temperature
-  fit_model <- function(data,
-                        independents='hdd|cdd',
-                        countries=get_eu_iso2s(include_eu = T),
-                        plot_moving_average_days=7) {
-    weather %>%
-      select(region_id, date, variable, value) %>%
-      filter(region_id %in% countries,
-             date %in% data$date) %>%
-      unite(variable, variable, region_id) %>%
-      spread(variable, value) %>%
-      left_join(data, .) -> modeldata
-
-    regression_vars <- grep(independents, names(modeldata), value=T)
-
-    # Remove '_CN'
-    regression_vars <- grep('_CN$',regression_vars, value=T, invert=T)
-
-    regression_formula <- as.formula(paste0('value ~ ',
-                                            paste(regression_vars, collapse='+'),
-                                            ' + as.factor(wday(date))'))
-
-    modeldata %>% lm(regression_formula, .) -> m
-
-    m %>% summary()
-    predict(m, modeldata) -> data$value_pred
-
-    data %>%
-      mutate(anomaly = value - value_pred,
-             value_temperature_corrected = mean(value_pred, na.rm=T) + anomaly,
-             year=year(date),
-             plotdate=date %>% 'year<-'(2022)) %>%
-      pivot_longer(c(anomaly, value, value_pred, value_temperature_corrected),
-                   names_to = 'measure') %>%
-      filter(date>='2019-01-01',
-             date <= max(weather$date)) ->
-      data
-
-    # Timeseries
-    data %>%
-      group_by(measure) %>%
-      mutate(across(value, zoo::rollapplyr, FUN=mean, width=plot_moving_average_days, fill=NA, na.rm=T)) %>%
-      ungroup() %>%
-      filter(measure=='value_temperature_corrected') %>%
-      ggplot(aes(plotdate, value, col=as.factor(year))) +
-      geom_line(linewidth=1) +
-      labs(title=paste('EU temperature corrected', unique(data$name)),
-           y=paste0(unique(data$unit), ', ', plot_moving_average_days, '-day mean'),
-           x='', col='year') +
-      theme_crea_new() +
-      scale_color_crea_d('change', col.index = c(1:3,5:7)) +
-      scale_y_continuous(labels=scales::comma) +
-      scale_x_date(date_labels = '%b') +
-      rcrea::scale_y_crea_zero() -> p
-
-    quicksave(file.path(diagnostics_folder,
-                           paste0('temp_corrected_ts_ ', unique(data$name), '.png')),
-              plot=p)
-
-    # By year
-    data %>%
-      group_by(year) %>%
-      summarise(value=mean(value[measure=="anomaly"], na.rm=T)) %>%
-      ungroup() %>%
-      ggplot(aes(factor(year), value)) +
-      geom_col() +
-      labs(title=paste('EU temperature corrected anomaly', unique(data$name)),
-           y=paste0(unique(data$unit), ', ', plot_moving_average_days, '-day mean'),
-           x='') +
-      theme_crea_new() +
-      scale_color_crea_d('change', col.index = c(1:3,5:7)) +
-      scale_y_continuous(labels=scales::comma) -> p
-
-    quicksave(file.path(diagnostics_folder,
-                        paste0('temp_corrected_year_ ', unique(data$name), '.png')),
-              plot=p)
-
-    data %>% group_by(measure) %>%
-      mutate(yoy=creahelpers::get_yoy(value, date)) %>% select(date, yoy) %>%
-      slice_tail(n=1) %>%
-      readr::write_csv(file.path(diagnostics_folder,
-                          paste0(unique(data$name), ', YoY changes, past ',
-                                 plot_moving_average_days,' days.csv'))) ->
-      changes
-
-    list(data=data, plot=p, model=m, recent_changes=changes)
-  }
-
-  #fit models
-  pwr_generation %>%
-    rename(value=value_mw) %>%
-    mutate(value=value/1e3, name='electricity demand', unit='GW') %>%
-    mutate(date=as.Date(date)) %>%
-    fit_model() ->
-    pwr_model
-
-  gas_demand %>%
-    filter(date>='2021-01-01') %>%
-    rename(value=value_TWh) %>%
-    mutate(name='gas demand outside the power sector', unit='TWh/day') %>%
-    mutate(date=as.Date(date)) %>%
-    fit_model() ->
-    gas_model
-
-  # Weather plotting is now handled by diagnose_weather function
-
-
-  # Format for DB
-  corrected_gas_demand <- gas_model$data %>%
-    ungroup() %>%
-    filter(measure=='value_temperature_corrected') %>%
-    select(date, unit, value) %>%
-    mutate(fuel='fossil_gas_temperature_corrected',
-           sector='except_power',
-           data_source='crea',
-           unit='TWh/day',
-           frequency='daily',
-           region_id='EU',
-           region_type='region')
-
-  corrected_electricity_demand <- pwr_model$data %>%
-    ungroup() %>%
-    filter(measure=='value_temperature_corrected') %>%
-    select(date, unit, value) %>%
-    mutate(fuel='electricity_temperature_corrected',
-           sector='total',
-           data_source='crea',
-           unit='GW',
-           frequency='daily',
-           region_id='EU',
-           region_type='region')
-
-  return(bind_rows(corrected_gas_demand,
-                   corrected_electricity_demand))
+  bind_rows(corrected_gas_demand, corrected_electricity_demand)
 }
-
