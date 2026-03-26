@@ -26,6 +26,8 @@ flowchart LR
   E2[AGSI Storage] --> F
   E3[EUROSTAT Gas] --> F
   G[EUROSTAT Industrial Production] --> H[Industry proxy]
+  N[NCV values<br/>(IEA or IPCC)] --> I
+  O[IPCC emission factors] --> I
   C --> I[CO2 conversion]
   D --> J[Projection & imputation]
   F --> J
