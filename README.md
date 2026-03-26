@@ -18,7 +18,7 @@ Latest methodology document is available [here](https://energyandcleanair.org/wp
 
 ```mermaid
 flowchart LR
-  A[Eurostat annual & monthly energy] --> C[Consumption <br> sector/fuel mapping]
+  
   B[ENTSOE daily power] --> D[Power generation]
   D --> C
   B2[EMBER monthly & yearly power] --> D
@@ -26,9 +26,10 @@ flowchart LR
   E2[AGSI Storage] --> F
   E3[EUROSTAT Gas] --> F
   G[EUROSTAT Industrial Production] --> H[Industry proxy]
-  N[NCV values<br/>(IEA or IPCC)] --> I
-  O[IPCC emission factors] --> I
+  A[Eurostat annual & monthly energy] --> C[Consumption <br> sector/fuel mapping]
   C --> I[CO2 conversion]
+  N["NCV values<br/>(IEA or IPCC)"] --> I
+  O[IPCC emission factors] --> I
   D --> J[Projection & imputation]
   F --> J
   H --> J
