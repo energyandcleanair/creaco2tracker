@@ -93,6 +93,13 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly,
       plt <- plt_data %>%
         filter(iso2 == !!iso2) %>%
         ggplot(aes(year, values, col=sector, linetype=source)) +
+        complete(year=seq(min(year), max(year), by=1),
+                 iso2,
+                 siec,
+                 fuel,
+                 sector,
+                 source,
+                 fill=list(values=NA)) %>%
         geom_line() +
         facet_wrap(~ siec,
                    scales='free_y') +
@@ -105,20 +112,6 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly,
              height=8,
              bg='white'
       )
-
-      (plt <- cons_combined %>%
-          filter(iso2 == !!iso2) %>%
-          ggplot(aes(time, values, col=siec, linetype=source)) +
-          geom_line() +
-          facet_grid(fuel~sector, scales='free_y') +
-          theme(legend.position='bottom')+
-          rcrea::scale_y_crea_zero())
-
-      ggsave(filename=file.path(diagnostics_folder, glue('eurostat_annual_vs_monthly_monthly_{tolower(iso2)}.png')),
-             plot=plt,
-             width=8,
-             height=6,
-             bg='white')
 
       (plt <- cons_combined %>%
           filter(iso2 == !!iso2) %>%
