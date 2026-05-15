@@ -81,6 +81,11 @@ MAD_THRESHOLD <- 5
 #' @param date_to Last date.
 #' @param use_cache Use the on-disk cache.
 #' @param mad_threshold Multiplier on MAD for outlier flagging (default 5).
+#' @param monthly_extend How to extend the monthly ratio beyond observed Ember
+#'   coverage: "ets" (default) fits an ETS forecast, "last" carries forward the
+#'   last observed value.
+#' @param yearly_extend Same as `monthly_extend` but for the yearly correction
+#'   ratio. Default "ets".
 #' @param diagnostics_folder Where to write diagnostic plots/CSVs. NULL disables.
 #'
 #' @return Tibble with columns `iso2, country, region, date, source, value_mw,
@@ -92,16 +97,22 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
                                  date_to = Sys.Date(),
                                  use_cache = TRUE,
                                  mad_threshold = MAD_THRESHOLD,
+                                 monthly_extend = c("ets", "last"),
+                                 yearly_extend  = c("ets", "last"),
                                  diagnostics_folder = "diagnostics/power_generation") {
 
   date_from <- as.Date(date_from)
   date_to   <- as.Date(date_to)
+  monthly_extend <- match.arg(monthly_extend)
+  yearly_extend  <- match.arg(yearly_extend)
 
   param_hash <- digest::digest(list(
     iso2s              = sort(iso2s),
     date_from          = as.character(date_from),
     date_to            = as.character(date_to),
     mad_threshold      = mad_threshold,
+    monthly_extend     = monthly_extend,
+    yearly_extend      = yearly_extend,
     entsoe_to_ember    = ENTSOE_TO_EMBER,
     ember_to_output    = EMBER_TO_OUTPUT,
     pipeline_version   = "chained_ets_v1"
@@ -140,11 +151,12 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
   # ---- Step 2: monthly ratio with MAD + ETS ----
   ratio_monthly_raw <- .compute_ratio_monthly(entsoe_monthly, ember_monthly)
   ratio_monthly_raw <- .flag_outliers_mad(ratio_monthly_raw, threshold = mad_threshold)
-  ratio_monthly_full <- .ets_extend_ratio(
+  ratio_monthly_full <- .extend_ratio(
     ratio_monthly_raw,
     target_date = lubridate::floor_date(date_to, "month"),
     frequency   = 12,
-    min_obs     = MIN_OBS_ETS_MONTHLY
+    min_obs     = MIN_OBS_ETS_MONTHLY,
+    method      = monthly_extend
   )
 
   # ---- Step 3: apply monthly scaling to ENTSOE daily ----
@@ -176,11 +188,12 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
   # ---- Step 5: yearly ratio (EMBER monthly → EMBER yearly) ----
   ratio_yearly_raw <- .compute_ratio_yearly(ember_monthly, ember_yearly)
   ratio_yearly_raw <- .flag_outliers_mad(ratio_yearly_raw, threshold = mad_threshold)
-  ratio_yearly_full <- .ets_extend_ratio(
+  ratio_yearly_full <- .extend_ratio(
     ratio_yearly_raw,
     target_date = as.Date(paste0(year(date_to), "-01-01")),
     frequency   = 1,
-    min_obs     = MIN_OBS_ETS_YEARLY
+    min_obs     = MIN_OBS_ETS_YEARLY,
+    method      = yearly_extend
   )
 
   # ---- Step 6: apply yearly scaling to everything (ENTSOE-derived AND fallback) ----
@@ -333,11 +346,17 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
 
 
 #' Build a fully-populated ratio series per (iso2, source) from min observed
-#' date to `target_date`, using ETS to forecast forward. Returns a tibble with
-#' `date, ratio_used, type ∈ {observed, interpolated, forecast}, is_outlier`.
-#' Falls back to last-value carry-forward for series with < `min_obs`.
+#' date to `target_date`. Returns a tibble with `date, ratio_obs, ratio_used,
+#' type in {observed, interpolated, forecast}, is_outlier`.
+#'
+#' @param method "ets" fits ETS with na.interp for outliers; "last" uses
+#'   last-observation-carried-forward (locf) everywhere. "ets" silently falls
+#'   back to "last" when there are fewer than `min_obs` non-outlier
+#'   observations.
 #' @keywords internal
-.ets_extend_ratio <- function(df, target_date, frequency = 12L, min_obs = 12L) {
+.extend_ratio <- function(df, target_date, frequency = 12L, min_obs = 12L,
+                          method = c("ets", "last")) {
+  method <- match.arg(method)
   if (nrow(df) == 0) {
     return(tibble(
       iso2       = character(0),
@@ -374,13 +393,20 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
         ratio_in   = if_else(is_outlier, NA_real_, ratio_obs)
       )
 
-    # If too few observations, carry forward last observed (non-outlier) value
-    if (n_obs < min_obs || all(is.na(full$ratio_in))) {
-      last_val <- tail(full$ratio_in[!is.na(full$ratio_in)], 1)
-      if (length(last_val) == 0) last_val <- 1
+    # ETS needs enough history; otherwise (and when method == "last") use locf
+    use_ets <- method == "ets" && n_obs >= min_obs && any(!is.na(full$ratio_in))
+
+    if (!use_ets) {
+      # locf: forward-fill, then back-fill leading NAs, default to 1 if all NA
+      x <- full$ratio_in
+      x <- if (all(is.na(x))) {
+        rep(1, length(x))
+      } else {
+        as.numeric(zoo::na.locf(zoo::na.locf(x, na.rm = FALSE), fromLast = TRUE))
+      }
       full <- full %>%
         mutate(
-          ratio_used = if_else(is.na(ratio_in), last_val, ratio_in),
+          ratio_used = x,
           type       = case_when(
             !is.na(ratio_obs) & !is_outlier ~ "observed",
             date > last_dt                  ~ "forecast",

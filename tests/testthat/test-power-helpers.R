@@ -166,10 +166,10 @@ test_that(".flag_outliers_mad treats each (iso2, source) group independently", {
 })
 
 # ============================================================================
-# .ets_extend_ratio()
+# .extend_ratio()
 # ============================================================================
 
-test_that(".ets_extend_ratio output grid covers start->target with no gaps", {
+test_that(".extend_ratio output grid covers start->target with no gaps", {
   df <- tibble(
     iso2       = "DE",
     source     = "Wind",
@@ -178,17 +178,17 @@ test_that(".ets_extend_ratio output grid covers start->target with no gaps", {
     is_outlier = FALSE
   )
 
-  result <- .ets_extend_ratio(df,
-                              target_date = as.Date("2025-03-01"),
-                              frequency   = 12L,
-                              min_obs     = 12L)
+  result <- .extend_ratio(df,
+                          target_date = as.Date("2025-03-01"),
+                          frequency   = 12L,
+                          min_obs     = 12L)
 
   expected_dates <- seq.Date(as.Date("2024-01-01"), as.Date("2025-03-01"), by = "month")
   expect_equal(sort(result$date), expected_dates)
   expect_equal(sum(result$type == "forecast"), 3L)  # Jan, Feb, Mar 2025
 })
 
-test_that(".ets_extend_ratio with too-short series falls back to last-value carry-forward", {
+test_that(".extend_ratio with too-short series falls back to last-value carry-forward", {
   df <- tibble(
     iso2       = "DE",
     source     = "Wind",
@@ -197,16 +197,40 @@ test_that(".ets_extend_ratio with too-short series falls back to last-value carr
     is_outlier = FALSE
   )
 
-  result <- .ets_extend_ratio(df,
-                              target_date = as.Date("2024-06-01"),
-                              frequency   = 12L,
-                              min_obs     = 12L)  # we have only 3 obs
+  result <- .extend_ratio(df,
+                          target_date = as.Date("2024-06-01"),
+                          frequency   = 12L,
+                          min_obs     = 12L)  # we have only 3 obs
 
   # Future months should carry the last observed value (1.2)
   expect_equal(result$ratio_used[result$date == as.Date("2024-06-01")], 1.2)
 })
 
-test_that(".ets_extend_ratio marks outlier months as 'interpolated' and future as 'forecast'", {
+test_that(".extend_ratio with method='last' uses locf for outliers and future months", {
+  df <- tibble(
+    iso2       = "DE",
+    source     = "Wind",
+    date       = seq.Date(as.Date("2024-01-01"), as.Date("2024-06-01"), by = "month"),
+    ratio      = c(1.0, 1.1, 1.2, 99, 1.4, 1.5),
+    is_outlier = c(FALSE, FALSE, FALSE, TRUE, FALSE, FALSE)
+  )
+
+  result <- .extend_ratio(df,
+                          target_date = as.Date("2024-09-01"),
+                          frequency   = 12L,
+                          min_obs     = 6L,
+                          method      = "last")
+
+  # Outlier in April: should be filled with previous good value (March = 1.2)
+  expect_equal(result$ratio_used[result$date == as.Date("2024-04-01")], 1.2)
+  # Future months Jul/Aug/Sep: carry forward last observed (June = 1.5)
+  expect_equal(result$ratio_used[result$date > as.Date("2024-06-01")],
+               rep(1.5, 3))
+  # Future months are flagged as forecast
+  expect_true(all(result$type[result$date > as.Date("2024-06-01")] == "forecast"))
+})
+
+test_that(".extend_ratio marks outlier months as 'interpolated' and future as 'forecast'", {
   df <- tibble(
     iso2       = "DE",
     source     = "Wind",
@@ -215,10 +239,10 @@ test_that(".ets_extend_ratio marks outlier months as 'interpolated' and future a
     is_outlier = c(rep(FALSE, 12), TRUE, rep(FALSE, 11))
   )
 
-  result <- .ets_extend_ratio(df,
-                              target_date = as.Date("2025-02-01"),
-                              frequency   = 12L,
-                              min_obs     = 12L)
+  result <- .extend_ratio(df,
+                          target_date = as.Date("2025-02-01"),
+                          frequency   = 12L,
+                          min_obs     = 12L)
 
   outlier_row <- result %>% filter(date == as.Date("2024-01-01"))
   expect_equal(outlier_row$type, "interpolated")
