@@ -85,7 +85,8 @@ MAD_THRESHOLD <- 5
 #'   coverage: "ets" (default) fits an ETS forecast, "last" carries forward the
 #'   last observed value.
 #' @param yearly_extend Same as `monthly_extend` but for the yearly correction
-#'   ratio. Default "ets".
+#'   ratio. Default "last" (the yearly correction is near-constant, so carrying
+#'   the last observed value forward is more robust than extrapolating it).
 #' @param diagnostics_folder Where to write diagnostic plots/CSVs. NULL disables.
 #'
 #' @return Tibble with columns `iso2, country, region, date, source, value_mw,
@@ -98,7 +99,7 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
                                  use_cache = TRUE,
                                  mad_threshold = MAD_THRESHOLD,
                                  monthly_extend = c("ets", "last"),
-                                 yearly_extend  = c("ets", "last"),
+                                 yearly_extend  = c("last", "ets"),
                                  diagnostics_folder = "diagnostics/power_generation") {
 
   date_from <- as.Date(date_from)
