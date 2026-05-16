@@ -54,10 +54,9 @@ EMBER_TO_OUTPUT <- c(
   "Other Renewables" = "Other"
 )
 
-# Minimum observations needed to fit ETS. Below this, fall back to last-value
-# carry-forward (or uniform Ember distribution for the monthly ratio).
+# Minimum monthly observations needed to fit ETS. Below this, the monthly
+# ratio falls back to last-value carry-forward.
 MIN_OBS_ETS_MONTHLY <- 12L
-MIN_OBS_ETS_YEARLY  <- 3L
 
 MAD_THRESHOLD <- 5
 
@@ -81,12 +80,11 @@ MAD_THRESHOLD <- 5
 #' @param date_to Last date.
 #' @param use_cache Use the on-disk cache.
 #' @param mad_threshold Multiplier on MAD for outlier flagging (default 5).
+#'   Applied to both the monthly and yearly ratio.
 #' @param monthly_extend How to extend the monthly ratio beyond observed Ember
 #'   coverage: "ets" (default) fits an ETS forecast, "last" carries forward the
-#'   last observed value.
-#' @param yearly_extend Same as `monthly_extend` but for the yearly correction
-#'   ratio. Default "last" (the yearly correction is near-constant, so carrying
-#'   the last observed value forward is more robust than extrapolating it).
+#'   last observed value. The yearly correction always uses "last" (it is
+#'   near-constant, so carrying the last observed value forward is robust).
 #' @param diagnostics_folder Where to write diagnostic plots/CSVs. NULL disables.
 #'
 #' @return Tibble with columns `iso2, country, region, date, source, value_mw,
@@ -99,13 +97,11 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
                                  use_cache = TRUE,
                                  mad_threshold = MAD_THRESHOLD,
                                  monthly_extend = c("ets", "last"),
-                                 yearly_extend  = c("last", "ets"),
                                  diagnostics_folder = "diagnostics/power_generation") {
 
   date_from <- as.Date(date_from)
   date_to   <- as.Date(date_to)
   monthly_extend <- match.arg(monthly_extend)
-  yearly_extend  <- match.arg(yearly_extend)
 
   param_hash <- digest::digest(list(
     iso2s              = sort(iso2s),
@@ -113,10 +109,9 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
     date_to            = as.character(date_to),
     mad_threshold      = mad_threshold,
     monthly_extend     = monthly_extend,
-    yearly_extend      = yearly_extend,
     entsoe_to_ember    = ENTSOE_TO_EMBER,
     ember_to_output    = EMBER_TO_OUTPUT,
-    pipeline_version   = "chained_ets_v1"
+    pipeline_version   = "chained_v2"
   ))
   cache_dir <- "cache"
   filepath  <- file.path(cache_dir, paste0("power_generation_", param_hash, ".RDS"))
@@ -149,7 +144,7 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
   # ---- Step 1: ENTSOE daily → monthly ----
   entsoe_monthly <- .aggregate_entsoe_monthly(entsoe_daily)
 
-  # ---- Step 2: monthly ratio with MAD + ETS ----
+  # ---- Step 2: monthly ratio with MAD outlier flagging, extended (ETS or last) ----
   ratio_monthly_raw <- .compute_ratio_monthly(entsoe_monthly, ember_monthly)
   ratio_monthly_raw <- .flag_outliers_mad(ratio_monthly_raw, threshold = mad_threshold)
   ratio_monthly_full <- .extend_ratio(
@@ -186,15 +181,15 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
     scaled_step1 <- bind_rows(scaled_step1, fallback)
   }
 
-  # ---- Step 5: yearly ratio (EMBER monthly → EMBER yearly) ----
+  # ---- Step 5: yearly ratio (EMBER monthly → EMBER yearly).
+  # MAD outlier flagging applies; extension is always last-value carry-forward.
   ratio_yearly_raw <- .compute_ratio_yearly(ember_monthly, ember_yearly)
   ratio_yearly_raw <- .flag_outliers_mad(ratio_yearly_raw, threshold = mad_threshold)
   ratio_yearly_full <- .extend_ratio(
     ratio_yearly_raw,
     target_date = as.Date(paste0(year(date_to), "-01-01")),
     frequency   = 1,
-    min_obs     = MIN_OBS_ETS_YEARLY,
-    method      = yearly_extend
+    method      = "last"
   )
 
   # ---- Step 6: apply yearly scaling to everything (ENTSOE-derived AND fallback) ----
