@@ -1,6 +1,5 @@
 update_gas_demand <- function(production, diagnostics_folder, data_masking=NULL){
   gas_demand <- get_gas_demand(data_masking = data_masking)
-  gas_demand <- apply_source_data_mask(gas_demand, source_name = "gas_demand", data_masking = data_masking)
   upload_gas_demand(gas_demand, production=production)
 }
 

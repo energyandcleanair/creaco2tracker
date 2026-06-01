@@ -21,22 +21,13 @@ get_eurostat_cons <- function(
 
 
   # Get monthly and yearly data
-  cons_raw_oil <- collect_oil(use_cache = use_cache)
-  cons_raw_solid <- collect_solid(use_cache = use_cache)
-  cons_raw_gas <- collect_gas(use_cache = use_cache)
-
-  cons_raw_oil <- list(
-    monthly = apply_source_data_mask(cons_raw_oil$monthly, source_name = "eurostat_oil_monthly", data_masking = data_masking),
-    yearly = apply_source_data_mask(cons_raw_oil$yearly, source_name = "eurostat_oil_yearly", data_masking = data_masking)
+  cons_sources <- eurostat_data_access_get_cons_sources(
+    use_cache = use_cache,
+    data_masking = data_masking
   )
-  cons_raw_solid <- list(
-    monthly = apply_source_data_mask(cons_raw_solid$monthly, source_name = "eurostat_solid_monthly", data_masking = data_masking),
-    yearly = apply_source_data_mask(cons_raw_solid$yearly, source_name = "eurostat_solid_yearly", data_masking = data_masking)
-  )
-  cons_raw_gas <- list(
-    monthly = apply_source_data_mask(cons_raw_gas$monthly, source_name = "eurostat_gas_monthly", data_masking = data_masking),
-    yearly = apply_source_data_mask(cons_raw_gas$yearly, source_name = "eurostat_gas_yearly", data_masking = data_masking)
-  )
+  cons_raw_oil <- cons_sources$oil
+  cons_raw_solid <- cons_sources$solid
+  cons_raw_gas <- cons_sources$gas
 
   # Check siec and siec_code are full and univoqual
   # That all iso2s are included
@@ -247,10 +238,14 @@ remove_last_incomplete <- function(cons) {
 #' @examples
 get_eurostat_indprod <- function(diagnostics_folder = NULL,
                                  use_cache = F,
-                                 iso2s = NULL) {
+                                 iso2s = NULL,
+                                 data_masking = NULL) {
 
-  indprod_raw <- get_eurostat_from_code(code = "sts_inpr_m", use_cache = use_cache) %>%
-    add_iso2()
+  indprod_raw <- eurostat_data_access_get_indprod(
+    use_cache = use_cache,
+    iso2s = iso2s,
+    data_masking = data_masking
+  )
 
 
   if(!is_null_or_empty(diagnostics_folder)){
@@ -261,30 +256,6 @@ get_eurostat_indprod <- function(diagnostics_folder = NULL,
   return(indprod_raw)
 }
 
-
-get_eurostat_from_code <- function(code, iso2s=NULL, use_cache = T, filters = NULL) {
-
-  # Create a digest of iso2s and filters
-  create_dir("cache")
-  digest <- digest::digest(list(iso2s, filters))
-  filepath <- file.path("cache", glue("eurostat_{code}_{digest}.rds"))
-
-  if (use_cache & file.exists(filepath)) {
-    return(readRDS(filepath))
-  }
-
-  if(!is.null(iso2s)){
-    filters$geo <- iso2s
-  }
-
-  raw <- eurostat::get_eurostat(code, filters = filters, keepFlags=T)
-  keep_code <- intersect(names(raw), c("nrg_bal", "siec", "nace_r2", "prod_nrg"))
-  if (length(keep_code) == 0) keep_code <- NULL
-  raw %>%
-    eurostat::label_eurostat(code = keep_code, fix_duplicated = T) %>% # Keep nrg_bal code as well
-    dplyr::rename(dplyr::any_of(c(time = "TIME_PERIOD"))) %T>% # Column changed with new EUROSTAT version
-    saveRDS(filepath)
-}
 
 #' Combine monthly and yearly data with cutoff filtering
 #'

@@ -62,70 +62,17 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
   date_from <- as.Date(date_from)
   date_to <- as.Date(date_to)
 
-  # Generate a hash of the parameters for caching
-  param_hash <- digest::digest(list(
-    iso2s = sort(iso2s),
-    date_from = as.character(date_from),
-    date_to = as.character(date_to),
-    corrected_sources = sort(corrected_sources),
-    tier_threshold = tier_threshold,
-    replace_entsoe_others_with_ember = replace_entsoe_others_with_ember,
-    diagnostics_folder = diagnostics_folder,
-    data_masking = data_masking
-  ))
-
-  # Create a filename using the hash
-  cache_dir <- "cache"
-  filepath <- file.path(cache_dir, paste0("power_generation_", param_hash, ".RDS"))
-
-  # Check if the file exists in cache and use_cache is TRUE
-  if (use_cache && file.exists(filepath)) {
-    message("Loading cached power generation data...")
-    return(readRDS(filepath))
-  }
-
-  # For tier calculation, we need historical data from 2020+
-  # Always fetch at least from 2020-01-01 for proper tier assignment
-  tier_calc_start <- as.Date("2020-01-01")
-  fetch_from <- min(date_from, tier_calc_start)
-
-  # Fetch ENTSOE daily data
-  message("Fetching ENTSOE daily data...")
-  entsoe_daily_full <- entsoe.get_power_generation(
-    date_from = fetch_from,
+  source_data <- power_data_access_get_sources(
+    iso2s = iso2s,
+    date_from = date_from,
     date_to = date_to,
-    iso2s = iso2s,
-    use_cache = use_cache
-  ) %>%
-    filter(iso2 %in% iso2s) %>%
-    apply_source_data_mask(
-      source_name = "entsoe_power_daily",
-      data_masking = data_masking
-    )
+    use_cache = use_cache,
+    data_masking = data_masking
+  )
 
-  # Fetch EMBER monthly data
-  message("Fetching EMBER monthly data...")
-  ember_monthly_raw <- ember.get_power_generation(
-    frequency = "monthly",
-    iso2s = iso2s,
-    use_cache = use_cache
-  ) %>%
-    apply_source_data_mask(
-      source_name = "ember_power_monthly",
-      data_masking = data_masking
-    )
-
-  # Fetch EMBER yearly data to fill gaps where monthly is incomplete
-  message("Fetching EMBER yearly data...")
-  ember_yearly <- ember.get_power_generation(
-    frequency = "yearly",
-    iso2s = iso2s,
-    use_cache = use_cache
-  ) %>%
-    apply_source_data_mask(
-      source_name = "ember_power_yearly",
-      data_masking = data_masking
-    )
+  entsoe_daily_full <- source_data$entsoe_daily
+  ember_monthly_raw <- source_data$ember_monthly
+  ember_yearly <- source_data$ember_yearly
 
   # Fill gaps in monthly data using yearly data
   ember_monthly <- .fill_ember_monthly_from_yearly(
@@ -283,12 +230,6 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
   if (any(duplicated(result %>% select(iso2, source, date)))) {
     stop("Duplicate iso2-source-date combinations found in the result")
   }
-
-  # Save the fetched data to cache
-  if (!dir.exists(cache_dir)) {
-    dir.create(cache_dir, recursive = TRUE)
-  }
-  saveRDS(result, filepath)
 
   return(result)
 }
@@ -749,18 +690,16 @@ get_power_generation_tiers <- function(tier_threshold = c(0.7, 1.3),
 
   iso2s <- get_eu_iso2s(include_eu = FALSE)
 
-  # Fetch data - use tier_calc_start for tier calculation
-  entsoe_daily <- entsoe.get_power_generation(
+  source_data <- power_data_access_get_sources(
     date_from = tier_calc_start,
+    date_to = Sys.Date(),
     iso2s = iso2s,
-    use_cache = use_cache
+    use_cache = use_cache,
+    data_masking = NULL
   )
 
-  ember_monthly <- ember.get_power_generation(
-    frequency = "monthly",
-    iso2s = iso2s,
-    use_cache = use_cache
-  )
+  entsoe_daily <- source_data$entsoe_daily
+  ember_monthly <- source_data$ember_monthly
 
   # Standardize
   entsoe_daily <- entsoe_daily %>%

@@ -47,21 +47,13 @@ get_co2 <- function(diagnostics_folder='diagnostics',
     correct_to_eurostat = correct_gas_demand_to_eurostat,
     use_cache = use_cache,
     data_masking = data_masking
-    ) %>%
-    apply_source_data_mask(
-      source_name = "gas_demand",
-      data_masking = data_masking
     )
 
   pwr_generation <- get_power_generation(
     iso2s = iso2s,
     date_to = date_to_cut,
     use_cache = use_cache,
-    data_masking = data_masking) %>%
-    apply_source_data_mask(
-      source_name = "power_generation",
-      data_masking = data_masking
-    )
+    data_masking = data_masking)
 
 
   # Get fossil-fuel consumption based on Eurostat
@@ -69,20 +61,13 @@ get_co2 <- function(diagnostics_folder='diagnostics',
     diagnostics_folder = file.path(diagnostics_folder, "eurostat"),
     pwr_generation = pwr_generation,
     use_cache = use_cache,
-    data_masking = data_masking) %>%
-    apply_source_data_mask(
-      source_name = "eurostat_cons",
-      data_masking = data_masking
-    )
+    data_masking = data_masking)
 
   # Get industrial production data from Eurostat
   eurostat_indprod <- get_eurostat_indprod(
     use_cache = use_cache,
-    diagnostics_folder = file.path(diagnostics_folder, 'eurostat')
-    ) %>%
-    apply_source_data_mask(
-      source_name = "eurostat_indprod",
-      data_masking = data_masking
+    diagnostics_folder = file.path(diagnostics_folder, 'eurostat'),
+    data_masking = data_masking
     )
 
   # Compute CO2 emissions based on Eurostat fossil-fuel consumption/oxydation

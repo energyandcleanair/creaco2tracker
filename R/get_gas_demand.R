@@ -52,49 +52,38 @@ get_gas_demand <- function(iso2s = NULL,
                            correct_to_eurostat=FALSE,
                            data_masking = NULL){
 
-  # Generate a hash of the parameters for caching
-  param_hash <- digest::digest(list(
-    iso2s = if (!is.null(iso2s)) sort(iso2s) else NULL,
-    date_to = as.character(date_to),
-    correct_to_eurostat = correct_to_eurostat,
-    data_masking = data_masking
-  ))
-
-  # Create a filename using the hash
-  cache_dir <- "cache"
-  filepath <- file.path(cache_dir, paste0("gas_demand_", param_hash, ".RDS"))
-
-  # Check if the file exists in cache and use_cache is TRUE
-  if (use_cache && file.exists(filepath)) {
-    message("Loading cached gas demand data...")
-    return(readRDS(filepath))
-  }
-
   years <- seq(2015, lubridate::year(lubridate::today()))
 
   create_dir(diagnostics_folder)
 
-  # Get all ENTSOG data once
-  entsog_data <- creahelpers::api.get("https://api.russiafossiltracker.com/v0/entsogflow",
-                                     date_from=glue("{min(years)}-01-01}"),
-                                     date_to=glue("{max(years)}-12-31}"),
-                                     type='consumption,distribution,storage,crossborder,production',
-                                     split_by='year',
-                                     verbose=verbose,
-                                     use_cache=TRUE,
-                                     refresh_cache=!use_cache) %>%
-    apply_source_data_mask(
-      source_name = "entsog_flow_raw",
-      data_masking = data_masking
-    )
+  entsog_data <- gas_data_access_get_entsog_flow(
+    years = years,
+    use_cache = use_cache,
+    verbose = verbose,
+    data_masking = data_masking
+  )
+
+  agsi_storage_data <- gas_data_access_get_agsi_storage(
+    date_from = min(as.Date(entsog_data$date)),
+    date_to = max(as.Date(entsog_data$date)),
+    iso2 = get_eu_iso2s(),
+    verbose = verbose,
+    data_masking = data_masking
+  )
 
   # Estimate with two different methods
   message('Getting gas demand from Consumption + Distribution ENTSOG points')
   consdist <- get_gas_demand_consdist(entsog_data=entsog_data, years=years, verbose=verbose)
   message('Getting gas demand from storage,crossborder,production')
-  apparent <- get_gas_demand_apparent(entsog_data=entsog_data, years=years, verbose=verbose, data_masking = data_masking)
+  apparent <- get_gas_demand_apparent(entsog_data=entsog_data, years=years, verbose=verbose)
   message('Getting gas demand from storage,crossborder,production using AGSI for storage')
-  apparent_w_agsi <- get_gas_demand_apparent(entsog_data=entsog_data, years=years, use_agsi_for_storage=T, verbose=verbose, data_masking = data_masking)
+  apparent_w_agsi <- get_gas_demand_apparent(
+    entsog_data=entsog_data,
+    years=years,
+    use_agsi_for_storage=T,
+    verbose=verbose,
+    agsi_storage_data = agsi_storage_data
+  )
 
 
   # Keep the best ones, and only those that match quality criteria
@@ -145,12 +134,6 @@ get_gas_demand <- function(iso2s = NULL,
   if (!is.null(date_to)) {
     result <- result %>% filter(date <= as.Date(date_to))
   }
-
-  # Save the result to cache
-  if (!dir.exists(cache_dir)) {
-    dir.create(cache_dir, recursive = TRUE)
-  }
-  saveRDS(result, filepath)
 
   return(result)
 }
@@ -233,7 +216,11 @@ get_gas_demand_consdist <- function(entsog_data, years, verbose=F){
 #' @export
 #'
 #' @examples
-get_gas_demand_apparent <- function(entsog_data, years, use_agsi_for_storage=F, verbose=F, data_masking = NULL){
+get_gas_demand_apparent <- function(entsog_data,
+                                    years,
+                                    use_agsi_for_storage=F,
+                                    verbose=F,
+                                    agsi_storage_data = NULL){
 
   entsog <- entsog_data %>%
     filter(type %in% c('storage', 'crossborder', 'production'))
@@ -257,15 +244,10 @@ get_gas_demand_apparent <- function(entsog_data, years, use_agsi_for_storage=F, 
   if(use_agsi_for_storage){
     # In some instances, AGSI is better than ENTSOG
     # Well, at least for Austria which has no storage data in ENTSOG
-    storage_drawdown <- agsi.get_storage_change(date_from=min(as.Date(entsog$date)),
-                                                date_to=max(as.Date(entsog$date)),
-                                                iso2=get_eu_iso2s(),
-                                                verbose=verbose
-                                                ) %>%
-      apply_source_data_mask(
-        source_name = "agsi_storage_daily",
-        data_masking = data_masking
-      )
+    if (is.null(agsi_storage_data)) {
+      stop("agsi_storage_data is required when use_agsi_for_storage is TRUE")
+    }
+    storage_drawdown <- agsi_storage_data
     entsog <- entsog %>%
       filter(type!='storage') %>%
       bind_rows(
@@ -345,29 +327,7 @@ get_gas_demand_apparent <- function(entsog_data, years, use_agsi_for_storage=F, 
 
 
 get_eurostat_gas <- function(years = NULL, data_masking = NULL){
-  gas_consumption <- eurostat::get_eurostat("nrg_cb_gasm")
-  gas_consumption %>%
-    filter(unit=='MIO_M3',
-           siec=="G3000") %>%
-    mutate(type=recode(nrg_bal,
-                       IC_OBS='consumption',
-                       IPRD='production',
-                       IMP='imports',
-                       EXP='minus_exports',
-                       STK_CHG_MG='storage',
-                       .default=NA_character_,
-    )) %>%
-    filter(!is.na(type)) %>%
-    mutate(values=ifelse(type %in% c('minus_exports', 'storage'), -values, values)) %>%
-    select(iso2=geo, date=TIME_PERIOD, value_m3=values, type) %>%
-    mutate(value_m3=value_m3*1e6,
-           unit='m3',
-           iso2=recode(iso2, 'UK'='GB', 'EU27_2020'='EU'),
-           method='eurostat') %>%
-    apply_source_data_mask(
-      source_name = "eurostat_gas_monthly_for_correction",
-      data_masking = data_masking
-    )
+  gas_data_access_get_eurostat_monthly_for_correction(data_masking = data_masking)
 }
 
 

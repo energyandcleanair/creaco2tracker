@@ -63,10 +63,6 @@ get_demand_components <- function(iso2s = "EU",
     correct_to_eurostat = correct_gas_to_eurostat,
     data_masking = data_masking
   ) %>%
-    apply_source_data_mask(
-      source_name = "gas_demand",
-      data_masking = data_masking
-    ) %>%
     filter(date >= date_from, date <= date_to) %>%
     mutate(date = as.Date(date)) %>%
     add_missing_cols(c("data_source")) %>%
@@ -81,11 +77,7 @@ get_demand_components <- function(iso2s = "EU",
     iso2s = iso2s,
     use_cache = use_cache,
     data_masking = data_masking
-  ) %>%
-    apply_source_data_mask(
-      source_name = "power_generation",
-      data_masking = data_masking
-    )
+  )
 
   elec_demand <- pwr_generation %>%
     filter(source == "Total",
@@ -112,18 +104,15 @@ get_demand_components <- function(iso2s = "EU",
     select(iso2, date, value = value_mw) %>%
     filter(iso2 %in% iso2s)
 
-  weather_raw <- get_weather(
+  weather_raw <- weather_data_access_get_filled(
     variable = "HDD,CDD",
     region_id = iso2s,
     date_from = date_from,
     date_to = date_to,
-    use_cache = use_cache
-  ) %>%
-    apply_source_data_mask(
-      source_name = "weather",
-      data_masking = data_masking
-    )
-  weather <- fill_weather(weather_raw) %>%
+    use_cache = use_cache,
+    data_masking = data_masking
+  )
+  weather <- weather_raw %>%
     mutate(
       date = as.Date(date),
       region_code = coalesce(region_iso2, region_id)
