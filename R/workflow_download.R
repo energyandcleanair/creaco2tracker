@@ -1,13 +1,3 @@
-select_if_exists <- function(data, ...) {
-  if (is.null(data) || nrow(data)==0) {
-    return(NULL)
-  }
-
-  dplyr::select(data, ...)
-}
-
-
-
 download_co2 <- function(date_from="2015-01-01", use_cache = F, version=NULL, iso2s=NULL){
 
   creahelpers::api.get("api.energyandcleanair.org/emission/co2",
