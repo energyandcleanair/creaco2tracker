@@ -73,6 +73,75 @@ test_that("get_data_masking_config returns expected top-level keys", {
 })
 
 
+test_that("default_source_lags returns the expected source keys", {
+  lags <- default_source_lags()
+
+  expect_named(
+    lags,
+    c(
+      "entsoe_power_daily",
+      "ember_power_monthly",
+      "ember_power_yearly",
+      "entsog_flow_raw",
+      "agsi_storage_daily",
+      "eurostat_gas_monthly_for_correction",
+      "eurostat_oil_monthly",
+      "eurostat_oil_yearly",
+      "eurostat_solid_monthly",
+      "eurostat_solid_yearly",
+      "eurostat_gas_monthly",
+      "eurostat_gas_yearly",
+      "eurostat_indprod",
+      "weather"
+    )
+  )
+  expect_true(all(vapply(lags, is.integer, logical(1))))
+})
+
+
+test_that("data_masking_as_of applies the default publication lags", {
+  cfg <- data_masking_as_of("2022-06-01")
+
+  expect_equal(cfg$entsoe_power_daily$date_to, "2022-05-30")
+  expect_equal(cfg$ember_power_monthly$date_to, "2022-03-01")
+  expect_equal(cfg$ember_power_yearly$date_to, "2020-01-01")
+  expect_equal(cfg$eurostat_gas_monthly$date_to, "2022-01-01")
+  expect_equal(cfg$weather$date_to, "2022-05-30")
+  expect_equal(cfg$all, list())
+  expect_equal(cfg$gas_demand, list())
+})
+
+
+test_that("data_masking_as_of respects custom lag overrides", {
+  cfg <- data_masking_as_of(
+    "2022-06-01",
+    lags = c(eurostat_gas_monthly = 0L, weather = 5L)
+  )
+
+  expect_equal(cfg$eurostat_gas_monthly$date_to, "2022-06-01")
+  expect_equal(cfg$weather$date_to, "2022-05-27")
+  expect_equal(cfg$entsoe_power_daily$date_to, "2022-05-30")
+})
+
+
+test_that("data_masking_as_of_batch returns named configs", {
+  cfgs <- data_masking_as_of_batch(c("2022-01-01", "2023-01-01"))
+
+  expect_named(cfgs, c("2022-01-01", "2023-01-01"))
+  expect_equal(length(cfgs), 2)
+  expect_true(is.list(cfgs[[1]]))
+  expect_equal(cfgs[[1]]$weather$date_to, "2021-12-30")
+  expect_equal(cfgs[[2]]$eurostat_gas_monthly$date_to, "2022-08-01")
+})
+
+
+test_that("data_masking_as_of accepts zero-day overrides", {
+  cfg <- data_masking_as_of("2022-06-01", lags = c(weather = 0L))
+
+  expect_equal(cfg$weather$date_to, "2022-06-01")
+})
+
+
 test_that("granular entsoe masking masks both value columns", {
   pwr <- tibble(
     iso2 = c("EU", "EU"),

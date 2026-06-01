@@ -44,5 +44,5 @@ Suggests:
 Remotes:
     energyandcleanair/creahelpers,
     energyandcleanair/rcrea
-RoxygenNote: 7.2.3
+RoxygenNote: 7.3.3
 Config/testthat/edition: 3
