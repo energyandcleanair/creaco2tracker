@@ -127,15 +127,26 @@ get_weather <- function(variable = "HDD,CDD",
 #' @return A data frame with filled weather data
 #' @export
 fill_weather <- function(weather_raw) {
+  if (is.null(weather_raw) || nrow(weather_raw) == 0) {
+    return(weather_raw)
+  }
+
   # Fill na values using forward fill method
   weather_raw %>%
     mutate(date = lubridate::date(date)) %>%
-    ungroup() %>%
-    tidyr::complete(date = seq.Date(min(date), max(date), by = 'day'),
-                    tidyr::nesting(variable, unit, region_id, region_type, region_iso2, averaging_period, source, region_name)) %>%
     group_by(variable, unit, region_id, region_type, region_iso2, averaging_period, source, region_name) %>%
-    arrange(date) %>%
-    fill(value) %>%
+    group_modify(function(df, ...) {
+      df %>%
+        arrange(date) %>%
+        mutate(.fill_break = cumsum(is.na(value))) %>%
+        tidyr::complete(date = seq.Date(min(date), max(date), by = 'day')) %>%
+        fill(.fill_break, .direction = "down") %>%
+        mutate(.fill_break = coalesce(.fill_break, 0)) %>%
+        group_by(.fill_break) %>%
+        fill(value, .direction = "down") %>%
+        ungroup() %>%
+        select(-.fill_break)
+    }) %>%
     ungroup() ->
     weather_filled
 

@@ -14,7 +14,8 @@ get_eurostat_cons <- function(
     pwr_generation,
     diagnostics_folder = "diagnostics/eurostat",
     use_cache = F,
-    iso2s = NULL) {
+  iso2s = NULL,
+  data_masking = NULL) {
 
   create_dir(diagnostics_folder)
 
@@ -23,6 +24,19 @@ get_eurostat_cons <- function(
   cons_raw_oil <- collect_oil(use_cache = use_cache)
   cons_raw_solid <- collect_solid(use_cache = use_cache)
   cons_raw_gas <- collect_gas(use_cache = use_cache)
+
+  cons_raw_oil <- list(
+    monthly = apply_source_data_mask(cons_raw_oil$monthly, source_name = "eurostat_oil_monthly", data_masking = data_masking),
+    yearly = apply_source_data_mask(cons_raw_oil$yearly, source_name = "eurostat_oil_yearly", data_masking = data_masking)
+  )
+  cons_raw_solid <- list(
+    monthly = apply_source_data_mask(cons_raw_solid$monthly, source_name = "eurostat_solid_monthly", data_masking = data_masking),
+    yearly = apply_source_data_mask(cons_raw_solid$yearly, source_name = "eurostat_solid_yearly", data_masking = data_masking)
+  )
+  cons_raw_gas <- list(
+    monthly = apply_source_data_mask(cons_raw_gas$monthly, source_name = "eurostat_gas_monthly", data_masking = data_masking),
+    yearly = apply_source_data_mask(cons_raw_gas$yearly, source_name = "eurostat_gas_yearly", data_masking = data_masking)
+  )
 
   # Check siec and siec_code are full and univoqual
   # That all iso2s are included

@@ -56,7 +56,8 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
                                  use_cache = TRUE,
                                  tier_threshold = c(0.7, 1.3),
                                  replace_entsoe_others_with_ember = TRUE,
-                                 diagnostics_folder = "diagnostics/power_generation") {
+                                 diagnostics_folder = "diagnostics/power_generation",
+                                 data_masking = NULL) {
 
   date_from <- as.Date(date_from)
   date_to <- as.Date(date_to)
@@ -69,7 +70,8 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
     corrected_sources = sort(corrected_sources),
     tier_threshold = tier_threshold,
     replace_entsoe_others_with_ember = replace_entsoe_others_with_ember,
-    diagnostics_folder = diagnostics_folder
+    diagnostics_folder = diagnostics_folder,
+    data_masking = data_masking
   ))
 
   # Create a filename using the hash
@@ -94,7 +96,12 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
     date_to = date_to,
     iso2s = iso2s,
     use_cache = use_cache
-  ) %>% filter(iso2 %in% iso2s)
+  ) %>%
+    filter(iso2 %in% iso2s) %>%
+    apply_source_data_mask(
+      source_name = "entsoe_power_daily",
+      data_masking = data_masking
+    )
 
   # Fetch EMBER monthly data
   message("Fetching EMBER monthly data...")
@@ -102,7 +109,11 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
     frequency = "monthly",
     iso2s = iso2s,
     use_cache = use_cache
-  )
+  ) %>%
+    apply_source_data_mask(
+      source_name = "ember_power_monthly",
+      data_masking = data_masking
+    )
 
   # Fetch EMBER yearly data to fill gaps where monthly is incomplete
   message("Fetching EMBER yearly data...")
@@ -110,7 +121,11 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
     frequency = "yearly",
     iso2s = iso2s,
     use_cache = use_cache
-  )
+  ) %>%
+    apply_source_data_mask(
+      source_name = "ember_power_yearly",
+      data_masking = data_masking
+    )
 
   # Fill gaps in monthly data using yearly data
   ember_monthly <- .fill_ember_monthly_from_yearly(

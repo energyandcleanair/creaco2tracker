@@ -10,6 +10,8 @@
 #' @param date_to End date for filtering data (YYYY-MM-DD). If NULL, no upper date filter is applied.
 #' @param ncv_source iea, iea_shared, ipcc
 #' @param fill_mode one of "missing", "overwrite", or "ratio". Default is "missing".
+#' @param data_masking Optional named list of masking rules. See
+#'   `get_data_masking_config()` for a template.
 #'
 #' @return
 #' @export
@@ -24,7 +26,8 @@ get_co2 <- function(diagnostics_folder='diagnostics',
                     ncv_source = "iea",
                     fill_mode=c("missing", "overwrite", "ratio"),
                     downscale_cut_latest_days = 3,
-                    correct_gas_demand_to_eurostat = TRUE
+                    correct_gas_demand_to_eurostat = TRUE,
+                    data_masking = NULL
                     ){
 
   create_dir(diagnostics_folder)
@@ -42,25 +45,44 @@ get_co2 <- function(diagnostics_folder='diagnostics',
     iso2s = iso2s,
     date_to = date_to_cut,
     correct_to_eurostat = correct_gas_demand_to_eurostat,
-    use_cache = use_cache
+    use_cache = use_cache,
+    data_masking = data_masking
+    ) %>%
+    apply_source_data_mask(
+      source_name = "gas_demand",
+      data_masking = data_masking
     )
 
   pwr_generation <- get_power_generation(
     iso2s = iso2s,
     date_to = date_to_cut,
-    use_cache = use_cache)
+    use_cache = use_cache,
+    data_masking = data_masking) %>%
+    apply_source_data_mask(
+      source_name = "power_generation",
+      data_masking = data_masking
+    )
 
 
   # Get fossil-fuel consumption based on Eurostat
   eurostat_cons <- get_eurostat_cons(
     diagnostics_folder = file.path(diagnostics_folder, "eurostat"),
     pwr_generation = pwr_generation,
-    use_cache = use_cache)
+    use_cache = use_cache,
+    data_masking = data_masking) %>%
+    apply_source_data_mask(
+      source_name = "eurostat_cons",
+      data_masking = data_masking
+    )
 
   # Get industrial production data from Eurostat
   eurostat_indprod <- get_eurostat_indprod(
     use_cache = use_cache,
     diagnostics_folder = file.path(diagnostics_folder, 'eurostat')
+    ) %>%
+    apply_source_data_mask(
+      source_name = "eurostat_indprod",
+      data_masking = data_masking
     )
 
   # Compute CO2 emissions based on Eurostat fossil-fuel consumption/oxydation

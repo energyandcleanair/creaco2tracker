@@ -7,6 +7,8 @@
 #' @param diagnostics_folder Folder for diagnostic outputs.
 #' @param use_cache Whether to use cached data.
 #' @param model_type Model type for demand decomposition: "lm" or "gam".
+#' @param data_masking Optional named list of masking rules. See
+#'   `get_data_masking_config()`.
 #'
 #' @return Tibble formatted for DB upload with columns:
 #'   date, unit, value, fuel, sector, data_source, frequency, region_id, region_type
@@ -14,7 +16,8 @@
 #' @export
 get_corrected_demand <- function(diagnostics_folder = "diagnostics",
                                  use_cache = TRUE,
-                                 model_type = c("gam", "lm")) {
+                                 model_type = c("gam", "lm"),
+                                 data_masking = NULL) {
 
   model_type <- match.arg(model_type)
   create_dir(diagnostics_folder)
@@ -26,7 +29,8 @@ get_corrected_demand <- function(diagnostics_folder = "diagnostics",
     date_to = Sys.Date(),
     use_cache = use_cache,
     model_type = model_type,
-    diagnostics_folder = file.path(diagnostics_folder, "demand_components")
+    diagnostics_folder = file.path(diagnostics_folder, "demand_components"),
+    data_masking = data_masking
   )
 
   # Gas: sum heating + others (exclude "electricity" = gas-to-power component)

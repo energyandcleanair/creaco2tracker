@@ -16,6 +16,8 @@
 #'   Only used when model_type = "lm". Ignored for "gam" (which uses smooth splines).
 #' @param diagnostics_folder Folder path for diagnostics outputs. Default is
 #'   "diagnostics/demand_components".
+#' @param data_masking Optional named list of masking rules. See
+#'   `get_data_masking_config()`.
 #'
 #' @return Tibble with columns:
 #'   - iso2: Country code
@@ -47,7 +49,8 @@ get_demand_components <- function(iso2s = "EU",
                                   correct_gas_to_eurostat = TRUE,
                                   model_type = c("gam", "lm"),
                                   include_time_interaction = TRUE,
-                                  diagnostics_folder = "diagnostics/demand_components") {
+                                  diagnostics_folder = "diagnostics/demand_components",
+                                  data_masking = NULL) {
 
   model_type <- match.arg(model_type)
   iso2s <- unique(iso2s)
@@ -57,8 +60,13 @@ get_demand_components <- function(iso2s = "EU",
   gas_demand <- get_gas_demand(
     iso2 = iso2s,
     use_cache = use_cache,
-    correct_to_eurostat = correct_gas_to_eurostat
+    correct_to_eurostat = correct_gas_to_eurostat,
+    data_masking = data_masking
   ) %>%
+    apply_source_data_mask(
+      source_name = "gas_demand",
+      data_masking = data_masking
+    ) %>%
     filter(date >= date_from, date <= date_to) %>%
     mutate(date = as.Date(date)) %>%
     add_missing_cols(c("data_source")) %>%
@@ -71,8 +79,13 @@ get_demand_components <- function(iso2s = "EU",
   pwr_generation <- get_power_generation(
     date_from = date_from,
     iso2s = iso2s,
-    use_cache = use_cache
-  )
+    use_cache = use_cache,
+    data_masking = data_masking
+  ) %>%
+    apply_source_data_mask(
+      source_name = "power_generation",
+      data_masking = data_masking
+    )
 
   elec_demand <- pwr_generation %>%
     filter(source == "Total",
@@ -105,7 +118,11 @@ get_demand_components <- function(iso2s = "EU",
     date_from = date_from,
     date_to = date_to,
     use_cache = use_cache
-  )
+  ) %>%
+    apply_source_data_mask(
+      source_name = "weather",
+      data_masking = data_masking
+    )
   weather <- fill_weather(weather_raw) %>%
     mutate(
       date = as.Date(date),
