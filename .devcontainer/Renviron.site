@@ -1,0 +1,6 @@
+PKG_SYSREQS=true
+PKG_SYSREQS_SUDO=true
+PKG_SYSREQS_RSPM_URL=https://packagemanager.posit.co
+PKG_CACHE_DIR=/workspaces/.cache/pak
+PKG_PACKAGE_CACHE_DIR=/workspaces/.cache/pak/packages
+PKG_METADATA_CACHE_DIR=/workspaces/.cache/pak/metadata

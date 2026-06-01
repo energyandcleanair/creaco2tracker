@@ -1,0 +1,32 @@
+{
+  "name": "R with pak and Posit binaries",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": {
+      "PPM_DISTRO": "bookworm"
+    }
+  },
+
+  "remoteUser": "rstudio",
+
+  "containerEnv": {
+    "R_LIBS_USER": "${containerWorkspaceFolder}/.r-lib",
+    "TMPDIR": "${containerWorkspaceFolder}/.tmp"
+  },
+
+  "postCreateCommand": "mkdir -p .r-lib .tmp /workspaces/.cache/pak/packages /workspaces/.cache/pak/metadata",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "REditorSupport.r",
+        "RDebugger.r-debugger"
+      ],
+      "settings": {
+        "r.sessionWatcher": true,
+        "r.plot.useHttpgd": true,
+        "r.lsp.enabled": true
+      }
+    }
+  }
+}

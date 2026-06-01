@@ -42,3 +42,8 @@ vignettes/*.pdf
 
 # R Environment Variables
 .Renviron
+
+.tmp
+.r-lib
+
+.vscode
