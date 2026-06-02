@@ -44,90 +44,90 @@ collect_gas <- function(use_cache = FALSE) {
 }
 
 
- process_gas <- function(x, pwr_generation) {
-    # Monthly data only valid from 2014, way too low before
-    x <- x %>%
-      filter(freq != "Monthly" | time >= "2015-01-01")
+process_gas <- function(x, pwr_generation) {
+  # Monthly data only valid from 2014, way too low before
+  x <- x %>%
+    filter(freq != "Monthly" | time >= "2015-01-01")
 
-    x_all <- x %>%
-      filter(
-        nrg_bal %in% c(
-          "Inland consumption - observed",
-          "Final consumption - non-energy use"
-        ),
-        grepl("Terajoule", unit),
-        siec_code == SIEC_NATURAL_GAS
-      ) %>%
-      group_by(across(-c(nrg_bal, nrg_bal_code, values))) %>%
-      summarise(
-        values = sum(values * case_when(
-          nrg_bal == "Inland consumption - observed" ~ 1,
-          T ~ -1
-        )),
-        .groups = "drop"
-      ) %>%
-      mutate(
-        sector = SECTOR_ALL,
-        fuel = FUEL_GAS
-      )
-
-    # Get months with fossil gas generation
-    # to remove EUROSTAT saying 0 while it is not (e.g. monthly Ireland in 2014)
-    has_gas_generation <- pwr_generation %>%
-      filter(source == "Fossil Gas") %>%
-      group_by(iso2, time = floor_date(date, "month")) %>%
-      summarise(value_mwh = sum(value_mwh, na.rm = T)) %>%
-      mutate(
-        value_mwh_threshold = quantile(value_mwh[value_mwh > 0], 0.1), # Could be due to stock changes
-        has_gas_generation = value_mwh > value_mwh_threshold
-      ) %>%
-      ungroup() %>%
-      tidyr::complete(iso2, time = unique(x$time), fill = list(has_gas_generation = FALSE, value_mwh = NA)) %>%
-      select(iso2, time, has_gas_generation) %>%
-      mutate(freq = "Monthly")
-
-
-    x_elec <- x %>%
-      filter(
-        (freq == "Monthly" & nrg_bal == "Transformation input - electricity and heat generation - main activity producers") |
-          (freq == "Annual" & nrg_bal %in% c(
-            "Transformation input - electricity and heat generation - main activity producer electricity only - energy use",
-            "Transformation input - electricity and heat generation - main activity producer combined heat and power - energy use"
-          )),
-        grepl("Terajoule", unit),
-        siec_code == SIEC_NATURAL_GAS
-      ) %>%
-      mutate(
-        sector = SECTOR_ELEC,
-        fuel = FUEL_GAS
-      ) %>%
-      filter(time >= min(x_all$time)) %>%
-      # Remove months with 0 if there is gas generation
-      add_iso2() %>%
-      left_join(has_gas_generation) %>%
-      arrange(time) %>%
-      filter(
-        !(freq == 'Monthly' & has_gas_generation & values == 0)
-      )
-
-    bind_rows(
-      x_all,
-      x_elec
+  x_all <- x %>%
+    filter(
+      nrg_bal %in% c(
+        "Inland consumption - observed",
+        "Final consumption - non-energy use"
+      ),
+      grepl("Terajoule", unit),
+      siec_code == SIEC_NATURAL_GAS
     ) %>%
-      group_by(iso2, fuel, sector, siec_code, time, unit) %>%
-      summarise(
-        values = sum(values, na.rm = TRUE),
-        .groups = "drop"
-      )
-  }
+    group_by(across(-c(nrg_bal, nrg_bal_code, values))) %>%
+    summarise(
+      values = sum(values * case_when(
+        nrg_bal == "Inland consumption - observed" ~ 1,
+        T ~ -1
+      )),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      sector = SECTOR_ALL,
+      fuel = FUEL_GAS
+    )
 
-  process_gas_monthly <- function(x, pwr_generation) {
-    process_gas(x, pwr_generation)
-  }
+  # Get months with fossil gas generation
+  # to remove EUROSTAT saying 0 while it is not (e.g. monthly Ireland in 2014)
+  has_gas_generation <- pwr_generation %>%
+    filter(source == "Fossil Gas") %>%
+    group_by(iso2, time = floor_date(date, "month")) %>%
+    summarise(value_mwh = sum(value_mwh, na.rm = T)) %>%
+    mutate(
+      value_mwh_threshold = quantile(value_mwh[value_mwh > 0], 0.1), # Could be due to stock changes
+      has_gas_generation = value_mwh > value_mwh_threshold
+    ) %>%
+    ungroup() %>%
+    tidyr::complete(iso2, time = unique(x$time), fill = list(has_gas_generation = FALSE, value_mwh = NA)) %>%
+    select(iso2, time, has_gas_generation) %>%
+    mutate(freq = "Monthly")
 
-  process_gas_yearly <- function(x, pwr_generation) {
-    process_gas(x, pwr_generation)
-  }
+
+  x_elec <- x %>%
+    filter(
+      (freq == "Monthly" & nrg_bal == "Transformation input - electricity and heat generation - main activity producers") |
+        (freq == "Annual" & nrg_bal %in% c(
+          "Transformation input - electricity and heat generation - main activity producer electricity only - energy use",
+          "Transformation input - electricity and heat generation - main activity producer combined heat and power - energy use"
+        )),
+      grepl("Terajoule", unit),
+      siec_code == SIEC_NATURAL_GAS
+    ) %>%
+    mutate(
+      sector = SECTOR_ELEC,
+      fuel = FUEL_GAS
+    ) %>%
+    filter(time >= min(x_all$time)) %>%
+    # Remove months with 0 if there is gas generation
+    add_iso2() %>%
+    left_join(has_gas_generation) %>%
+    arrange(time) %>%
+    filter(
+      !(freq == "Monthly" & has_gas_generation & values == 0)
+    )
+
+  bind_rows(
+    x_all,
+    x_elec
+  ) %>%
+    group_by(iso2, fuel, sector, siec_code, time, unit) %>%
+    summarise(
+      values = sum(values, na.rm = TRUE),
+      .groups = "drop"
+    )
+}
+
+process_gas_monthly <- function(x, pwr_generation) {
+  process_gas(x, pwr_generation)
+}
+
+process_gas_yearly <- function(x, pwr_generation) {
+  process_gas(x, pwr_generation)
+}
 
 
 #' Monthly data is not as detailed as yearly one.
@@ -148,14 +148,14 @@ collect_gas <- function(use_cache = FALSE) {
 #'
 #' @examples
 add_gas_non_energy <- function(cons_monthly_raw, cons_yearly_raw) {
-
-
-  #TODO Add diagnostic chart
+  # TODO Add diagnostic chart
   shares <- cons_yearly_raw %>%
     filter(time >= "1990-01-01") %>%
-    filter(nrg_bal_code %in% c("IC_OBS", "FC_NE"),
-           siec_code == SIEC_NATURAL_GAS,
-           grepl("Terajoule", unit)) %>%
+    filter(
+      nrg_bal_code %in% c("IC_OBS", "FC_NE"),
+      siec_code == SIEC_NATURAL_GAS,
+      grepl("Terajoule", unit)
+    ) %>%
     # Remove years with only NAs
     # Important because last one could be 0
     group_by(geo, time) %>%
@@ -168,9 +168,9 @@ add_gas_non_energy <- function(cons_monthly_raw, cons_yearly_raw) {
     select(-c(FC_NE, IC_OBS))
 
   shares %>%
-    filter(geo=="Netherlands") %>%
+    filter(geo == "Netherlands") %>%
     ggplot(aes(year, share_non_energy)) +
-    geom_line()+
+    geom_line() +
     rcrea::scale_y_crea_zero()
 
   # Project til now
@@ -237,7 +237,7 @@ fill_ng_elec_eu27 <- function(cons_monthly_raw) {
     group_by(unit) %>%
     tidyr::complete(
       tidyr::nesting(time = seq.Date(min(time), max(time), by = "month")),
-      tidyr::nesting(nrg_bal_code, nrg_bal, siec, siec_code,freq),
+      tidyr::nesting(nrg_bal_code, nrg_bal, siec, siec_code, freq),
       tidyr::nesting(geo, iso2)
     ) %>%
     left_join(eu27_ng_elec_new %>%

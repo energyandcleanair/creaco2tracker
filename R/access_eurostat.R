@@ -73,8 +73,7 @@ eurostat_data_access_get_indprod <- function(use_cache = FALSE,
 }
 
 
-get_eurostat_from_code <- function(code, iso2s=NULL, use_cache = T, filters = NULL) {
-
+get_eurostat_from_code <- function(code, iso2s = NULL, use_cache = T, filters = NULL) {
   # Create a digest of iso2s and filters
   create_dir("cache")
   digest <- digest::digest(list(iso2s, filters))
@@ -84,11 +83,11 @@ get_eurostat_from_code <- function(code, iso2s=NULL, use_cache = T, filters = NU
     return(readRDS(filepath))
   }
 
-  if(!is.null(iso2s)){
+  if (!is.null(iso2s)) {
     filters$geo <- iso2s
   }
 
-  raw <- eurostat::get_eurostat(code, filters = filters, keepFlags=T)
+  raw <- eurostat::get_eurostat(code, filters = filters, keepFlags = T)
   keep_code <- intersect(names(raw), c("nrg_bal", "siec", "nace_r2", "prod_nrg"))
   if (length(keep_code) == 0) keep_code <- NULL
   raw %>%

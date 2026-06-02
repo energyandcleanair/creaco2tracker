@@ -17,12 +17,12 @@ get_data_filepath <- function(filename) {
   if (file.exists(dev_path)) {
     return(dev_path)
   }
-  
+
   # Then try installed package location
   pkg_path <- system.file("extdata", filename, package = "creaco2tracker")
   if (pkg_path != "") {
     return(pkg_path)
   }
-  
+
   stop(sprintf("Could not find data file '%s' in package", filename))
 }

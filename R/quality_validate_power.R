@@ -1,20 +1,22 @@
-validate_power <- function(pwr_generation=entsoe.get_power_generation(), folder="validation"){
-
-  ember_explorer <- ember.get_power_generation(iso2s=get_eu_iso2s())
+validate_power <- function(pwr_generation = entsoe.get_power_generation(), folder = "validation") {
+  ember_explorer <- ember.get_power_generation(iso2s = get_eu_iso2s())
   ember_1 <- ember_explorer %>%
-    mutate(source=recode(source,
-                         Gas='Fossil Gas',
-                         Bioenergy='Other',
-                         `Other Fossil`='Other',
-                         `Other Renewables`='Other')) %>%
-    group_by(year=year(date), source) %>%
-    summarise(value_twh=sum(value_mwh)/1e6,
-              data_source='EMBER (Data Explorer)')
+    mutate(source = recode(source,
+      Gas = "Fossil Gas",
+      Bioenergy = "Other",
+      `Other Fossil` = "Other",
+      `Other Renewables` = "Other"
+    )) %>%
+    group_by(year = year(date), source) %>%
+    summarise(
+      value_twh = sum(value_mwh) / 1e6,
+      data_source = "EMBER (Data Explorer)"
+    )
 
 
   filepath <- "data/ember_yearly_full_release_long_format.csv"
   url <- "https://storage.googleapis.com/emb-prod-bkt-publicdata/public-downloads/yearly_full_release_long_format.csv"
-  if(!file.exists(filepath)){
+  if (!file.exists(filepath)) {
     dir.create(dirname(filepath), showWarnings = FALSE, recursive = T)
     download.file(url, filepath)
   }
@@ -22,104 +24,119 @@ validate_power <- function(pwr_generation=entsoe.get_power_generation(), folder=
   ember_catalogue <- read_csv(filepath)
   ember_2 <- ember_catalogue %>%
     rename(iso3 = `ISO 3 code`) %>%
-    mutate(iso2=countrycode::countrycode(iso3, 'iso3c', 'iso2c')) %>%
-    filter(iso2 %in% get_eu_iso2s(),
-           EU==1,
-           Unit=='TWh',
-           Category=='Electricity generation') %>%
+    mutate(iso2 = countrycode::countrycode(iso3, "iso3c", "iso2c")) %>%
+    filter(
+      iso2 %in% get_eu_iso2s(),
+      EU == 1,
+      Unit == "TWh",
+      Category == "Electricity generation"
+    ) %>%
     filter(Variable %in% c(
-      'Coal','Gas','Hydro','Nuclear','Other Fossil', 'Other Renewables',
-      'Solar', 'Wind', 'Bioenergy'
+      "Coal", "Gas", "Hydro", "Nuclear", "Other Fossil", "Other Renewables",
+      "Solar", "Wind", "Bioenergy"
     )) %>%
-    mutate(source=recode(Variable,
-                         Gas='Fossil Gas',
-                         Bioenergy='Other',
-                         `Other Fossil`='Other',
-                         `Other Renewables`='Other')) %>%
-    group_by(year=Year,
-             source) %>%
-    summarise(value_twh = sum(Value),
-              data_source='EMBER (Data Catalogue)') %>%
+    mutate(source = recode(Variable,
+      Gas = "Fossil Gas",
+      Bioenergy = "Other",
+      `Other Fossil` = "Other",
+      `Other Renewables` = "Other"
+    )) %>%
+    group_by(
+      year = Year,
+      source
+    ) %>%
+    summarise(
+      value_twh = sum(Value),
+      data_source = "EMBER (Data Catalogue)"
+    ) %>%
     ungroup()
 
 
   data <- bind_rows(
-
     ember_1,
     ember_1 %>% group_by(year, data_source) %>%
-      summarise(value_twh=sum(value_twh), source='Total'),
-
+      summarise(value_twh = sum(value_twh), source = "Total"),
     ember_2,
     ember_2 %>% group_by(year, data_source) %>%
-      summarise(value_twh=sum(value_twh), source='Total'),
-
+      summarise(value_twh = sum(value_twh), source = "Total"),
     pwr_generation %>%
-      filter(country=="EU total", date < "2026-01-01") %>%
-      group_by(year=year(date), source) %>%
-      summarise(value_twh=sum(value_mwh, na.rm=T) / 1e6,
-                data_source='ENTSOE')
+      filter(country == "EU total", date < "2026-01-01") %>%
+      group_by(year = year(date), source) %>%
+      summarise(
+        value_twh = sum(value_mwh, na.rm = T) / 1e6,
+        data_source = "ENTSOE"
+      )
   )
 
   # EU Comparison
   ggplot(data) +
-    geom_line(aes(year, value_twh, col=data_source)) +
+    geom_line(aes(year, value_twh, col = data_source)) +
     facet_wrap(~source) +
     rcrea::scale_y_crea_zero() +
-    labs(title='Comparison of EU power generation',
-         subtitle="TWh",
-         x=NULL,
-         y=NULL)
+    labs(
+      title = "Comparison of EU power generation",
+      subtitle = "TWh",
+      x = NULL,
+      y = NULL
+    )
 
 
   # Check why we're missing gas
   ember_catalogue %>%
-    filter(Variable=='Gas',
-           EU==1,
-           Year==max(Year)
-           ) %>%
-    mutate(iso2=countrycode::countrycode(`Country code`, 'iso3c', 'iso2c'),
-           source='Fossil Gas',
-           year=Year) %>%
-    select(iso2, source, year, value_ember=Value) %>%
-    left_join(pwr_generation %>%
-                group_by(iso2, year=year(date), source) %>%
-                summarise(value_crea=sum(value_mwh, na.rm=T) / 1e6)
+    filter(
+      Variable == "Gas",
+      EU == 1,
+      Year == max(Year)
     ) %>%
-    pivot_longer(c(value_ember, value_crea), names_to='data_source', values_to='value_twh') %>%
+    mutate(
+      iso2 = countrycode::countrycode(`Country code`, "iso3c", "iso2c"),
+      source = "Fossil Gas",
+      year = Year
+    ) %>%
+    select(iso2, source, year, value_ember = Value) %>%
+    left_join(pwr_generation %>%
+      group_by(iso2, year = year(date), source) %>%
+      summarise(value_crea = sum(value_mwh, na.rm = T) / 1e6)) %>%
+    pivot_longer(c(value_ember, value_crea), names_to = "data_source", values_to = "value_twh") %>%
     ggplot() +
-    geom_col(aes(iso2, value_twh, fill=data_source),
-             position='dodge')
+    geom_col(aes(iso2, value_twh, fill = data_source),
+      position = "dodge"
+    )
 
 
   # Compare countries
   ember_1_per_country <- ember_explorer %>%
-    mutate(source=recode(source,
-                         Gas='Fossil Gas',
-                         Bioenergy='Other',
-                         `Other Fossil`='Other',
-                         `Other Renewables`='Other')) %>%
-    group_by(iso2, year=year(date)) %>%
-    summarise(value_twh=sum(value_mwh)/1e6,
-              data_source='EMBER (Data Explorer)')
+    mutate(source = recode(source,
+      Gas = "Fossil Gas",
+      Bioenergy = "Other",
+      `Other Fossil` = "Other",
+      `Other Renewables` = "Other"
+    )) %>%
+    group_by(iso2, year = year(date)) %>%
+    summarise(
+      value_twh = sum(value_mwh) / 1e6,
+      data_source = "EMBER (Data Explorer)"
+    )
 
   bind_rows(
-
     ember_1_per_country,
     pwr_generation %>%
-      filter(date < "2026-01-01", source=="Total") %>%
-      group_by(iso2, year=year(date)) %>%
-      summarise(value_twh=sum(value_mwh, na.rm=T) / 1e6,
-                data_source='ENTSOE')
+      filter(date < "2026-01-01", source == "Total") %>%
+      group_by(iso2, year = year(date)) %>%
+      summarise(
+        value_twh = sum(value_mwh, na.rm = T) / 1e6,
+        data_source = "ENTSOE"
+      )
   ) %>%
     filter(iso2 != "EU") %>%
     ggplot() +
-    geom_line(aes(year, value_twh, col=data_source)) +
+    geom_line(aes(year, value_twh, col = data_source)) +
     facet_wrap(~iso2) +
     rcrea::scale_y_crea_zero() +
-    labs(title='Comparison of EU power generation per country',
-         subtitle="TWh",
-         x=NULL,
-         y=NULL)
-
-
+    labs(
+      title = "Comparison of EU power generation per country",
+      subtitle = "TWh",
+      x = NULL,
+      y = NULL
+    )
 }

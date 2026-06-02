@@ -34,8 +34,6 @@ get_weather_corrected_co2 <- function(co2,
                                       demand_fuels = c("electricity", "fossil_gas"),
                                       use_cache = TRUE,
                                       diagnostics_folder = "diagnostics/weather_correction") {
-
-
   # Derive parameters from co2 data
   iso2s <- unique(co2$iso2)
   date_from <- min(co2$date, na.rm = TRUE)
@@ -69,7 +67,8 @@ get_weather_corrected_co2 <- function(co2,
         left_join(
           wc_powermix %>%
             select(iso2, year, sector,
-                   correction_factor_powermix = emission_correction_factor),
+              correction_factor_powermix = emission_correction_factor
+            ),
           by = c("iso2", "year", "sector")
         ) %>%
         mutate(correction_factor_powermix = coalesce(correction_factor_powermix, 1.0))
@@ -83,7 +82,6 @@ get_weather_corrected_co2 <- function(co2,
 
   # Apply demand correction
   if (apply_demand_correction) {
-
     message("Getting demand correction...")
     wc_demand <- get_weather_correction_demand(
       iso2s = iso2s,

@@ -18,7 +18,6 @@ get_corrected_demand <- function(diagnostics_folder = "diagnostics",
                                  use_cache = TRUE,
                                  model_type = c("gam", "lm"),
                                  data_masking = NULL) {
-
   model_type <- match.arg(model_type)
   create_dir(diagnostics_folder)
 

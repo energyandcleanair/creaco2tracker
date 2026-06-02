@@ -7,28 +7,28 @@ collect_solid <- function(use_cache = FALSE) {
   # Monthly data
   consumption_codes_monthly <- c("nrg_cb_sffm")
   cons_monthly_raw <- get_eurostat_from_code(
-        code = consumption_codes_monthly,
-        use_cache = use_cache
-    )
+    code = consumption_codes_monthly,
+    use_cache = use_cache
+  )
 
   # Yearly data
   consumption_codes_yearly <- c("nrg_cb_sff")
   cons_yearly_raw <- get_eurostat_from_code(
-        code = consumption_codes_yearly,
-        use_cache = use_cache
-    )
+    code = consumption_codes_yearly,
+    use_cache = use_cache
+  )
 
   # Only keep certain SIEC codes
   # to avoid double counting
   # e.g. shouldn't keep both Lignite and Brown coal
   siec_codes <- c(
-      SIEC_BROWN_COAL,
-      SIEC_HARD_COAL,
-      SIEC_COKE_OVEN_COKE,
-      SIEC_BROWN_COAL_BRIQUETTES,
-      SIEC_OIL_SHALE,
-      SIEC_PEAT
-    )
+    SIEC_BROWN_COAL,
+    SIEC_HARD_COAL,
+    SIEC_COKE_OVEN_COKE,
+    SIEC_BROWN_COAL_BRIQUETTES,
+    SIEC_OIL_SHALE,
+    SIEC_PEAT
+  )
 
   filter_siec <- function(x) filter(x, siec_code %in% siec_codes)
 
@@ -37,9 +37,9 @@ collect_solid <- function(use_cache = FALSE) {
   #     filter(geo!='Slovenia' | time != '2023-12-01' | siec_code != SIEC_HARD_COAL)
 
   list(
-        monthly = filter_siec(cons_monthly_raw) %>% add_iso2() %>% filter(!is.na(iso2)),
-        yearly = filter_siec(cons_yearly_raw) %>% add_iso2() %>% filter(!is.na(iso2))
-    )
+    monthly = filter_siec(cons_monthly_raw) %>% add_iso2() %>% filter(!is.na(iso2)),
+    yearly = filter_siec(cons_yearly_raw) %>% add_iso2() %>% filter(!is.na(iso2))
+  )
 }
 
 process_solid_monthly <- function(x, pwr_generation) {
@@ -54,8 +54,8 @@ process_solid_monthly <- function(x, pwr_generation) {
   by_sector <- x %>%
     filter(nrg_bal_code %in% c(NRG_GID_CALCULATED, NRG_TRANS_ELEC, NRG_TRANS_COKING)) %>%
     mutate(sector = if_else(nrg_bal_code == NRG_TRANS_ELEC, SECTOR_ELEC, SECTOR_ALL)) %>%
-  # Date valid only from 2014
-  filter(time >= "2014-01-01") %>%
+    # Date valid only from 2014
+    filter(time >= "2014-01-01") %>%
     select(iso2, time, siec_code, nrg_bal_code, sector, unit, values)
 
 
@@ -84,15 +84,16 @@ process_solid_monthly <- function(x, pwr_generation) {
   # but apparently 100% of brown coal was used for elec before that
   to_add_greece <- by_sector %>%
     filter((iso2 == "GR" & siec_code == SIEC_BROWN_COAL & time >= "2015-09-01" & nrg_bal_code == NRG_GID_CALCULATED)) %>%
-    mutate(sector = SECTOR_ELEC,
-           nrg_bal_code = NRG_TRANS_ELEC
-           )
+    mutate(
+      sector = SECTOR_ELEC,
+      nrg_bal_code = NRG_TRANS_ELEC
+    )
 
   by_sector_fixed <- bind_rows(
-      by_sector %>%
-        filter(!(iso2 == "GR" & siec_code == SIEC_BROWN_COAL & time >= "2015-09-01" & sector == SECTOR_ELEC)),
-      to_add_greece
-    )
+    by_sector %>%
+      filter(!(iso2 == "GR" & siec_code == SIEC_BROWN_COAL & time >= "2015-09-01" & sector == SECTOR_ELEC)),
+    to_add_greece
+  )
 
   # Add the difference to EU
   to_add_to_eu <- to_add_greece %>%
@@ -147,8 +148,10 @@ process_solid_monthly <- function(x, pwr_generation) {
   # Remove part of the coal that is used to produced coke to avoid double counting
   # Though keeping a share to represent coke oven gas emissions (see in process_solid_yearly)
   result <- by_sector_fixed %>%
-    mutate(factor = case_when(nrg_bal_code == NRG_TRANS_COKING ~ -1 + HARDCOAL_COKING_RATE_FACTOR,
-                              TRUE ~ 1)) %>%
+    mutate(factor = case_when(
+      nrg_bal_code == NRG_TRANS_COKING ~ -1 + HARDCOAL_COKING_RATE_FACTOR,
+      TRUE ~ 1
+    )) %>%
     group_by(iso2, siec_code, sector, fuel, unit, time) %>%
     summarise(values = sum(values * factor, na.rm = F))
 
@@ -165,7 +168,7 @@ process_solid_monthly <- function(x, pwr_generation) {
     add_iso2() %>%
     left_join(keep_siec) %>%
     filter(keep) %>%
-    select(-keep, - n)
+    select(-keep, -n)
 
   keep_sector <- result %>%
     ungroup() %>%
@@ -179,7 +182,7 @@ process_solid_monthly <- function(x, pwr_generation) {
     add_iso2() %>%
     left_join(keep_sector) %>%
     filter(keep) %>%
-    select(-keep, - n)
+    select(-keep, -n)
 
   # Add siec
   # stopifnot(!"siec" %in% colnames(result))
@@ -189,11 +192,9 @@ process_solid_monthly <- function(x, pwr_generation) {
 
 
   return(result)
-
 }
 
 process_solid_yearly <- function(x) {
-
   NRG_FINAL_ENERGY <- "FC_E"
   NRG_TRANS_ENERGY <- "TI_E"
   NRG_ELEC_CHP <- "TI_EHG_MAPCHP_E"
@@ -202,29 +203,29 @@ process_solid_yearly <- function(x) {
   NRG_FINAL_IRON_STEEL <- "FC_IND"
 
   result <- x %>%
-        filter(nrg_bal_code %in% c(
-          NRG_FINAL_ENERGY,
-          NRG_TRANS_ENERGY,
-          NRG_ELEC_CHP,
-          NRG_ELEC_ONLY,
-          NRG_TRANS_COKING) |
-            (nrg_bal_code == NRG_FINAL_IRON_STEEL & siec_code == SIEC_COKE_OVEN_COKE)) %>%
-        mutate(
-            sector = ifelse(grepl("electricity", nrg_bal), SECTOR_ELEC, SECTOR_ALL),
-            fuel = siec_to_fuel(siec_code)
-        ) %>%
-
+    filter(nrg_bal_code %in% c(
+      NRG_FINAL_ENERGY,
+      NRG_TRANS_ENERGY,
+      NRG_ELEC_CHP,
+      NRG_ELEC_ONLY,
+      NRG_TRANS_COKING
+    ) |
+      (nrg_bal_code == NRG_FINAL_IRON_STEEL & siec_code == SIEC_COKE_OVEN_COKE)) %>%
+    mutate(
+      sector = ifelse(grepl("electricity", nrg_bal), SECTOR_ELEC, SECTOR_ALL),
+      fuel = siec_to_fuel(siec_code)
+    ) %>%
     # Remove MOST OF coal used to produce coke to avoid double counting
     # We find in investigate_coking_emissions that we can approximate that
     # coke oven gas emissions represent roughly 8% of the equivalent
     # of hard coal emissions. So we keep some of it to account for it
     # (coke oven gas will then be under Coal category)
     mutate(factor = case_when(
-        nrg_bal_code == NRG_TRANS_COKING ~ -1 + HARDCOAL_COKING_RATE_FACTOR,
-        TRUE ~ 1)
-        ) %>%
-      group_by(iso2, time, siec_code, sector, fuel, unit) %>%
-      summarise(values = sum(values * factor, na.rm = T), .groups = "drop")
+      nrg_bal_code == NRG_TRANS_COKING ~ -1 + HARDCOAL_COKING_RATE_FACTOR,
+      TRUE ~ 1
+    )) %>%
+    group_by(iso2, time, siec_code, sector, fuel, unit) %>%
+    summarise(values = sum(values * factor, na.rm = T), .groups = "drop")
 
   return(result)
 }
@@ -237,5 +238,7 @@ siec_to_fuel <- function(siec_code) {
     TRUE ~ NA_character_
   ) %>%
     # Raise error if unknown siec_code
-    {if(any(is.na(.))) stop("Unknown SIEC code in siec_to_fuel") else .}
+    {
+      if (any(is.na(.))) stop("Unknown SIEC code in siec_to_fuel") else .
+    }
 }

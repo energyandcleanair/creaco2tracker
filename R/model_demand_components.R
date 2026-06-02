@@ -51,7 +51,6 @@ get_demand_components <- function(iso2s = "EU",
                                   include_time_interaction = TRUE,
                                   diagnostics_folder = "diagnostics/demand_components",
                                   data_masking = NULL) {
-
   model_type <- match.arg(model_type)
   iso2s <- unique(iso2s)
   date_from <- as.Date(date_from)
@@ -80,9 +79,11 @@ get_demand_components <- function(iso2s = "EU",
   )
 
   elec_demand <- pwr_generation %>%
-    filter(source == "Total",
-           date >= date_from,
-           date <= date_to) %>%
+    filter(
+      source == "Total",
+      date >= date_from,
+      date <= date_to
+    ) %>%
     mutate(
       date = as.Date(date),
       fuel = "electricity",
@@ -97,9 +98,11 @@ get_demand_components <- function(iso2s = "EU",
 
   # Gas-fired electricity generation (used as predictor in gas demand regression)
   gas_elec <- pwr_generation %>%
-    filter(source == "Fossil Gas",
-           date >= date_from,
-           date <= date_to) %>%
+    filter(
+      source == "Fossil Gas",
+      date >= date_from,
+      date <= date_to
+    ) %>%
     mutate(date = as.Date(date)) %>%
     select(iso2, date, value = value_mw) %>%
     filter(iso2 %in% iso2s)
@@ -166,11 +169,9 @@ get_demand_components <- function(iso2s = "EU",
                                model_type = "gam",
                                include_time_interaction = FALSE,
                                diagnostics_folder = NULL) {
-
   date_seq <- seq.Date(date_from, date_to, by = "day")
 
   results <- pblapply(iso2s, function(iso2) {
-
     demand_iso <- demand %>%
       filter(iso2 == !!iso2)
 
@@ -217,9 +218,11 @@ get_demand_components <- function(iso2s = "EU",
     # Compute day-of-year mean HDD/CDD for weather correction
     yday_means <- model_data %>%
       group_by(yday) %>%
-      summarise(hdd_mean = mean(hdd, na.rm = TRUE),
-                cdd_mean = mean(cdd, na.rm = TRUE),
-                .groups = "drop")
+      summarise(
+        hdd_mean = mean(hdd, na.rm = TRUE),
+        cdd_mean = mean(cdd, na.rm = TRUE),
+        .groups = "drop"
+      )
 
     model_data <- model_data %>%
       left_join(yday_means, by = "yday")
@@ -239,7 +242,8 @@ get_demand_components <- function(iso2s = "EU",
         formula_terms <- c(formula_terms, "hdd:year_c", "cdd:year_c")
       }
       model <- lm(as.formula(paste("value ~", paste(formula_terms, collapse = " + "))),
-                   data = model_data)
+        data = model_data
+      )
     }
 
     # Decomposition using direct subtraction (Lauri's approach)
@@ -311,8 +315,10 @@ get_demand_components <- function(iso2s = "EU",
 
     comp_value %>%
       left_join(comp_wc, by = c("date", "component")) %>%
-      select(iso2, date, fuel, component, value, value_weather_corrected,
-             unit, frequency, data_source)
+      select(
+        iso2, date, fuel, component, value, value_weather_corrected,
+        unit, frequency, data_source
+      )
   })
 
   bind_rows(results)
@@ -331,11 +337,9 @@ get_demand_components <- function(iso2s = "EU",
                               model_type = "gam",
                               include_time_interaction = FALSE,
                               diagnostics_folder = NULL) {
-
   date_seq <- seq.Date(date_from, date_to, by = "day")
 
   results <- pblapply(iso2s, function(iso2) {
-
     demand_iso <- demand %>%
       filter(iso2 == !!iso2)
 
@@ -388,8 +392,10 @@ get_demand_components <- function(iso2s = "EU",
     # Compute day-of-year mean HDD for weather correction
     yday_means <- model_data %>%
       group_by(yday) %>%
-      summarise(hdd_mean = mean(hdd, na.rm = TRUE),
-                .groups = "drop")
+      summarise(
+        hdd_mean = mean(hdd, na.rm = TRUE),
+        .groups = "drop"
+      )
 
     model_data <- model_data %>%
       left_join(yday_means, by = "yday")
@@ -408,7 +414,8 @@ get_demand_components <- function(iso2s = "EU",
         formula_terms <- c(formula_terms, "hdd:year_c")
       }
       model <- lm(as.formula(paste("value ~", paste(formula_terms, collapse = " + "))),
-                   data = model_data)
+        data = model_data
+      )
     }
 
     # Decomposition using direct subtraction (Lauri's approach)
@@ -477,13 +484,17 @@ get_demand_components <- function(iso2s = "EU",
         names_to = "component",
         values_to = "value_weather_corrected"
       ) %>%
-      mutate(component = gsub("_wc$", "", component),
-             component = ifelse(component == "elec", "electricity", component))
+      mutate(
+        component = gsub("_wc$", "", component),
+        component = ifelse(component == "elec", "electricity", component)
+      )
 
     comp_value %>%
       left_join(comp_wc, by = c("date", "component")) %>%
-      select(iso2, date, fuel, component, value, value_weather_corrected,
-             unit, frequency, data_source)
+      select(
+        iso2, date, fuel, component, value, value_weather_corrected,
+        unit, frequency, data_source
+      )
   })
 
   bind_rows(results)

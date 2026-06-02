@@ -16,7 +16,6 @@ power_data_access_get_sources <- function(iso2s,
                                           date_to,
                                           use_cache = TRUE,
                                           data_masking = NULL) {
-
   date_from <- as.Date(date_from)
   date_to <- as.Date(date_to)
 

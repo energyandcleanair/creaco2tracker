@@ -58,7 +58,6 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
                                  replace_entsoe_others_with_ember = TRUE,
                                  diagnostics_folder = "diagnostics/power_generation",
                                  data_masking = NULL) {
-
   date_from <- as.Date(date_from)
   date_to <- as.Date(date_to)
 
@@ -120,7 +119,7 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
 
   entsoe_passthrough <- entsoe_daily %>%
     filter(!(source %in% corrected_sources | source %in% c("Wind Onshore", "Wind Offshore"))) %>%
-    filter(source != "Total")  # Don't pass through Total, we'll recalculate
+    filter(source != "Total") # Don't pass through Total, we'll recalculate
 
   # If replacing ENTSOE others with EMBER, filter them out from passthrough
   if (replace_entsoe_others_with_ember) {
@@ -157,7 +156,7 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
       value_mwh_raw = value_mwh,
       correction_tier = NA_integer_,
       correction_ratio = NA_real_,
-      data_source = "entsoe"  # Keep original data_source for passthrough
+      data_source = "entsoe" # Keep original data_source for passthrough
     ) %>%
     select(
       date, source, data_source, iso2, region, country,
@@ -174,7 +173,7 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
       date_from = date_from,
       date_to = date_to,
       iso2s = iso2s,
-      entsoe_daily = entsoe_daily_full  # For getting region/country info
+      entsoe_daily = entsoe_daily_full # For getting region/country info
     )
   }
 
@@ -185,7 +184,7 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
   # Recalculate Total if it was in ENTSOE originally
   if (any(entsoe_daily_full$source == "Total", na.rm = TRUE)) {
     total_recalculated <- result %>%
-      filter(source != "Total") %>%  # Exclude any existing Total
+      filter(source != "Total") %>% # Exclude any existing Total
       group_by(iso2, region, country, date) %>%
       summarise(
         value_mw = sum(value_mw, na.rm = TRUE),
@@ -216,7 +215,7 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
       entsoe_daily = entsoe_to_correct,
       ember_monthly = ember_monthly_for_correction,
       scaling_factors = scaling_factors,
-      result = result,  # Pass all results for complete diagnostics
+      result = result, # Pass all results for complete diagnostics
       diagnostics_folder = diagnostics_folder
     )
   }
@@ -240,7 +239,6 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
 .calculate_monthly_scaling_factors <- function(entsoe_daily,
                                                ember_monthly,
                                                tier_threshold) {
-
   # Aggregate ENTSOE to monthly
   entsoe_monthly <- entsoe_daily %>%
     mutate(
@@ -292,7 +290,8 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
   # Add tier and calculate scaling factor
   scaling_factors <- monthly_comparison %>%
     left_join(tier_assignment %>% select(iso2, source_std, tier),
-              by = c("iso2", "source_std")) %>%
+      by = c("iso2", "source_std")
+    ) %>%
     mutate(
       # For Tier 1: scale_factor to multiply ENTSOE by
       # For Tier 2: we'll use EMBER directly, but still track ratio
@@ -310,7 +309,6 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
                                      scaling_factors,
                                      date_from,
                                      date_to) {
-
   # Get tier assignment for each country/source
   tier_assignment <- scaling_factors %>%
     select(iso2, source_std, tier) %>%
@@ -364,8 +362,8 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
       # If ENTSOE has valid data, use its pattern; otherwise use equal distribution
       daily_share = case_when(
         monthly_total > 0 & !is.na(value_mwh) ~ value_mwh / monthly_total,
-        n_valid_days == 0 ~ 1 / n(),  # All NA: use equal distribution
-        TRUE ~ 0  # This day is NA but others aren't - give it 0 share
+        n_valid_days == 0 ~ 1 / n(), # All NA: use equal distribution
+        TRUE ~ 0 # This day is NA but others aren't - give it 0 share
       ),
       entsoe_all_na = (n_valid_days == 0)
     ) %>%
@@ -449,7 +447,6 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
 #' @return EMBER monthly data with gaps filled from yearly
 #' @keywords internal
 .fill_ember_monthly_from_yearly <- function(ember_monthly, ember_yearly, entsoe_daily) {
-
   # Identify which year/country/source combinations have monthly data
   monthly_coverage <- ember_monthly %>%
     mutate(year = year(date)) %>%
@@ -476,7 +473,7 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
     # Consider incomplete if <10 months or monthly sum is <80% of yearly
     filter(
       n_months < 10 |
-      (yearly_mwh > 0 & monthly_mwh / yearly_mwh < 0.8)
+        (yearly_mwh > 0 & monthly_mwh / yearly_mwh < 0.8)
     )
 
   if (nrow(gaps) == 0) {
@@ -484,8 +481,10 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
     return(ember_monthly)
   }
 
-  message(sprintf("Filling %d year/country/source gaps in EMBER monthly from yearly data",
-                  nrow(gaps)))
+  message(sprintf(
+    "Filling %d year/country/source gaps in EMBER monthly from yearly data",
+    nrow(gaps)
+  ))
 
   # Prepare ENTSOE monthly patterns for distribution
   entsoe_monthly_pattern <- entsoe_daily %>%
@@ -504,7 +503,7 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
     group_by(iso2, source_std, year) %>%
     mutate(
       yearly_total = sum(entsoe_mwh, na.rm = TRUE),
-      monthly_share = if_else(yearly_total > 0, entsoe_mwh / yearly_total, 1/12)
+      monthly_share = if_else(yearly_total > 0, entsoe_mwh / yearly_total, 1 / 12)
     ) %>%
     ungroup() %>%
     select(iso2, source_std, year, month, monthly_share)
@@ -519,7 +518,7 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
       by = c("iso2", "source" = "source_std", "year", "month")
     ) %>%
     # If no ENTSOE pattern available, use equal distribution
-    mutate(monthly_share = coalesce(monthly_share, 1/12)) %>%
+    mutate(monthly_share = coalesce(monthly_share, 1 / 12)) %>%
     # Calculate monthly value from yearly
     mutate(
       value_mwh = yearly_mwh * monthly_share,
@@ -565,12 +564,11 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
 #' @return Daily data in the same format as result_corrected/result_passthrough
 #' @keywords internal
 .distribute_ember_to_daily <- function(ember_monthly,
-                                        ember_only_sources,
-                                        date_from,
-                                        date_to,
-                                        iso2s,
-                                        entsoe_daily) {
-
+                                       ember_only_sources,
+                                       date_from,
+                                       date_to,
+                                       iso2s,
+                                       entsoe_daily) {
   # Filter EMBER to only the sources we want
   ember_subset <- ember_monthly %>%
     filter(source %in% ember_only_sources, iso2 %in% iso2s)
@@ -596,15 +594,15 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
   # Generate months to fill (from last EMBER month + 1 to date_to)
   months_to_fill <- last_ember_values %>%
     group_by(iso2, source) %>%
-    group_modify(function(df, keys){
-
+    group_modify(function(df, keys) {
       need_new_months <- lubridate::ceiling_date(df$last_date, "month") <= as.Date(date_to)
-      missing_months <- if(need_new_months){
+      missing_months <- if (need_new_months) {
         seq.Date(
-        from = lubridate::ceiling_date(df$last_date, "month"),
-        to = lubridate::floor_date(as.Date(date_to), "month"),
-        by = "month")
-      }else{
+          from = lubridate::ceiling_date(df$last_date, "month"),
+          to = lubridate::floor_date(as.Date(date_to), "month"),
+          by = "month"
+        )
+      } else {
         df$last_date
       }
       tibble(
@@ -666,9 +664,11 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
       value_mw_raw, value_mwh_raw, correction_tier, correction_ratio
     )
 
-  message(sprintf("Added %d daily observations from EMBER-only sources (%s)",
-                  nrow(daily_data),
-                  paste(ember_only_sources, collapse = ", ")))
+  message(sprintf(
+    "Added %d daily observations from EMBER-only sources (%s)",
+    nrow(daily_data),
+    paste(ember_only_sources, collapse = ", ")
+  ))
 
   return(daily_data)
 }
@@ -687,7 +687,6 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
 get_power_generation_tiers <- function(tier_threshold = c(0.7, 1.3),
                                        use_cache = TRUE,
                                        tier_calc_start = "2020-01-01") {
-
   iso2s <- get_eu_iso2s(include_eu = FALSE)
 
   source_data <- power_data_access_get_sources(
@@ -746,7 +745,6 @@ get_power_generation_tiers <- function(tier_threshold = c(0.7, 1.3),
                                         scaling_factors,
                                         result,
                                         diagnostics_folder) {
-
   message("Generating power generation diagnostics...")
   create_dir(diagnostics_folder)
 
@@ -766,7 +764,7 @@ get_power_generation_tiers <- function(tier_threshold = c(0.7, 1.3),
 
   # Corrected
   result_monthly <- result %>%
-    group_by(iso2, year=year(date), month=month(date), source_std = case_when(
+    group_by(iso2, year = year(date), month = month(date), source_std = case_when(
       source %in% c("Wind Onshore", "Wind Offshore", "Wind") ~ "Wind",
       source == "Fossil Gas" ~ "Gas",
       TRUE ~ source
@@ -806,7 +804,7 @@ get_power_generation_tiers <- function(tier_threshold = c(0.7, 1.3),
   #   mutate(
   #     iso2 = "EU",
   #     ratio = entsoe_mwh / ember_mwh
-    # )
+  # )
 
   # monthly_comparison <- bind_rows(monthly_comparison, eu_monthly)
 
@@ -859,7 +857,9 @@ get_power_generation_tiers <- function(tier_threshold = c(0.7, 1.3),
     )
 
   ggsave(file.path(diagnostics_folder, "yearly_ratio_all_countries.png"),
-         p_yearly_ratio, width = 16, height = 16)
+    p_yearly_ratio,
+    width = 16, height = 16
+  )
 
   # ============================================================================
   # 2. Monthly ratio chart - all countries (recent years)
@@ -887,7 +887,9 @@ get_power_generation_tiers <- function(tier_threshold = c(0.7, 1.3),
     )
 
   ggsave(file.path(diagnostics_folder, "monthly_ratio_all_countries.png"),
-         p_monthly_ratio, width = 16, height = 16)
+    p_monthly_ratio,
+    width = 16, height = 16
+  )
 
   # ============================================================================
   # 3. Yearly comparison by source - ENTSOE vs EMBER
@@ -927,7 +929,9 @@ get_power_generation_tiers <- function(tier_threshold = c(0.7, 1.3),
       )
 
     ggsave(file.path(diagnostics_folder, paste0("yearly_", tolower(src), "_all_countries.png")),
-           p_yearly_src, width = 16, height = 14)
+      p_yearly_src,
+      width = 16, height = 14
+    )
   }
 
   # ============================================================================
@@ -966,7 +970,9 @@ get_power_generation_tiers <- function(tier_threshold = c(0.7, 1.3),
       )
 
     ggsave(file.path(diagnostics_folder, paste0("monthly_", tolower(src), "_all_countries.png")),
-           p_monthly_src, width = 16, height = 16)
+      p_monthly_src,
+      width = 16, height = 16
+    )
   }
 
   # ============================================================================
@@ -1008,7 +1014,9 @@ get_power_generation_tiers <- function(tier_threshold = c(0.7, 1.3),
     theme(axis.text.y = element_text(size = 8))
 
   ggsave(file.path(diagnostics_folder, "scaling_factors_heatmap.png"),
-         p_heatmap, width = 8, height = 12)
+    p_heatmap,
+    width = 8, height = 12
+  )
 
   # ============================================================================
   # 6. Tier assignment summary
@@ -1039,7 +1047,9 @@ get_power_generation_tiers <- function(tier_threshold = c(0.7, 1.3),
     xlim(0.5, 1.5)
 
   ggsave(file.path(diagnostics_folder, "ratio_distribution_monthly.png"),
-         p_ratio_dist, width = 10, height = 5)
+    p_ratio_dist,
+    width = 10, height = 5
+  )
 
   # ============================================================================
   # 8. Summary statistics
@@ -1067,7 +1077,7 @@ get_power_generation_tiers <- function(tier_threshold = c(0.7, 1.3),
   for (src in sources) {
     plt <- entsoe_monthly %>%
       left_join(ember_monthly_prep, by = c("iso2", "year", "month", "source_std", "date")) %>%
-      left_join(result_monthly, by = c("iso2", "year", "month", "source_std", "date"))  %>%
+      left_join(result_monthly, by = c("iso2", "year", "month", "source_std", "date")) %>%
       tidyr::pivot_longer(
         cols = c(entsoe_mwh, ember_mwh, result_mwh),
         names_to = "data_source",
@@ -1086,8 +1096,9 @@ get_power_generation_tiers <- function(tier_threshold = c(0.7, 1.3),
       )
 
     ggsave(file.path(diagnostics_folder, paste0("overall_", tolower(src), "_all_countries.png")),
-           plt, width = 16, height = 14)
-
+      plt,
+      width = 16, height = 14
+    )
   }
 
   message("Diagnostics saved to: ", diagnostics_folder)

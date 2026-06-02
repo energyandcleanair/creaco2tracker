@@ -13,21 +13,24 @@
 #' @export
 #'
 #' @examples
-detotalise_co2 <- function(x){
-
+detotalise_co2 <- function(x) {
   # sector should NOT be in group cols
   group_by_cols <- intersect(names(x), c("iso2", "geo", "date", "fuel", "estimate", "unit"))
 
   # Deduct other from total and other sectors
   filler <- x %>%
     filter(sector != SECTOR_OTHERS) %>%
-    mutate(factor = ifelse(sector==SECTOR_ALL, 1, -1)) %>%
+    mutate(factor = ifelse(sector == SECTOR_ALL, 1, -1)) %>%
     group_by_at(group_by_cols) %>%
-    filter(any(sector==SECTOR_ALL),
-           !any(sector==SECTOR_OTHERS)) %>%
-    summarise(value_deducted = sum(value * factor),
-              sector = SECTOR_OTHERS,
-              .groups = "drop") %>%
+    filter(
+      any(sector == SECTOR_ALL),
+      !any(sector == SECTOR_OTHERS)
+    ) %>%
+    summarise(
+      value_deducted = sum(value * factor),
+      sector = SECTOR_OTHERS,
+      .groups = "drop"
+    ) %>%
     arrange(desc(date))
 
   y <- x %>%
@@ -36,7 +39,7 @@ detotalise_co2 <- function(x){
     select(-value_deducted) %>%
     group_by(iso2, fuel, date) %>%
     # Remove total if there is another sector
-    filter(!(sector==SECTOR_ALL & any(sector==SECTOR_OTHERS & !is.na(value)))) %>%
+    filter(!(sector == SECTOR_ALL & any(sector == SECTOR_OTHERS & !is.na(value)))) %>%
     ungroup()
 
   # For debugging purposes

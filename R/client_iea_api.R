@@ -1,4 +1,3 @@
-
 iea.get_balance <- function(year_from = 2000, year_to = 2022, iso2, use_cache = TRUE) {
   # Generate a hash of the parameters
   param_hash <- digest::digest(c(year_from, year_to, iso2))
@@ -14,10 +13,11 @@ iea.get_balance <- function(year_from = 2000, year_to = 2022, iso2, use_cache = 
     # Fetch the data
     result <- pbapply::pblapply(seq(year_from, year_to), function(year) {
       creahelpers::api.get("api.energyandcleanair.org/energy/iea_balance",
-                           year_from = year,
-                           year_to = year,
-                           country = iso2,
-                           api_key = Sys.get_env("API_KEY"))
+        year_from = year,
+        year_to = year,
+        country = iso2,
+        api_key = Sys.get_env("API_KEY")
+      )
     }) %>%
       bind_rows()
 
@@ -31,7 +31,6 @@ iea.get_balance <- function(year_from = 2000, year_to = 2022, iso2, use_cache = 
 
 
 iea.get_conversion_factors <- function(year_from = 2000, year_to = 2022, iso2, use_cache = TRUE) {
-
   # Generate a hash of the parameters
   param_hash <- digest::digest(c(year_from, year_to, iso2))
 
@@ -46,10 +45,11 @@ iea.get_conversion_factors <- function(year_from = 2000, year_to = 2022, iso2, u
     # Fetch the data
     print(glue("Getting conversion factors from IEA for {paste(iso2, sep=',')} from {year_from} to {year_to}"))
     result <- creahelpers::api.get("api.energyandcleanair.org/energy/iea_conversion",
-                                   year_from = year_from,
-                                   year_to = year_to,
-                                   country = iso2,
-                                   api_key = Sys.getenv("API_KEY"))
+      year_from = year_from,
+      year_to = year_to,
+      country = iso2,
+      api_key = Sys.getenv("API_KEY")
+    )
 
     print(glue("Got {nrow(result)} records"))
     # Save the fetched data to cache

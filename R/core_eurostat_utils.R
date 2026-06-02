@@ -10,16 +10,18 @@
 #' @return A numeric vector with appropriate NA values filled with zeros
 #' @export
 fill_gaps_with_zero_when_suitable <- function(x,
-                                             consecutive_required = 3,
-                                             prob = 0.05,
-                                             beyond_last_na = FALSE) {
+                                              consecutive_required = 3,
+                                              prob = 0.05,
+                                              beyond_last_na = FALSE) {
   # 1. Determine threshold
   threshold <- quantile(x, probs = prob, na.rm = TRUE)
 
   # 2. Find the index of the last non-NA
   last_non_na_idx <- suppressWarnings(max(which(!is.na(x))))
   # If everything is NA, just return x
-  if (!is.finite(last_non_na_idx)) return(x)
+  if (!is.finite(last_non_na_idx)) {
+    return(x)
+  }
 
   out <- x
   # We'll track how many consecutive "small or zero" values we've seen so far.
@@ -96,8 +98,6 @@ fill_eu_from_countries_sum <- function(data,
                                        min_countries = 20,
                                        max_rel_diff = 0.05,
                                        min_points = 12) {
-
-
   # Add iso2 and time to group_cols if in data cols and not in group_cols
   group_cols <- unique(c(group_cols, "iso2", "time"))
 
@@ -131,7 +131,7 @@ fill_eu_from_countries_sum <- function(data,
     distinct(available_countries, n_countries) %>%
     arrange(desc(n_countries))
 
-  if(nrow(country_sets) == 0) {
+  if (nrow(country_sets) == 0) {
     return(data)
   }
 
@@ -151,7 +151,7 @@ fill_eu_from_countries_sum <- function(data,
         n = sum(!is.na(values)),
         .groups = "drop"
       ) %>%
-      filter(n == length(current_countries))  # Only keep rows where all countries have data
+      filter(n == length(current_countries)) # Only keep rows where all countries have data
 
     # Check correlation with existing EU data
     correlation_check <- eu_data %>%
@@ -167,7 +167,7 @@ fill_eu_from_countries_sum <- function(data,
 
 
     # If correlation is good enough, use this set for filling
-    if(any(correlation_check$corr_is_good_enough)) {
+    if (any(correlation_check$corr_is_good_enough)) {
       # Get the groups where correlation is good enough
       good_groups <- correlation_check %>%
         filter(corr_is_good_enough) %>%
@@ -179,7 +179,7 @@ fill_eu_from_countries_sum <- function(data,
         inner_join(good_groups, by = setdiff(group_cols, "time")) %>%
         mutate(
           values = coalesce(values, values_sum),
-          order = i  # Add order based on country set size
+          order = i # Add order based on country set size
         ) %>%
         select(-values_sum, -n)
 
@@ -191,9 +191,9 @@ fill_eu_from_countries_sum <- function(data,
   final_projection <- bind_rows(projected_results) %>%
     group_by(across(all_of(group_cols))) %>%
     filter(!is.na(values)) %>%
-    slice_min(order, n = 1) %>%  # Take row with smallest order number
+    slice_min(order, n = 1) %>% # Take row with smallest order number
     ungroup() %>%
-    select(-order)  # Remove the order column
+    select(-order) # Remove the order column
 
   # Combine projected EU data with original data, ensuring no duplicates
   bind_rows(
@@ -222,19 +222,18 @@ fill_eu_from_countries_sum <- function(data,
 #' @return A dataframe with filled gaps
 #' @export
 fill_gaps_in_time_series <- function(data,
-                                    group_cols,
-                                    zero_consecutive_required = 3,
-                                    zero_consecutive_required_beyond_last = 12,
-                                    zero_prob = 0.05,
-                                    interp_cv_threshold = 0.1,
-                                    interp_maxgap = 3,
-                                    exclude_iso2s = "EU") {
-
+                                     group_cols,
+                                     zero_consecutive_required = 3,
+                                     zero_consecutive_required_beyond_last = 12,
+                                     zero_prob = 0.05,
+                                     interp_cv_threshold = 0.1,
+                                     interp_maxgap = 3,
+                                     exclude_iso2s = "EU") {
   # Ensure data has iso2 column
   data <- add_iso2(data)
 
   # Get time frequency from data
-  if(all(lubridate::month(data$time) == 1)) {
+  if (all(lubridate::month(data$time) == 1)) {
     frequency <- "year"
   } else {
     frequency <- "month"
@@ -246,12 +245,12 @@ fill_gaps_in_time_series <- function(data,
     group_modify(function(group_data, group_keys) {
       # Skip gap filling for excluded ISO2 codes
       if ("iso2" %in% names(group_data) &&
-          any(group_data$iso2 %in% exclude_iso2s)) {
+        any(group_data$iso2 %in% exclude_iso2s)) {
         return(group_data)
       }
 
       if ("iso2" %in% names(group_keys) &&
-          any(group_keys$iso2 %in% exclude_iso2s)) {
+        any(group_keys$iso2 %in% exclude_iso2s)) {
         return(group_data)
       }
 
@@ -304,12 +303,12 @@ fill_gaps_in_time_series <- function(data,
 #' @param min_points Minimum number of non-NA points required (default: 12)
 #' @return A list with correlation metrics and whether it's good enough
 #' @export
-check_proxy_correlation <- function(target, proxy, max_rel_diff=0.05, min_points=12) {
+check_proxy_correlation <- function(target, proxy, max_rel_diff = 0.05, min_points = 12) {
   # Remove rows where either target or proxy is NA
-  valid_data <- data.frame(target=target, proxy=proxy) %>%
+  valid_data <- data.frame(target = target, proxy = proxy) %>%
     filter(!is.na(target), !is.na(proxy))
 
-  if(nrow(valid_data) < min_points) {
+  if (nrow(valid_data) < min_points) {
     return(list(
       rel_diff = 1,
       n_points = nrow(valid_data),
@@ -340,10 +339,10 @@ check_proxy_correlation <- function(target, proxy, max_rel_diff=0.05, min_points
 eurostat_split_elec_others <- function(x) {
   # Quick return if no work needed
   sectors <- unique(x$sector)
-  if(setequal(sectors, c(SECTOR_ELEC, SECTOR_OTHERS))) {
+  if (setequal(sectors, c(SECTOR_ELEC, SECTOR_OTHERS))) {
     return(x)
   }
-  if(!all(sectors %in% c(SECTOR_ALL, SECTOR_ELEC, SECTOR_OTHERS))) {
+  if (!all(sectors %in% c(SECTOR_ALL, SECTOR_ELEC, SECTOR_OTHERS))) {
     stop("eurostat_split_elec_others shouldn't be applied to datasets with more than all, elec, and others")
   }
 
@@ -360,8 +359,8 @@ eurostat_split_elec_others <- function(x) {
     add_missing_cols(c("all", "others", "electricity")) %>%
     mutate(
       # Handle case where only "all" data is available
-      electricity = coalesce(electricity, 0),  # Default to 0 if no electricity data
-      others = coalesce(others, all - electricity),  # calculate others value
+      electricity = coalesce(electricity, 0), # Default to 0 if no electricity data
+      others = coalesce(others, all - electricity), # calculate others value
       # If others is still NA (which can happen if all is NA), set it to 0
       others = coalesce(others, 0),
       # Recalculate electricity if it was set to 0 but we have all data

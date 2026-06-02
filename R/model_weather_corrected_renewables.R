@@ -9,12 +9,11 @@
 #' @keywords internal
 get_weather_corrected_renewables <- function(iso2s,
                                              date_from,
-                                             date_to=NULL,
+                                             date_to = NULL,
                                              pwr_generation,
                                              sources = c("wind", "solar", "hydro"),
                                              use_cache = TRUE,
                                              diagnostics_folder = diagnostics_folder) {
-
   renewable_data <- list()
 
   # Get weather-corrected wind
@@ -80,51 +79,53 @@ get_weather_corrected_wind <- function(iso2s = "EU",
                                        pwr_generation,
                                        date_from = "2015-01-01",
                                        date_to = NULL,
-                                       diagnostics_folder = 'diagnostics/weather_correction/wind',
+                                       diagnostics_folder = "diagnostics/weather_correction/wind",
                                        use_cache = TRUE,
                                        use_local = FALSE) {
-
   create_dir(diagnostics_folder)
 
   # Ensure this is daily data
-  stopifnot(all(lubridate::date(pwr_generation$date)==pwr_generation$date))
+  stopifnot(all(lubridate::date(pwr_generation$date) == pwr_generation$date))
 
   # Filter for wind generation in specified countries
   wind_generation <- pwr_generation %>%
     filter(iso2 %in% iso2s) %>%
     filter(grepl("wind", source, ignore.case = TRUE))
 
-  if(!is.null(date_to)) {
+  if (!is.null(date_to)) {
     wind_generation <- wind_generation %>%
       filter(date <= as.Date(date_to))
   }
 
   message("Getting wind speed and temperature data from CREA DB")
   # If EU, we'll use weather in all countries as predictors
-  weather_iso2s <- if("EU" %in% iso2s) {
+  weather_iso2s <- if ("EU" %in% iso2s) {
     get_eu_iso2s(include_eu = FALSE)
   } else {
     iso2s
   }
 
   # Get both wind speed and temperature in one call
-  weather <- tryCatch({
-    get_weather(
-      variable = "ws50m_daily,t10m_daily",
-      region_iso2 = paste(weather_iso2s, collapse = ","),
-      region_type = "station",
-      station_source = "gem",
-      date_from = date_from,
-      date_to = date_to,
-      use_cache = use_cache,
-      use_local = use_local,
-      aggregate_by = "region_iso2,date",
-      aggregate_fn = "mean"
-    )
-  }, error = function(e) {
-    warning(sprintf("Failed to get weather data: %s", e$message))
-    return(NULL)
-  })
+  weather <- tryCatch(
+    {
+      get_weather(
+        variable = "ws50m_daily,t10m_daily",
+        region_iso2 = paste(weather_iso2s, collapse = ","),
+        region_type = "station",
+        station_source = "gem",
+        date_from = date_from,
+        date_to = date_to,
+        use_cache = use_cache,
+        use_local = use_local,
+        aggregate_by = "region_iso2,date",
+        aggregate_fn = "mean"
+      )
+    },
+    error = function(e) {
+      warning(sprintf("Failed to get weather data: %s", e$message))
+      return(NULL)
+    }
+  )
 
   if (is.null(weather) || nrow(weather) == 0) {
     stop("No weather data retrieved. Check API availability and parameters.")
@@ -137,8 +138,7 @@ get_weather_corrected_wind <- function(iso2s = "EU",
   message("Fitting weather correction models...")
   # Fit model for each country
   corrected_data <- pblapply(iso2s, function(iso2) {
-
-    keep_weather_iso2s <- if(iso2=="EU"){
+    keep_weather_iso2s <- if (iso2 == "EU") {
       get_eu_iso2s(include_eu = FALSE)
     } else {
       iso2
@@ -151,13 +151,15 @@ get_weather_corrected_wind <- function(iso2s = "EU",
     model_data <- wind_generation %>%
       filter(iso2 == !!iso2) %>%
       select(iso2, date, value_mwh) %>%
-      left_join(weather_country %>%
-                  select(weather_iso2=region_iso2, date, variable, value) %>%
-                  tidyr::pivot_wider(names_from = variable, values_from = value),
-                by = c("date"))
+      left_join(
+        weather_country %>%
+          select(weather_iso2 = region_iso2, date, variable, value) %>%
+          tidyr::pivot_wider(names_from = variable, values_from = value),
+        by = c("date")
+      )
 
 
-    if(nrow(model_data) == 0 || nrow(weather_country) == 0){
+    if (nrow(model_data) == 0 || nrow(weather_country) == 0) {
       warning(sprintf("No data for %s", iso2))
       return(NULL)
     }
@@ -165,7 +167,7 @@ get_weather_corrected_wind <- function(iso2s = "EU",
     # Add time vars and physics-based features
     model_data <- model_data %>%
       mutate(
-        yday = lubridate::yday(date),  # Day of year for climatology
+        yday = lubridate::yday(date), # Day of year for climatology
         year = lubridate::year(date),
         year_month = lubridate::floor_date(date, "month"),
         month = lubridate::month(date)
@@ -181,12 +183,14 @@ get_weather_corrected_wind <- function(iso2s = "EU",
     # We spread variable_iso2
     model_data <- model_data %>%
       select(iso2, date, value_mwh, year, ws_1, ws_2, ws_3, inv_temp, temp, weather_iso2) %>%
-      tidyr::pivot_wider(names_from = weather_iso2, values_from = c(ws_1, ws_2, ws_3, inv_temp, temp),
-                         names_sep = "_")
+      tidyr::pivot_wider(
+        names_from = weather_iso2, values_from = c(ws_1, ws_2, ws_3, inv_temp, temp),
+        names_sep = "_"
+      )
 
     # Drop columns with only NAs (in case some countries don't have weather data for all iso2s)
     model_data <- model_data %>%
-      select(where(~!all(is.na(.))))
+      select(where(~ !all(is.na(.))))
 
     weather_vars <- grep(names(model_data), pattern = "^(ws_1|ws_2|ws_3|inv_temp|temp)_", value = TRUE)
     weather_iso2s <- unique(gsub("^(ws_1|ws_2|ws_3|inv_temp|temp)_", "", weather_vars))
@@ -205,75 +209,77 @@ get_weather_corrected_wind <- function(iso2s = "EU",
       return(NULL)
     }
 
-    tryCatch({
-
-      # Fit model using gbm
-      formula_str <- paste("value_mwh ~ 0 + year +",
-                           paste(glue("ws_1_{weather_iso2s}"), collapse = " + "), "+",
-                           paste(glue("ws_2_{weather_iso2s}"), collapse = " + "), "+",
-                           paste0(glue("ws_3_{weather_iso2s}*inv_temp_{weather_iso2s}"), collapse = " + ")
-      )
-      # formula_str <- paste("value_mwh ~ 0 + year  + ws_1 + ws_2 + ws_3*inv_temp")
-      model_formula <- as.formula(formula_str)
-      model <- gbm::gbm(
-        model_formula,
-        data = model_data_country,
-        n.trees = 1000,
-        interaction.depth = 3,
-        shrinkage = 0.01,
-        distribution = "gaussian"
-      )
-
-      # Predict at ACTUAL weather (fitted values)
-      fitted_actual <- predict(model, model_data_country)
-
-      # Predict at NORMAL weather
-      # For each date, predict using all historical weather for that day-of-year
-      # while keeping the actual year
-      #
-      # Attention: we should not predict at average weather for each yday,
-      # because the curve is non-linear
-      # -> the generation at average weather is not the same as average of generation at actual weather
-      # see Jensen's inequality (E[f(X)] != f(E[X]) for non-linear f)
-      crossed_weather <- model_data_country %>%
-        mutate(yday = lubridate::yday(date)) %>%
-        select_at(c("yday", weather_vars)) %>%
-        full_join(
-          model_data_country %>%
-            mutate(yday = lubridate::yday(date)) %>%
-            distinct(date, year, yday),
-          by = "yday",
-          relationship = "many-to-many"
+    tryCatch(
+      {
+        # Fit model using gbm
+        formula_str <- paste(
+          "value_mwh ~ 0 + year +",
+          paste(glue("ws_1_{weather_iso2s}"), collapse = " + "), "+",
+          paste(glue("ws_2_{weather_iso2s}"), collapse = " + "), "+",
+          paste0(glue("ws_3_{weather_iso2s}*inv_temp_{weather_iso2s}"), collapse = " + ")
+        )
+        # formula_str <- paste("value_mwh ~ 0 + year  + ws_1 + ws_2 + ws_3*inv_temp")
+        model_formula <- as.formula(formula_str)
+        model <- gbm::gbm(
+          model_formula,
+          data = model_data_country,
+          n.trees = 1000,
+          interaction.depth = 3,
+          shrinkage = 0.01,
+          distribution = "gaussian"
         )
 
-      crossed_weather$predicted_mwh <- predict(model, crossed_weather)
+        # Predict at ACTUAL weather (fitted values)
+        fitted_actual <- predict(model, model_data_country)
 
-      fitted_normal <- crossed_weather %>%
-        group_by(date) %>%
-        summarise(fitted_normal = mean(predicted_mwh, na.rm = TRUE), .groups = "drop") %>%
-        ungroup()
+        # Predict at NORMAL weather
+        # For each date, predict using all historical weather for that day-of-year
+        # while keeping the actual year
+        #
+        # Attention: we should not predict at average weather for each yday,
+        # because the curve is non-linear
+        # -> the generation at average weather is not the same as average of generation at actual weather
+        # see Jensen's inequality (E[f(X)] != f(E[X]) for non-linear f)
+        crossed_weather <- model_data_country %>%
+          mutate(yday = lubridate::yday(date)) %>%
+          select_at(c("yday", weather_vars)) %>%
+          full_join(
+            model_data_country %>%
+              mutate(yday = lubridate::yday(date)) %>%
+              distinct(date, year, yday),
+            by = "yday",
+            relationship = "many-to-many"
+          )
 
-      model_data_country <- model_data_country %>%
-        left_join(fitted_normal, by = c("date")) %>%
-        mutate(value_mwh_corrected = value_mwh + (fitted_normal - fitted_actual))
+        crossed_weather$predicted_mwh <- predict(model, crossed_weather)
 
-      # Plot diagnostics
-      if(!is.null(diagnostics_folder)){
-        plot_wind_power_curve(model, model_data_country, iso2, diagnostics_folder)
-        plot_corrected_vs_ember(model_data_country, iso2, "wind", diagnostics_folder)
+        fitted_normal <- crossed_weather %>%
+          group_by(date) %>%
+          summarise(fitted_normal = mean(predicted_mwh, na.rm = TRUE), .groups = "drop") %>%
+          ungroup()
+
+        model_data_country <- model_data_country %>%
+          left_join(fitted_normal, by = c("date")) %>%
+          mutate(value_mwh_corrected = value_mwh + (fitted_normal - fitted_actual))
+
+        # Plot diagnostics
+        if (!is.null(diagnostics_folder)) {
+          plot_wind_power_curve(model, model_data_country, iso2, diagnostics_folder)
+          plot_corrected_vs_ember(model_data_country, iso2, "wind", diagnostics_folder)
+        }
+
+        # Return deweathered data with both actual and corrected values
+        model_data_country %>%
+          select(date, iso2, value_mwh_actual = value_mwh, value_mwh_corrected) %>%
+          mutate(
+            source = "Wind"
+          )
+      },
+      error = function(e) {
+        warning(sprintf("Model fitting failed for %s: %s", iso2, e$message))
+        return(NULL)
       }
-
-      # Return deweathered data with both actual and corrected values
-      model_data_country %>%
-        select(date, iso2, value_mwh_actual = value_mwh, value_mwh_corrected) %>%
-        mutate(
-          source = "Wind"
-        )
-
-    }, error = function(e) {
-      warning(sprintf("Model fitting failed for %s: %s", iso2, e$message))
-      return(NULL)
-    })
+    )
   }) %>%
     bind_rows()
 
@@ -303,10 +309,9 @@ get_weather_corrected_solar <- function(iso2s = "EU",
                                         pwr_generation,
                                         date_from = "2020-01-01",
                                         date_to = NULL,
-                                        diagnostics_folder = 'diagnostics/weather_correction/solar',
+                                        diagnostics_folder = "diagnostics/weather_correction/solar",
                                         use_cache = TRUE,
                                         use_local = FALSE) {
-
   create_dir(diagnostics_folder)
 
   # Ensure this is daily data
@@ -317,34 +322,37 @@ get_weather_corrected_solar <- function(iso2s = "EU",
     filter(iso2 %in% iso2s) %>%
     filter(grepl("solar", source, ignore.case = TRUE))
 
-  if(!is.null(date_to)) {
+  if (!is.null(date_to)) {
     solar_generation <- solar_generation %>%
       filter(date <= as.Date(date_to))
   }
 
   message("Getting solar radiation data from CREA DB")
   # If EU, we'll use weather in all countries as predictors
-  weather_iso2s <- if("EU" %in% iso2s) {
+  weather_iso2s <- if ("EU" %in% iso2s) {
     get_eu_iso2s(include_eu = FALSE)
   } else {
     iso2s
   }
 
   # Get solar radiation data
-  weather <- tryCatch({
-    get_weather(
-      variable = "solar_radiation",
-      region_iso2 = paste(weather_iso2s, collapse = ","),
-      region_type = "country",
-      date_from = date_from,
-      use_cache = use_cache,
-      use_local = use_local,
-      date_to = date_to
-    )
-  }, error = function(e) {
-    warning(sprintf("Failed to get weather data: %s", e$message))
-    return(NULL)
-  })
+  weather <- tryCatch(
+    {
+      get_weather(
+        variable = "solar_radiation",
+        region_iso2 = paste(weather_iso2s, collapse = ","),
+        region_type = "country",
+        date_from = date_from,
+        use_cache = use_cache,
+        use_local = use_local,
+        date_to = date_to
+      )
+    },
+    error = function(e) {
+      warning(sprintf("Failed to get weather data: %s", e$message))
+      return(NULL)
+    }
+  )
 
   if (is.null(weather) || nrow(weather) == 0) {
     stop("No weather data retrieved. Check API availability and parameters.")
@@ -356,8 +364,7 @@ get_weather_corrected_solar <- function(iso2s = "EU",
   message("Fitting weather correction models...")
   # Fit model for each country
   corrected_data <- pblapply(iso2s, function(iso2) {
-
-     keep_weather_iso2s <- if(iso2=="EU"){
+    keep_weather_iso2s <- if (iso2 == "EU") {
       get_eu_iso2s(include_eu = FALSE)
     } else {
       iso2
@@ -367,23 +374,27 @@ get_weather_corrected_solar <- function(iso2s = "EU",
     model_data <- solar_generation %>%
       filter(iso2 == !!iso2) %>%
       select(iso2, date, value_mwh) %>%
-      left_join(weather %>%
-                  filter(region_iso2 %in% keep_weather_iso2s) %>%
-                select(weather_iso2 = region_iso2, date, variable, value) %>%
-                tidyr::pivot_wider(names_from = variable, values_from = value),
-              by = c("date"))
+      left_join(
+        weather %>%
+          filter(region_iso2 %in% keep_weather_iso2s) %>%
+          select(weather_iso2 = region_iso2, date, variable, value) %>%
+          tidyr::pivot_wider(names_from = variable, values_from = value),
+        by = c("date")
+      )
 
 
     # We spread variable_iso2
     model_data <- model_data %>%
       select(iso2, weather_iso2, date, value_mwh, solar_radiation) %>%
-      tidyr::pivot_wider(names_from = weather_iso2, values_from = solar_radiation,
-                         names_prefix = "solar_radiation_") %>%
+      tidyr::pivot_wider(
+        names_from = weather_iso2, values_from = solar_radiation,
+        names_prefix = "solar_radiation_"
+      ) %>%
       mutate(year = year(date))
 
     # Drop columns with only NAs (in case some countries don't have weather data for all iso2s)
     model_data <- model_data %>%
-      select(where(~!all(is.na(.))))
+      select(where(~ !all(is.na(.))))
 
     weather_vars <- grep(names(model_data), pattern = "^(solar_radiation)_", value = TRUE)
     weather_iso2s <- unique(gsub("^(solar_radiation)_", "", weather_vars))
@@ -402,68 +413,71 @@ get_weather_corrected_solar <- function(iso2s = "EU",
       return(NULL)
     }
 
-    tryCatch({
-
-      # Fit model using gbm
-      formula_str <- paste("value_mwh ~ 0 + year + ",
-                          paste(weather_vars, collapse = " + "))
-      model_formula <- as.formula(formula_str)
-      model <- gbm::gbm(
-        model_formula,
-        data = model_data_country,
-        n.trees = 1000,
-        interaction.depth = 3,
-        shrinkage = 0.01,
-        distribution = "gaussian"
-      )
-
-      # Predict at ACTUAL weather (fitted values)
-      fitted_actual <- predict(model, model_data_country)
-
-      # Predict at NORMAL weather
-      # For each date, predict using all historical weather for that day-of-year
-      # while keeping the actual year
-      #
-      # Attention: we should not predict at average weather for each yday,
-      # because the curve is potentially non-linear
-      # -> the generation at average weather is not the same as average of generation at actual weather
-      # see Jensen's inequality (E[f(X)] != f(E[X]) for non-linear f)
-      crossed_weather <- model_data_country %>%
-        mutate(yday = lubridate::yday(date)) %>%
-        select(yday, weather_vars) %>%
-        full_join(
-          model_data_country %>%
-            mutate(yday = lubridate::yday(date)) %>%
-            distinct(date, year, yday),
-          by = "yday",
-          relationship = "many-to-many"
+    tryCatch(
+      {
+        # Fit model using gbm
+        formula_str <- paste(
+          "value_mwh ~ 0 + year + ",
+          paste(weather_vars, collapse = " + ")
+        )
+        model_formula <- as.formula(formula_str)
+        model <- gbm::gbm(
+          model_formula,
+          data = model_data_country,
+          n.trees = 1000,
+          interaction.depth = 3,
+          shrinkage = 0.01,
+          distribution = "gaussian"
         )
 
-      crossed_weather$predicted_mwh <- predict(model, crossed_weather)
+        # Predict at ACTUAL weather (fitted values)
+        fitted_actual <- predict(model, model_data_country)
 
-      fitted_normal <- crossed_weather %>%
-        group_by(date) %>%
-        summarise(fitted_normal = mean(predicted_mwh, na.rm = TRUE), .groups = "drop") %>%
-        ungroup()
+        # Predict at NORMAL weather
+        # For each date, predict using all historical weather for that day-of-year
+        # while keeping the actual year
+        #
+        # Attention: we should not predict at average weather for each yday,
+        # because the curve is potentially non-linear
+        # -> the generation at average weather is not the same as average of generation at actual weather
+        # see Jensen's inequality (E[f(X)] != f(E[X]) for non-linear f)
+        crossed_weather <- model_data_country %>%
+          mutate(yday = lubridate::yday(date)) %>%
+          select(yday, weather_vars) %>%
+          full_join(
+            model_data_country %>%
+              mutate(yday = lubridate::yday(date)) %>%
+              distinct(date, year, yday),
+            by = "yday",
+            relationship = "many-to-many"
+          )
 
-      model_data_country <- model_data_country %>%
-        left_join(fitted_normal, by = c("date")) %>%
-        mutate(value_mwh_corrected = value_mwh + (fitted_normal - fitted_actual))
+        crossed_weather$predicted_mwh <- predict(model, crossed_weather)
 
-      # Plot comparison with EMBER using helper function
-      plot_corrected_vs_ember(model_data_country, iso2, "solar", diagnostics_folder)
+        fitted_normal <- crossed_weather %>%
+          group_by(date) %>%
+          summarise(fitted_normal = mean(predicted_mwh, na.rm = TRUE), .groups = "drop") %>%
+          ungroup()
 
-      # Return deweathered data with both actual and corrected values
-      model_data_country %>%
-        select(date, iso2, value_mwh_actual = value_mwh, value_mwh_corrected) %>%
-        mutate(
-          source = "Solar"
-        )
+        model_data_country <- model_data_country %>%
+          left_join(fitted_normal, by = c("date")) %>%
+          mutate(value_mwh_corrected = value_mwh + (fitted_normal - fitted_actual))
 
-    }, error = function(e) {
-      warning(sprintf("Model fitting failed for %s: %s", iso2, e$message))
-      return(NULL)
-    })
+        # Plot comparison with EMBER using helper function
+        plot_corrected_vs_ember(model_data_country, iso2, "solar", diagnostics_folder)
+
+        # Return deweathered data with both actual and corrected values
+        model_data_country %>%
+          select(date, iso2, value_mwh_actual = value_mwh, value_mwh_corrected) %>%
+          mutate(
+            source = "Solar"
+          )
+      },
+      error = function(e) {
+        warning(sprintf("Model fitting failed for %s: %s", iso2, e$message))
+        return(NULL)
+      }
+    )
   }) %>%
     bind_rows()
 
@@ -496,10 +510,9 @@ get_weather_corrected_hydro <- function(iso2s = "EU",
                                         pwr_generation,
                                         date_from = "2015-01-01",
                                         date_to = NULL,
-                                        diagnostics_folder = 'diagnostics/weather_correction/hydro',
+                                        diagnostics_folder = "diagnostics/weather_correction/hydro",
                                         use_cache = TRUE,
                                         use_local = FALSE) {
-
   create_dir(diagnostics_folder)
 
   # Ensure this is daily data
@@ -510,23 +523,26 @@ get_weather_corrected_hydro <- function(iso2s = "EU",
     filter(iso2 %in% iso2s) %>%
     filter(grepl("hydro", source, ignore.case = TRUE))
 
-  if(!is.null(date_to)) {
+  if (!is.null(date_to)) {
     hydro_generation <- hydro_generation %>%
       filter(date <= as.Date(date_to))
   }
 
   message("Getting ENTSOE capacity data")
   # Get ENTSOE installed capacity data for hydro
-  capacity_raw <- tryCatch({
-    entsoe.get_installed_capacity(iso2s = iso2s, date_from = date_from, date_to = date_to) %>%
-      filter(grepl("hydro", source, ignore.case = TRUE)) %>%
-      mutate(year = lubridate::year(date)) %>%
-      group_by(iso2, year) %>%
-      summarise(capacity_mw = mean(value_mw, na.rm = TRUE), .groups = "drop")
-  }, error = function(e) {
-    warning(sprintf("Failed to get ENTSOE capacity data: %s", e$message))
-    tibble(iso2 = character(), year = integer(), capacity_mw = numeric())
-  })
+  capacity_raw <- tryCatch(
+    {
+      entsoe.get_installed_capacity(iso2s = iso2s, date_from = date_from, date_to = date_to) %>%
+        filter(grepl("hydro", source, ignore.case = TRUE)) %>%
+        mutate(year = lubridate::year(date)) %>%
+        group_by(iso2, year) %>%
+        summarise(capacity_mw = mean(value_mw, na.rm = TRUE), .groups = "drop")
+    },
+    error = function(e) {
+      warning(sprintf("Failed to get ENTSOE capacity data: %s", e$message))
+      tibble(iso2 = character(), year = integer(), capacity_mw = numeric())
+    }
+  )
 
 
   # Fill missing capacity data
@@ -617,14 +633,15 @@ get_weather_corrected_hydro <- function(iso2s = "EU",
 #' @return NULL (plot is saved to file)
 #' @keywords internal
 plot_wind_power_curve <- function(model, model_data_country, iso2, diagnostics_folder) {
-
   # Create prediction grid for power curves
   weather_vars <- grep(names(model_data_country), pattern = "^(ws_1|ws_2|ws_3|inv_temp|temp)_", value = TRUE)
   weather_iso2s <- unique(gsub("^(ws_1|ws_2|ws_3|inv_temp|temp)_", "", weather_vars))
   ws_1_vars <- glue("ws_1_{weather_iso2s}")
-  ws_1 = seq(0, max(model_data_country[,ws_1_vars], na.rm = TRUE), 0.1)
+  ws_1 <- seq(0, max(model_data_country[, ws_1_vars], na.rm = TRUE), 0.1)
   temp_vars <- glue("temp_{weather_iso2s}")
-  temp = model_data_country[,temp_vars] %>% as.matrix() %>% mean(na.rm=T)
+  temp <- model_data_country[, temp_vars] %>%
+    as.matrix() %>%
+    mean(na.rm = T)
 
   plot_curve_data <- tibble(
     ws_1 = ws_1,
@@ -637,7 +654,7 @@ plot_wind_power_curve <- function(model, model_data_country, iso2, diagnostics_f
       ws_3 = ws_1^3
     )
 
-  for(iso2 in weather_iso2s){
+  for (iso2 in weather_iso2s) {
     plot_curve_data[[paste0("ws_1_", iso2)]] <- plot_curve_data$ws_1
     plot_curve_data[[paste0("ws_2_", iso2)]] <- plot_curve_data$ws_1^2
     plot_curve_data[[paste0("ws_3_", iso2)]] <- plot_curve_data$ws_1^3
@@ -649,14 +666,15 @@ plot_wind_power_curve <- function(model, model_data_country, iso2, diagnostics_f
   plot_curve_data$pred <- predict(model, plot_curve_data)
 
   # Create plot
-  plt_curve <-  ggplot() +
+  plt_curve <- ggplot() +
     geom_line(
-      data=plot_curve_data,
+      data = plot_curve_data,
       aes(ws_1, pred, color = as.factor(year)),
-      linewidth = 1.5) +
+      linewidth = 1.5
+    ) +
     {
       # We can only add dots if single country
-      if(length(ws_1_vars)==1){
+      if (length(ws_1_vars) == 1) {
         geom_point(
           data = model_data_country,
           aes_string(x = ws_1_vars, y = "value_mwh", color = "as.factor(year)"),
@@ -701,31 +719,35 @@ plot_wind_power_curve <- function(model, model_data_country, iso2, diagnostics_f
 #' @return NULL (plot is saved to file)
 #' @keywords internal
 plot_corrected_vs_ember <- function(model_data_country, iso2, source_type, diagnostics_folder) {
-
-
-  iso2s <- if(iso2=="EU"){
+  iso2s <- if (iso2 == "EU") {
     get_eu_iso2s(include_eu = FALSE)
   } else {
     iso2
   }
 
   # Get EMBER capacity data once
-  ember_capacity_raw <- tryCatch({
-    ember.get_installed_capacity(iso2s = iso2s) %>%
-      filter(grepl(source_type, source, ignore.case = TRUE)) %>%
-      filter(date >= min(model_data_country$date))
-  }, error = function(e) {
-    warning(sprintf("Could not get EMBER data for %s: %s", iso2, e$message))
-    tibble(date = as.Date(character()), value_mw = numeric())
-  })
+  ember_capacity_raw <- tryCatch(
+    {
+      ember.get_installed_capacity(iso2s = iso2s) %>%
+        filter(grepl(source_type, source, ignore.case = TRUE)) %>%
+        filter(date >= min(model_data_country$date))
+    },
+    error = function(e) {
+      warning(sprintf("Could not get EMBER data for %s: %s", iso2, e$message))
+      tibble(date = as.Date(character()), value_mw = numeric())
+    }
+  )
 
-  entsoe_capacity_raw <- tryCatch({
-    entsoe.get_installed_capacity(iso2s = iso2s, date_from = min(model_data_country$date)) %>%
-      filter(grepl(source_type, source, ignore.case = TRUE))
-  }, error = function(e) {
-    warning(sprintf("Could not get ENTSOE data for %s: %s", iso2, e$message))
-    tibble(date = as.Date(character()), value_mw = numeric())
-  })
+  entsoe_capacity_raw <- tryCatch(
+    {
+      entsoe.get_installed_capacity(iso2s = iso2s, date_from = min(model_data_country$date)) %>%
+        filter(grepl(source_type, source, ignore.case = TRUE))
+    },
+    error = function(e) {
+      warning(sprintf("Could not get ENTSOE data for %s: %s", iso2, e$message))
+      tibble(date = as.Date(character()), value_mw = numeric())
+    }
+  )
 
   # Aggregate to yearly
   ember_capacity_yearly <- ember_capacity_raw %>%
@@ -767,19 +789,21 @@ plot_corrected_vs_ember <- function(model_data_country, iso2, source_type, diagn
       mutate(source = "Capacity (ENTSOE)")
   ) %>%
     group_by(source) %>%
-    mutate(value = if(n() > 0 && !all(is.na(value))) value / value[year == min(year)] * 100 else NA_real_) %>%
+    mutate(value = if (n() > 0 && !all(is.na(value))) value / value[year == min(year)] * 100 else NA_real_) %>%
     ungroup() %>%
-    mutate(time_scale = "Yearly",
-           date = as.Date(paste0(year, "-01-01")))
+    mutate(
+      time_scale = "Yearly",
+      date = as.Date(paste0(year, "-01-01"))
+    )
 
   # Prepare plot data for monthly comparison
   plot_data_monthly <- bind_rows(
     model_data_country %>%
-      group_by(year_month=floor_date(date, "month")) %>%
+      group_by(year_month = floor_date(date, "month")) %>%
       summarise(value = mean(value_mwh_corrected, na.rm = TRUE), .groups = "drop") %>%
       mutate(source = "Weather-corrected generation"),
     model_data_country %>%
-      group_by(year_month=floor_date(date, "month")) %>%
+      group_by(year_month = floor_date(date, "month")) %>%
       summarise(value = mean(value_mwh, na.rm = TRUE), .groups = "drop") %>%
       mutate(source = "Actual generation"),
     ember_capacity_monthly %>%
@@ -790,10 +814,12 @@ plot_corrected_vs_ember <- function(model_data_country, iso2, source_type, diagn
       mutate(source = "Capacity (ENTSOE)")
   ) %>%
     group_by(source) %>%
-    mutate(value = if(n() > 0 && !all(is.na(value))) value / value[year_month == min(year_month)] * 100 else NA_real_) %>%
+    mutate(value = if (n() > 0 && !all(is.na(value))) value / value[year_month == min(year_month)] * 100 else NA_real_) %>%
     ungroup() %>%
-    mutate(time_scale = "Monthly",
-           date = year_month)
+    mutate(
+      time_scale = "Monthly",
+      date = year_month
+    )
 
   colors <- c(
     "Actual generation" = rcrea::pal_crea[["Light.gray"]],

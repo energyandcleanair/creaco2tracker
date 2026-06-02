@@ -11,12 +11,12 @@
 #'
 #' @examples
 get_eurostat_cons <- function(
-    pwr_generation,
-    diagnostics_folder = "diagnostics/eurostat",
-    use_cache = F,
+  pwr_generation,
+  diagnostics_folder = "diagnostics/eurostat",
+  use_cache = F,
   iso2s = NULL,
-  data_masking = NULL) {
-
+  data_masking = NULL
+) {
   create_dir(diagnostics_folder)
 
 
@@ -48,8 +48,8 @@ get_eurostat_cons <- function(
 
   aggregate <- function(x) {
     x %>%
-        group_by(iso2, sector, time, unit, siec_code, fuel) %>%
-        summarise_at("values", sum, na.rm = T) %>%
+      group_by(iso2, sector, time, unit, siec_code, fuel) %>%
+      summarise_at("values", sum, na.rm = T) %>%
       ungroup()
   }
 
@@ -67,8 +67,8 @@ get_eurostat_cons <- function(
   # Process data
   cons_monthly <- list(
     oil = process_oil_monthly(cons_raw_oil$monthly),
-    solid = process_solid_monthly(cons_raw_solid$monthly, pwr_generation=pwr_generation) %>% eurostat_split_elec_others(),
-    gas = process_gas_monthly(cons_raw_gas$monthly, pwr_generation=pwr_generation) %>% eurostat_split_elec_others()
+    solid = process_solid_monthly(cons_raw_solid$monthly, pwr_generation = pwr_generation) %>% eurostat_split_elec_others(),
+    gas = process_gas_monthly(cons_raw_gas$monthly, pwr_generation = pwr_generation) %>% eurostat_split_elec_others()
   ) %>%
     bind_rows() %>%
     aggregate() %>%
@@ -78,7 +78,7 @@ get_eurostat_cons <- function(
   cons_yearly <- list(
     oil = process_oil_yearly(cons_raw_oil$yearly),
     solid = process_solid_yearly(cons_raw_solid$yearly) %>% eurostat_split_elec_others(),
-    gas = process_gas_yearly(cons_raw_gas$yearly, pwr_generation=pwr_generation) %>% eurostat_split_elec_others()
+    gas = process_gas_yearly(cons_raw_gas$yearly, pwr_generation = pwr_generation) %>% eurostat_split_elec_others()
   ) %>%
     bind_rows() %>%
     aggregate() %>%
@@ -96,7 +96,7 @@ get_eurostat_cons <- function(
   # Combine monthly and yearly data with cutoff filtering
   cons_combined <- combine_monthly_yearly_with_cutoff(cons_yearly_monthly, cons_monthly)
 
-  if(!is_null_or_empty(diagnostics_folder)){
+  if (!is_null_or_empty(diagnostics_folder)) {
     # Visual check
     diagnostic_eurostat_cons_yearly_monthly(
       diagnostics_folder = diagnostics_folder,
@@ -131,16 +131,16 @@ get_eurostat_cons <- function(
 
 
   # Other diagnostics
-  if(!is_null_or_empty(diagnostics_folder)){
+  if (!is_null_or_empty(diagnostics_folder)) {
     diagnostic_eurostat_cons(cons,
-                             iso2s=iso2s,
-                             diagnostics_folder = diagnostics_folder)
+      iso2s = iso2s,
+      diagnostics_folder = diagnostics_folder
+    )
   }
 
 
   return(cons)
 }
-
 
 
 #' Apply seasonal adjustment to convert yearly data to monthly data
@@ -240,7 +240,6 @@ get_eurostat_indprod <- function(diagnostics_folder = NULL,
                                  use_cache = F,
                                  iso2s = NULL,
                                  data_masking = NULL) {
-
   indprod_raw <- eurostat_data_access_get_indprod(
     use_cache = use_cache,
     iso2s = iso2s,
@@ -248,9 +247,10 @@ get_eurostat_indprod <- function(diagnostics_folder = NULL,
   )
 
 
-  if(!is_null_or_empty(diagnostics_folder)){
+  if (!is_null_or_empty(diagnostics_folder)) {
     diagnostic_eurostat_indprod(indprod_raw,
-                                diagnostics_folder = diagnostics_folder)
+      diagnostics_folder = diagnostics_folder
+    )
   }
 
   return(indprod_raw)
@@ -273,20 +273,22 @@ combine_monthly_yearly_with_cutoff <- function(cons_yearly_monthly, cons_monthly
   # Monthly data is quite incomplete/chaotic before ~2020, and sometimes a bit after
   # Look at diagnostic charts for more details
   cutoff_monthly <- tibble(
-    siec_code=c(SIEC_NATURAL_GAS,
-                SIEC_COKE_OVEN_COKE,
-                SIEC_KEROSENE_XBIO,
-                SIEC_HARD_COAL
-                ),
-    cutoff_date=c("2020-01-01", "2019-01-01", "2019-01-01", "2020-01-01"),
-    source="monthly"
+    siec_code = c(
+      SIEC_NATURAL_GAS,
+      SIEC_COKE_OVEN_COKE,
+      SIEC_KEROSENE_XBIO,
+      SIEC_HARD_COAL
+    ),
+    cutoff_date = c("2020-01-01", "2019-01-01", "2019-01-01", "2020-01-01"),
+    source = "monthly"
   ) %>%
     # Add default cutoff date for all other siec_codes
-    tidyr::complete(siec_code=unique(cons_yearly_monthly$siec_code),
-                    source,
-                    fill=list(cutoff_date="2020-01-01")
-                    ) %>%
-    tidyr::crossing(iso2=unique(add_iso2(cons_yearly_monthly)$iso2)) %>%
+    tidyr::complete(
+      siec_code = unique(cons_yearly_monthly$siec_code),
+      source,
+      fill = list(cutoff_date = "2020-01-01")
+    ) %>%
+    tidyr::crossing(iso2 = unique(add_iso2(cons_yearly_monthly)$iso2)) %>%
     left_join(cons_yearly_monthly %>% distinct(siec_code, fuel))
 
   # Apply country-specific fixes
@@ -295,7 +297,7 @@ combine_monthly_yearly_with_cutoff <- function(cons_yearly_monthly, cons_monthly
       cutoff_date = case_when(
         # Fuel oil is quite oscillating in Portugal before 2023
         # Risk is that validation then isn't relevant as mostly on yearly data
-        iso2 == "PT" & fuel==FUEL_OIL ~ "2023-01-01",
+        iso2 == "PT" & fuel == FUEL_OIL ~ "2023-01-01",
         T ~ cutoff_date
       )
     )
@@ -318,4 +320,3 @@ combine_monthly_yearly_with_cutoff <- function(cons_yearly_monthly, cons_monthly
 
   return(cons_combined)
 }
-

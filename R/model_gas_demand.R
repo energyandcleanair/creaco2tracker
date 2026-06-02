@@ -46,12 +46,11 @@
 #' @export
 get_gas_demand <- function(iso2s = NULL,
                            date_to = NULL,
-                           diagnostics_folder='diagnostics/gas_demand',
-                           verbose=FALSE,
-                           use_cache=TRUE,
-                           correct_to_eurostat=FALSE,
-                           data_masking = NULL){
-
+                           diagnostics_folder = "diagnostics/gas_demand",
+                           verbose = FALSE,
+                           use_cache = TRUE,
+                           correct_to_eurostat = FALSE,
+                           data_masking = NULL) {
   years <- seq(2015, lubridate::year(lubridate::today()))
 
   create_dir(diagnostics_folder)
@@ -72,29 +71,33 @@ get_gas_demand <- function(iso2s = NULL,
   )
 
   # Estimate with two different methods
-  message('Getting gas demand from Consumption + Distribution ENTSOG points')
-  consdist <- get_gas_demand_consdist(entsog_data=entsog_data, years=years, verbose=verbose)
-  message('Getting gas demand from storage,crossborder,production')
-  apparent <- get_gas_demand_apparent(entsog_data=entsog_data, years=years, verbose=verbose)
-  message('Getting gas demand from storage,crossborder,production using AGSI for storage')
+  message("Getting gas demand from Consumption + Distribution ENTSOG points")
+  consdist <- get_gas_demand_consdist(entsog_data = entsog_data, years = years, verbose = verbose)
+  message("Getting gas demand from storage,crossborder,production")
+  apparent <- get_gas_demand_apparent(entsog_data = entsog_data, years = years, verbose = verbose)
+  message("Getting gas demand from storage,crossborder,production using AGSI for storage")
   apparent_w_agsi <- get_gas_demand_apparent(
-    entsog_data=entsog_data,
-    years=years,
-    use_agsi_for_storage=T,
-    verbose=verbose,
+    entsog_data = entsog_data,
+    years = years,
+    use_agsi_for_storage = T,
+    verbose = verbose,
     agsi_storage_data = agsi_storage_data
   )
 
 
   # Keep the best ones, and only those that match quality criteria
-  gas_demand <- keep_best(consumption=bind_rows(consdist,
-                                                apparent,
-                                                apparent_w_agsi),
-            min_comparison_points = 12,
-            diagnostics_folder=diagnostics_folder,
-            min_r2=0.95,
-            max_rrse=0.3,
-            data_masking = data_masking)
+  gas_demand <- keep_best(
+    consumption = bind_rows(
+      consdist,
+      apparent,
+      apparent_w_agsi
+    ),
+    min_comparison_points = 12,
+    diagnostics_folder = diagnostics_folder,
+    min_r2 = 0.95,
+    max_rrse = 0.3,
+    data_masking = data_masking
+  )
 
   # Store raw gas demand for diagnostics
   gas_demand_raw <- gas_demand
@@ -119,13 +122,15 @@ get_gas_demand <- function(iso2s = NULL,
 
   # Keep the longest one per country
   result <- gas_demand %>%
-    select(iso2, date, value=value_m3) %>%
-    mutate(fuel='fossil_gas',
-           sector='total',
-           data_source=ifelse(correct_to_eurostat, 'crea_eurostat_corrected', 'crea'),
-           unit='m3',
-           frequency='daily',
-           region_type=case_when(iso2=='EU' ~ 'region', T ~ 'iso2'))
+    select(iso2, date, value = value_m3) %>%
+    mutate(
+      fuel = "fossil_gas",
+      sector = "total",
+      data_source = ifelse(correct_to_eurostat, "crea_eurostat_corrected", "crea"),
+      unit = "m3",
+      frequency = "daily",
+      region_type = case_when(iso2 == "EU" ~ "region", T ~ "iso2")
+    )
 
   # Apply filters if specified
   if (!is.null(iso2s)) {
@@ -172,40 +177,43 @@ get_gas_demand <- function(iso2s = NULL,
 #' @export
 #'
 #' @examples
-get_gas_demand_consdist <- function(entsog_data, years, verbose=F){
-
+get_gas_demand_consdist <- function(entsog_data, years, verbose = F) {
   entsog <- entsog_data %>%
-    filter(type %in% c('consumption', 'distribution'))
+    filter(type %in% c("consumption", "distribution"))
 
   consdist <- entsog %>%
-    group_by(iso2=destination_iso2, date) %>%
-    summarise(value_m3=.summarise_masked_sum(value_m3, multiplier = -1), .groups = "drop_last") %>%
+    group_by(iso2 = destination_iso2, date) %>%
+    summarise(value_m3 = .summarise_masked_sum(value_m3, multiplier = -1), .groups = "drop_last") %>%
     arrange(date) %>%
     mutate(preserve_na = is.na(value_m3)) %>%
-
     # Interpolate missing data
-    tidyr::complete(date=seq.Date(min(as.Date(date)),
-                                  max(as.Date(date)), by='day'),
-                    fill=list(value_m3=NA_real_, preserve_na=FALSE)) %>%
-    mutate(value_m3=.interpolate_unobserved_gaps(value_m3, preserve_na)) %>%
+    tidyr::complete(
+      date = seq.Date(min(as.Date(date)),
+        max(as.Date(date)),
+        by = "day"
+      ),
+      fill = list(value_m3 = NA_real_, preserve_na = FALSE)
+    ) %>%
+    mutate(value_m3 = .interpolate_unobserved_gaps(value_m3, preserve_na)) %>%
     select(-preserve_na) %>%
     ungroup() %>%
     mutate(has_source_row = TRUE) %>%
-
     # Fill with 0 before and after each country's reporting period
     group_by(iso2) %>%
-    tidyr::complete(date=seq.Date(min(as.Date(entsog$date)),
-                    max(as.Date(entsog$date)), by='day'),
-            fill=list(value_m3=NA_real_, has_source_row=FALSE)) %>%
+    tidyr::complete(
+      date = seq.Date(min(as.Date(entsog$date)),
+        max(as.Date(entsog$date)),
+        by = "day"
+      ),
+      fill = list(value_m3 = NA_real_, has_source_row = FALSE)
+    ) %>%
     mutate(value_m3 = ifelse(!has_source_row & is.na(value_m3), 0, value_m3)) %>%
     ungroup() %>%
     select(-has_source_row) %>%
-
-    mutate(method='consdist')
+    mutate(method = "consdist")
 
   return(consdist)
 }
-
 
 
 #' Get national gas demand based on Net imports + production + storage drawdown
@@ -218,12 +226,11 @@ get_gas_demand_consdist <- function(entsog_data, years, verbose=F){
 #' @examples
 get_gas_demand_apparent <- function(entsog_data,
                                     years,
-                                    use_agsi_for_storage=F,
-                                    verbose=F,
-                                    agsi_storage_data = NULL){
-
+                                    use_agsi_for_storage = F,
+                                    verbose = F,
+                                    agsi_storage_data = NULL) {
   entsog <- entsog_data %>%
-    filter(type %in% c('storage', 'crossborder', 'production'))
+    filter(type %in% c("storage", "crossborder", "production"))
 
   # Fill missing data
   entsog <- entsog %>%
@@ -232,16 +239,19 @@ get_gas_demand_apparent <- function(entsog_data,
     group_by(destination_iso2, departure_iso2, type) %>%
     mutate(preserve_na = is.na(value_m3)) %>%
     # Interpolate missing data
-    tidyr::complete(date=seq.Date(min(as.Date(date)),
-                                  max(as.Date(date)), by='day'),
-                    fill=list(value_m3=NA_real_, preserve_na=FALSE)) %>%
-    mutate(value_m3=.interpolate_unobserved_gaps(value_m3, preserve_na)) %>%
+    tidyr::complete(
+      date = seq.Date(min(as.Date(date)),
+        max(as.Date(date)),
+        by = "day"
+      ),
+      fill = list(value_m3 = NA_real_, preserve_na = FALSE)
+    ) %>%
+    mutate(value_m3 = .interpolate_unobserved_gaps(value_m3, preserve_na)) %>%
     select(-preserve_na) %>%
     ungroup()
 
 
-
-  if(use_agsi_for_storage){
+  if (use_agsi_for_storage) {
     # In some instances, AGSI is better than ENTSOG
     # Well, at least for Austria which has no storage data in ENTSOG
     if (is.null(agsi_storage_data)) {
@@ -249,13 +259,15 @@ get_gas_demand_apparent <- function(entsog_data,
     }
     storage_drawdown <- agsi_storage_data
     entsog <- entsog %>%
-      filter(type!='storage') %>%
+      filter(type != "storage") %>%
       bind_rows(
         storage_drawdown %>%
-          select(destination_iso2=iso2,
-                 date,
-                 value_m3) %>%
-          mutate(type='storage')
+          select(
+            destination_iso2 = iso2,
+            date,
+            value_m3
+          ) %>%
+          mutate(type = "storage")
       )
   }
 
@@ -264,116 +276,128 @@ get_gas_demand_apparent <- function(entsog_data,
   # i.e. not doing this: entsog_eu <- entsog %>%
   #   mutate(destination_iso2=destination_region,
   #          departure_iso2=departure_region)
-  ex_eu <- c('NO', 'GB', 'UK', 'TR', 'lng',
-             'UA', 'RU', 'AZ', 'DZ', 'LY', 'BY', 'MA')
+  ex_eu <- c(
+    "NO", "GB", "UK", "TR", "lng",
+    "UA", "RU", "AZ", "DZ", "LY", "BY", "MA"
+  )
   entsog_eu <- entsog %>%
-    mutate(destination_iso2=case_when(destination_iso2 %in% ex_eu ~ 'Others',
-                                      T~'EU'),
-           departure_iso2=case_when(departure_iso2 %in% ex_eu ~ 'Others',
-                                    T~'EU'))
+    mutate(
+      destination_iso2 = case_when(
+        destination_iso2 %in% ex_eu ~ "Others",
+        T ~ "EU"
+      ),
+      departure_iso2 = case_when(
+        departure_iso2 %in% ex_eu ~ "Others",
+        T ~ "EU"
+      )
+    )
 
   entsog_all <- bind_rows(entsog, entsog_eu)
 
   # Implied consumption = net imports + production + storage_drawdown
   imports <- entsog_all %>%
-    filter(type %in% c('crossborder')) %>%
+    filter(type %in% c("crossborder")) %>%
     filter(departure_iso2 != destination_iso2) %>%
     group_by(destination_iso2, date) %>%
     summarise(value_m3 = .summarise_masked_sum(value_m3), .groups = "drop") %>%
-    mutate(type='imports')
+    mutate(type = "imports")
 
   minus_exports <- entsog_all %>%
-    filter(type %in% c('crossborder')) %>%
+    filter(type %in% c("crossborder")) %>%
     filter(departure_iso2 != destination_iso2) %>%
-    mutate(tmp=departure_iso2,
-           departure_iso2=destination_iso2,
-           destination_iso2=tmp,
-           value_m3=-value_m3) %>%
+    mutate(
+      tmp = departure_iso2,
+      departure_iso2 = destination_iso2,
+      destination_iso2 = tmp,
+      value_m3 = -value_m3
+    ) %>%
     group_by(destination_iso2, date) %>%
     summarise(value_m3 = .summarise_masked_sum(value_m3), .groups = "drop") %>%
-    mutate(type='minus_exports')
+    mutate(type = "minus_exports")
 
   net_imports <- bind_rows(imports, minus_exports) %>%
     group_by(destination_iso2, date) %>%
     summarise(value_m3 = .summarise_masked_sum(value_m3), .groups = "drop") %>%
-    mutate(type='net_imports')
+    mutate(type = "net_imports")
 
   storage_drawdown <- entsog_all %>%
-    filter(type %in% c('storage')) %>%
+    filter(type %in% c("storage")) %>%
     group_by(destination_iso2, date) %>%
     summarise(value_m3 = .summarise_masked_sum(value_m3), .groups = "drop") %>%
-    mutate(type='storage_drawdown')
+    mutate(type = "storage_drawdown")
 
   production <- entsog_all %>%
-    filter(type == 'production') %>%
+    filter(type == "production") %>%
     group_by(destination_iso2, date) %>%
     summarise(value_m3 = .summarise_masked_sum(value_m3), .groups = "drop") %>%
-    mutate(type='production')
+    mutate(type = "production")
 
   apparent <- bind_rows(imports, minus_exports, storage_drawdown, production) %>%
-    group_by(iso2=destination_iso2, date) %>%
+    group_by(iso2 = destination_iso2, date) %>%
     summarise(value_m3 = .summarise_masked_sum(value_m3), .groups = "drop") %>%
     mutate(has_source_row = TRUE) %>%
     group_by(iso2) %>%
-    tidyr::complete(date=seq.Date(min(as.Date(entsog$date)), max(as.Date(entsog$date)), by='day'),
-                    fill=list(value_m3=NA_real_, has_source_row=FALSE)) %>%
+    tidyr::complete(
+      date = seq.Date(min(as.Date(entsog$date)), max(as.Date(entsog$date)), by = "day"),
+      fill = list(value_m3 = NA_real_, has_source_row = FALSE)
+    ) %>%
     mutate(value_m3 = ifelse(!has_source_row & is.na(value_m3), 0, value_m3)) %>%
     ungroup() %>%
     select(-has_source_row) %>%
-    mutate(method=ifelse(use_agsi_for_storage, 'apparent_agsi', 'apparent'))
+    mutate(method = ifelse(use_agsi_for_storage, "apparent_agsi", "apparent"))
 
   return(apparent)
 }
 
 
-get_eurostat_gas <- function(years = NULL, data_masking = NULL){
+get_eurostat_gas <- function(years = NULL, data_masking = NULL) {
   gas_data_access_get_eurostat_monthly_for_correction(data_masking = data_masking)
 }
 
 
-
-keep_best<- function(consumption,
-                     diagnostics_folder,
-                     min_comparison_points=24,
-                     min_r2=0.95, max_rrse=0.4,
-                     data_masking = NULL){
-
-  eurostat = get_eurostat_gas(data_masking = data_masking) %>% filter(type=='consumption')
-  rsq <- function (x, y) cor(x, y) ^ 2
+keep_best <- function(consumption,
+                      diagnostics_folder,
+                      min_comparison_points = 24,
+                      min_r2 = 0.95, max_rrse = 0.4,
+                      data_masking = NULL) {
+  eurostat <- get_eurostat_gas(data_masking = data_masking) %>% filter(type == "consumption")
+  rsq <- function(x, y) cor(x, y)^2
   min_start <- min(consumption$date)
-  max_start = max(eurostat$date) - months(min_comparison_points - 1)
+  max_start <- max(eurostat$date) - months(min_comparison_points - 1)
 
   # We test the correlation for several starting dates
   # The older the better, but often it becomes accurate only after a certain date
-  date_froms <- seq.Date(as.Date(min_start), as.Date(max_start), by='month')
+  date_froms <- seq.Date(as.Date(min_start), as.Date(max_start), by = "month")
   consumption_date_to <- consumption %>%
     group_by(iso2, method) %>%
-    summarise(date_to=max(date))
+    summarise(date_to = max(date))
 
   consumption_monthly <- consumption %>%
-    filter(date < max(lubridate::floor_date(date, 'month'))) %>%
-    group_by(iso2, method, date=lubridate::floor_date(date, 'month')) %>%
-    summarise(value_m3=sum(value_m3)) %>%
+    filter(date < max(lubridate::floor_date(date, "month"))) %>%
+    group_by(iso2, method, date = lubridate::floor_date(date, "month")) %>%
+    summarise(value_m3 = sum(value_m3)) %>%
     ungroup() %>%
-    tidyr::complete(date, method, iso2, fill=list(value_m3=0))
+    tidyr::complete(date, method, iso2, fill = list(value_m3 = 0))
 
-  bests <- pbapply::pblapply(date_froms, function(date_from){
+  bests <- pbapply::pblapply(date_froms, function(date_from) {
     consumption_monthly %>%
       filter(date >= date_from) %>%
       left_join(eurostat %>%
-                  rename(value_m3_eurostat=value_m3) %>%
-                  select(-c(method))) %>%
+        rename(value_m3_eurostat = value_m3) %>%
+        select(-c(method))) %>%
       filter(!is.na(value_m3_eurostat)) %>%
       group_by(iso2, method) %>%
-      summarise(r2=rsq(value_m3_eurostat, value_m3),
-                rrse=Metrics::rrse(value_m3_eurostat, value_m3),
-                count=n()) %>%
-      mutate(valid=(rrse < max_rrse) & (r2 > min_r2)) %>%
+      summarise(
+        r2 = rsq(value_m3_eurostat, value_m3),
+        rrse = Metrics::rrse(value_m3_eurostat, value_m3),
+        count = n()
+      ) %>%
+      mutate(valid = (rrse < max_rrse) & (r2 > min_r2)) %>%
       group_by(iso2) %>%
-      top_n(n=1, wt=r2) %>%
+      top_n(n = 1, wt = r2) %>%
       ungroup() %>%
       arrange(desc(r2)) %>%
-      mutate(date_from=!!date_from)
+      mutate(date_from = !!date_from)
   }) %>%
     do.call(bind_rows, .)
 
@@ -389,8 +413,8 @@ keep_best<- function(consumption,
     # Avoid those that aren't updated
     filter(date_to > max(date_to) - lubridate::days(10)) %>%
     # Take earlier one
-    filter(date_from==min(date_from)) %>%
-    filter(r2==max(r2)) %>%
+    filter(date_from == min(date_from)) %>%
+    filter(r2 == max(r2)) %>%
     # Sometimes apparent strictly equivalent to apparent_asgi
     distinct(iso2, .keep_all = T)
 
@@ -412,10 +436,9 @@ keep_best<- function(consumption,
 #' @return Corrected gas demand data with same structure
 #' @keywords internal
 .apply_eurostat_gas_correction <- function(gas_demand, data_masking = NULL) {
-
   # Get Eurostat monthly consumption data
   eurostat <- get_eurostat_gas(data_masking = data_masking) %>%
-    filter(type == 'consumption') %>%
+    filter(type == "consumption") %>%
     select(iso2, date, eurostat_m3 = value_m3)
 
   # Aggregate ENTSOG to monthly for comparison
@@ -423,7 +446,7 @@ keep_best<- function(consumption,
     mutate(
       year = lubridate::year(date),
       month = lubridate::month(date),
-      month_date = lubridate::floor_date(date, 'month')
+      month_date = lubridate::floor_date(date, "month")
     ) %>%
     group_by(iso2, year, month, month_date) %>%
     summarise(
@@ -480,8 +503,10 @@ keep_best<- function(consumption,
     ) %>%
     left_join(
       monthly_factors %>%
-        select(iso2, year, month, scale_factor = scale_factor_filled,
-               ratio, is_extrapolated),
+        select(iso2, year, month,
+          scale_factor = scale_factor_filled,
+          ratio, is_extrapolated
+        ),
       by = c("iso2", "year", "month")
     ) %>%
     mutate(
@@ -509,19 +534,18 @@ keep_best<- function(consumption,
 #'
 #' @keywords internal
 .generate_gas_diagnostics <- function(gas_demand_raw,
-                                       gas_demand_corrected,
-                                       diagnostics_folder) {
-
+                                      gas_demand_corrected,
+                                      diagnostics_folder) {
   message("Generating gas demand diagnostics...")
   create_dir(diagnostics_folder)
 
   # Get Eurostat data
- eurostat <- get_eurostat_gas() %>%
-    filter(type == 'consumption')
+  eurostat <- get_eurostat_gas() %>%
+    filter(type == "consumption")
 
   # Aggregate raw data to monthly
   raw_monthly <- gas_demand_raw %>%
-    mutate(date = lubridate::floor_date(date, 'month')) %>%
+    mutate(date = lubridate::floor_date(date, "month")) %>%
     group_by(iso2, date) %>%
     summarise(value_m3 = sum(value_m3, na.rm = TRUE), .groups = "drop") %>%
     mutate(method = "CREA estimate")
@@ -538,7 +562,7 @@ keep_best<- function(consumption,
   # Add corrected if available
   if (!is.null(gas_demand_corrected)) {
     corrected_monthly <- gas_demand_corrected %>%
-      mutate(date = lubridate::floor_date(date, 'month')) %>%
+      mutate(date = lubridate::floor_date(date, "month")) %>%
       group_by(iso2, date) %>%
       summarise(value_m3 = sum(value_m3, na.rm = TRUE), .groups = "drop") %>%
       mutate(method = "Corrected")
@@ -565,8 +589,9 @@ keep_best<- function(consumption,
   plot_data <- plot_data %>%
     filter(iso2 %in% unique(gas_demand_raw$iso2)) %>%
     mutate(
-      country = countrycode::countrycode(iso2, 'iso2c', 'country.name',
-                                          custom_match = c('EU' = 'EU')),
+      country = countrycode::countrycode(iso2, "iso2c", "country.name",
+        custom_match = c("EU" = "EU")
+      ),
       method = factor(method, levels = method_levels)
     )
 
@@ -589,15 +614,16 @@ keep_best<- function(consumption,
     ) +
     rcrea::theme_crea() +
     theme(legend.position = "bottom") +
-    guides(size = guide_legend(nrow = 1),
-           color = guide_legend(nrow = 1))
+    guides(
+      size = guide_legend(nrow = 1),
+      color = guide_legend(nrow = 1)
+    )
 
   ggsave(
     file.path(diagnostics_folder, "gas_consumption_estimates.png"),
-    plt, width = 10, height = 10, bg = "white"
+    plt,
+    width = 10, height = 10, bg = "white"
   )
 
   message("Gas demand diagnostics saved to: ", diagnostics_folder)
 }
-
-

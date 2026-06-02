@@ -39,8 +39,10 @@
 #' solar_de <- get_weather(variable = "solar_radiation", region_iso2 = "DE", region_type = "country")
 #'
 #' # Get wind speed from stations for France
-#' wind_fr <- get_weather(variable = "ws50m_daily", region_iso2 = "FR",
-#'                        region_type = "station", station_source = "gem")
+#' wind_fr <- get_weather(
+#'   variable = "ws50m_daily", region_iso2 = "FR",
+#'   region_type = "station", station_source = "gem"
+#' )
 #'
 #' # Use local API
 #' weather_local <- get_weather(variable = "HDD", region_id = "EU", use_local = TRUE)
@@ -59,7 +61,6 @@ get_weather <- function(variable = "HDD,CDD",
                         verbose = FALSE,
                         aggregate_by = NULL,
                         aggregate_fn = NULL) {
-
   # Build base URL
   base_url <- ifelse(use_local, "http://localhost:8080", "https://api.energyandcleanair.org")
   endpoint <- glue::glue("{base_url}/v1/weather")
@@ -106,8 +107,10 @@ get_weather <- function(variable = "HDD,CDD",
   }
 
   # Call API
-  weather_data <- do.call(creahelpers::api.get,
-                          c(list(endpoint = endpoint), params))
+  weather_data <- do.call(
+    creahelpers::api.get,
+    c(list(endpoint = endpoint), params)
+  )
 
   # Standardize variable names to lowercase for consistency
   weather_data <- weather_data %>%
@@ -139,7 +142,7 @@ fill_weather <- function(weather_raw) {
       df %>%
         arrange(date) %>%
         mutate(.fill_break = cumsum(is.na(value))) %>%
-        tidyr::complete(date = seq.Date(min(date), max(date), by = 'day')) %>%
+        tidyr::complete(date = seq.Date(min(date), max(date), by = "day")) %>%
         fill(.fill_break, .direction = "down") %>%
         mutate(.fill_break = coalesce(.fill_break, 0)) %>%
         group_by(.fill_break) %>%
@@ -148,7 +151,7 @@ fill_weather <- function(weather_raw) {
         select(-.fill_break)
     }) %>%
     ungroup() ->
-    weather_filled
+  weather_filled
 
   return(weather_filled)
 }
@@ -167,10 +170,8 @@ fill_weather <- function(weather_raw) {
 #' @return A list containing diagnostic plots and summary statistics
 #' @export
 diagnose_weather <- function(weather,
-                            weather_raw = NULL,
-                            diagnostics_folder = 'diagnostics') {
-
-
+                             weather_raw = NULL,
+                             diagnostics_folder = "diagnostics") {
   # Create diagnostics directory if it doesn't exist
   if (!is.null(diagnostics_folder) & !dir.exists(diagnostics_folder)) {
     dir.create(diagnostics_folder, recursive = TRUE)
@@ -181,66 +182,77 @@ diagnose_weather <- function(weather,
   # Ensure date column is properly formatted
 
   # 1. Running average
-  #additional plots
+  # additional plots
   running_plot_data <- weather %>%
     filter(year(date) >= 2018) %>%
     group_by(region_id, variable) %>%
-    mutate(plotdate = date %>% 'year<-'(2000),
-           across(value, zoo::rollapplyr, FUN=mean, width=30, fill=NA, na.rm=T))
+    mutate(
+      plotdate = date %>% "year<-"(2000),
+      across(value, zoo::rollapplyr, FUN = mean, width = 30, fill = NA, na.rm = T)
+    )
 
   plt <- running_plot_data %>%
-    mutate(plotdate=as.Date(plotdate)) %>%
-    mutate(year=as.factor(year(date)),
-           variable_name=ifelse(variable=='cdd', 'cooling', 'heating')) %>%
-    ggplot(aes(plotdate, value, alpha=factor(year(date)), col=variable_name)) +
-    facet_grid(region_id~variable_name, scales='free_y') +
-    geom_line(size=1) +
-    labs(title='EU average cooling and heating needs',
-         subtitle='30-day running average. Population-weighted average for EU-27',
-         y='degree-days', x='') +
-    theme_crea_new() +
-    theme(legend.position = 'right') +
-    scale_color_crea_d('change', col.index = c(7,1), guide='none') +
-    scale_alpha_discrete(range=c(.33,1),
-                         # guide=guide_legend(nrow=1, override.aes = list(alpha=1, color=c('gray66', 'gray33', 'black')), title.position = 'left')
+    mutate(plotdate = as.Date(plotdate)) %>%
+    mutate(
+      year = as.factor(year(date)),
+      variable_name = ifelse(variable == "cdd", "cooling", "heating")
+    ) %>%
+    ggplot(aes(plotdate, value, alpha = factor(year(date)), col = variable_name)) +
+    facet_grid(region_id ~ variable_name, scales = "free_y") +
+    geom_line(size = 1) +
+    labs(
+      title = "EU average cooling and heating needs",
+      subtitle = "30-day running average. Population-weighted average for EU-27",
+      y = "degree-days", x = ""
     ) +
-    scale_x_date(date_labels = '%b', expand=expansion(mult=.01)) +
+    theme_crea_new() +
+    theme(legend.position = "right") +
+    scale_color_crea_d("change", col.index = c(7, 1), guide = "none") +
+    scale_alpha_discrete(
+      range = c(.33, 1),
+      # guide=guide_legend(nrow=1, override.aes = list(alpha=1, color=c('gray66', 'gray33', 'black')), title.position = 'left')
+    ) +
+    scale_x_date(date_labels = "%b", expand = expansion(mult = .01)) +
     rcrea::scale_y_crea_zero() +
-    guides(alpha=guide_legend(title=NULL, title.position = 'right'))
+    guides(alpha = guide_legend(title = NULL, title.position = "right"))
 
   if (!is.null(diagnostics_folder)) {
-    quicksave(file.path(diagnostics_folder, 'weather_running_30day.png'),
-              plot = plt, width = 10, height = 6)
+    quicksave(file.path(diagnostics_folder, "weather_running_30day.png"),
+      plot = plt, width = 10, height = 6
+    )
   }
 
 
   # 3. Raw Weather Tilemap (if raw data provided)
   if (!is.null(weather_raw)) {
-
     # Create tilemap for raw data
     tilemap_raw_plot <- weather_raw %>%
       filter(!is.na(year)) %>%
       ggplot(aes(x = `year<-`(date, 2000), y = year(date), fill = value)) +
-      geom_tile(data = ~ subset(., variable=='cdd'), aes(cdd=value)) +
-      geom_tile(data = ~ subset(., variable=='hdd'), aes(hdd=value)) +
-      scale_x_date(date_labels = '%b', expand = expansion(mult = .01)) +
-      facet_grid(region_id~toupper(variable), scales = 'free') +
+      geom_tile(data = ~ subset(., variable == "cdd"), aes(cdd = value)) +
+      geom_tile(data = ~ subset(., variable == "hdd"), aes(hdd = value)) +
+      scale_x_date(date_labels = "%b", expand = expansion(mult = .01)) +
+      facet_grid(region_id ~ toupper(variable), scales = "free") +
       ggh4x::scale_fill_multi(
-        aesthetics = c('hdd', 'cdd'),
+        aesthetics = c("hdd", "cdd"),
         name = list("HDD", "CDD"),
         colours = list(
-          hdd = viridis::viridis(100, option = 'plasma'),
-          cdd = viridis::viridis(100, option = 'viridis')
-        )) +
-      labs(title = 'Raw HDD and CDD Data (Before Filling)',
-           subtitle = 'Daily values shown as tiles - white indicates missing data',
-           x = NULL, y=NULL) +
+          hdd = viridis::viridis(100, option = "plasma"),
+          cdd = viridis::viridis(100, option = "viridis")
+        )
+      ) +
+      labs(
+        title = "Raw HDD and CDD Data (Before Filling)",
+        subtitle = "Daily values shown as tiles - white indicates missing data",
+        x = NULL, y = NULL
+      ) +
       theme_minimal()
 
 
     if (!is.null(diagnostics_folder)) {
-      quicksave(file.path(diagnostics_folder, 'weather_data_availability.png'),
-                plot = tilemap_raw_plot, width = 12, height = 8)
+      quicksave(file.path(diagnostics_folder, "weather_data_availability.png"),
+        plot = tilemap_raw_plot, width = 12, height = 8
+      )
     }
   }
 }
