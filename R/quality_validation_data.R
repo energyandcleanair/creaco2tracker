@@ -94,12 +94,12 @@ load_carbonmonitor <- function(source_name, region, ...) {
   url <- "https://datas.carbonmonitor.org/API/downloadFullDataset.php?source=carbon_eu"
   filepath <- "data/CM_EU.csv"
   if (!file.exists(filepath)) {
-    dir.create(dirname(filepath), showWarnings = FALSE, recursive = T)
+    dir.create(dirname(filepath), showWarnings = FALSE, recursive = TRUE)
     download.file(url, filepath)
   }
 
   suppressWarnings(read_csv(filepath, col_types = cols())) %>%
-    distinct(country, date, sector, .keep_all = T) %>%
+    distinct(country, date, sector, .keep_all = TRUE) %>%
     add_iso2("country") %>%
     # Add EU values
     {
@@ -135,10 +135,12 @@ load_carbonmonitor <- function(source_name, region, ...) {
 # Load PRIMAP data
 load_primap <- function(source_name, region, version = "2.6", ...) {
   filepath <- "data/Guetschow_et_al_2024a-PRIMAP-hist_v2.6_final_13-Sep-2024.csv"
-  url <- "https://zenodo.org/records/13752654/files/Guetschow_et_al_2024a-PRIMAP-hist_v2.6_final_13-Sep-2024.csv?download=1"
+  url <- paste0("https://zenodo.org/records/13752654/files/Guetschow_et_",
+    "al_2024a-PRIMAP-hist_v2.6_final_13-Sep-2024.csv?downloa",
+    "d=1")
 
   if (!file.exists(filepath)) {
-    dir.create(dirname(filepath), showWarnings = FALSE, recursive = T)
+    dir.create(dirname(filepath), showWarnings = FALSE, recursive = TRUE)
     download.file(url, filepath)
   }
 

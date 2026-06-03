@@ -24,12 +24,14 @@ test_that("combine_monthly_yearly_with_cutoff works correctly with valid data", 
 
   cons_monthly <- tribble(
     ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
-    "DE", "A", "2019-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 95,   # Before cutoff, should be filtered out
-    "DE", "A", "2019-02-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 105,  # Before cutoff, should be filtered out
-    "DE", "A", "2020-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 125,  # After cutoff, should be kept
-    "DE", "A", "2020-02-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 135,  # After cutoff, should be kept
-    "DE", "A", "2021-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 145,  # After cutoff, should be kept
-    "DE", "A", "2021-02-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 155   # After cutoff, should be kept
+    # Before cutoff, should be filtered out
+    "DE", "A", "2019-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 95,
+    # Before cutoff, should be filtered out
+    "DE", "A", "2019-02-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 105,
+    "DE", "A", "2020-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 125, # After cutoff, should be kept
+    "DE", "A", "2020-02-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 135, # After cutoff, should be kept
+    "DE", "A", "2021-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 145, # After cutoff, should be kept
+    "DE", "A", "2021-02-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 155 # After cutoff, should be kept
   ) %>%
     mutate(time = as.Date(time))
 
@@ -44,7 +46,7 @@ test_that("combine_monthly_yearly_with_cutoff works correctly with valid data", 
     filter(time < as.Date("2020-01-01")) %>%
     arrange(time)
 
-  expect_equal(early_dates$values, c(100, 110))  # Should be yearly values
+  expect_equal(early_dates$values, c(100, 110)) # Should be yearly values
   expect_equal(early_dates$source, c("yearly", "yearly"))
 
   # Check that monthly data after cutoff date uses monthly data
@@ -52,7 +54,7 @@ test_that("combine_monthly_yearly_with_cutoff works correctly with valid data", 
     filter(time >= as.Date("2020-01-01")) %>%
     arrange(time)
 
-  expect_equal(late_dates$values, c(125, 135, 145, 155))  # Should be monthly values
+  expect_equal(late_dates$values, c(125, 135, 145, 155)) # Should be monthly values
   expect_equal(late_dates$source, c("monthly", "monthly", "monthly", "monthly"))
 })
 
@@ -60,17 +62,17 @@ test_that("combine_monthly_yearly_with_cutoff handles different fuel types corre
   # Create test data with different fuel types
   cons_yearly_monthly <- tribble(
     ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
-    "DE", "A", "2018-01-01", "TJ", SIEC_NATURAL_GAS, "GAS", 100,   # Natural gas, cutoff 2020-01-01
-    "DE", "A", "2019-01-01", "TJ", SIEC_HARD_COAL, "COAL", 200,  # Hard coal, cutoff 2020-01-01
-    "DE", "A", "2018-01-01", "TJ", SIEC_HARD_COAL, "COAL", 300   # Hard coal, cutoff 2020-01-01
+    "DE", "A", "2018-01-01", "TJ", SIEC_NATURAL_GAS, "GAS", 100, # Natural gas, cutoff 2020-01-01
+    "DE", "A", "2019-01-01", "TJ", SIEC_HARD_COAL, "COAL", 200, # Hard coal, cutoff 2020-01-01
+    "DE", "A", "2018-01-01", "TJ", SIEC_HARD_COAL, "COAL", 300 # Hard coal, cutoff 2020-01-01
   ) %>%
     mutate(time = as.Date(time))
 
   cons_monthly <- tribble(
     ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
-    "DE", "A", "2018-01-01", "TJ", SIEC_NATURAL_GAS, "GAS", 95,    # Before cutoff, should be filtered
-    "DE", "A", "2019-01-01", "TJ", SIEC_HARD_COAL, "COAL", 205,  # Before cutoff, should be filtered
-    "DE", "A", "2018-01-01", "TJ", SIEC_HARD_COAL, "COAL", 305   # Before cutoff, should be filtered
+    "DE", "A", "2018-01-01", "TJ", SIEC_NATURAL_GAS, "GAS", 95, # Before cutoff, should be filtered
+    "DE", "A", "2019-01-01", "TJ", SIEC_HARD_COAL, "COAL", 205, # Before cutoff, should be filtered
+    "DE", "A", "2018-01-01", "TJ", SIEC_HARD_COAL, "COAL", 305 # Before cutoff, should be filtered
   ) %>%
     mutate(time = as.Date(time))
 
@@ -86,19 +88,25 @@ test_that("combine_monthly_yearly_with_cutoff handles country-specific cutoffs",
   # Create test data for Portugal fuel oil (special case)
   cons_yearly_monthly <- tribble(
     ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
-    "PT", "A", "2022-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 100,  # Before Portugal cutoff (2023-01-01)
-    "PT", "A", "2023-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 110,  # After Portugal cutoff
-    "DE", "A", "2022-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 200,  # Germany, normal cutoff (2020-01-01)
-    "DE", "A", "2023-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 210   # Germany, after normal cutoff
+    # Before Portugal cutoff (2023-01-01)
+    "PT", "A", "2022-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 100,
+    "PT", "A", "2023-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 110, # After Portugal cutoff
+    # Germany, normal cutoff (2020-01-01)
+    "DE", "A", "2022-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 200,
+    "DE", "A", "2023-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 210 # Germany, after normal cutoff
   ) %>%
     mutate(time = as.Date(time))
 
   cons_monthly <- tribble(
     ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
-    "PT", "A", "2022-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 95,   # Before Portugal cutoff, should be filtered
-    "PT", "A", "2023-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 115,  # After Portugal cutoff, should be kept
-    "DE", "A", "2022-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 205,  # After Germany cutoff, should be kept
-    "DE", "A", "2023-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 215   # After Germany cutoff, should be kept
+    # Before Portugal cutoff, should be filtered
+    "PT", "A", "2022-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 95,
+    # After Portugal cutoff, should be kept
+    "PT", "A", "2023-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 115,
+    # After Germany cutoff, should be kept
+    "DE", "A", "2022-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 205,
+    # After Germany cutoff, should be kept
+    "DE", "A", "2023-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 215
   ) %>%
     mutate(time = as.Date(time))
 
@@ -150,7 +158,8 @@ test_that("combine_monthly_yearly_with_cutoff handles missing data gracefully", 
   expect_equal(result$source, "monthly")
 })
 
-test_that("combine_monthly_yearly_with_cutoff prioritizes monthly over yearly when both available", {
+test_that("combine_monthly_yearly_with_cutoff prioritizes monthly over yearly when both available",
+  {
   # Create test data where both monthly and yearly are available after cutoff
   cons_yearly_monthly <- tribble(
     ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
@@ -194,5 +203,3 @@ test_that("combine_monthly_yearly_with_cutoff handles edge cases with no monthly
   expect_true(all(result$source == "yearly"))
   expect_equal(result$values, c(100, 110))
 })
-
-

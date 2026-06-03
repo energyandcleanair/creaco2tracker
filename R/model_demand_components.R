@@ -442,7 +442,8 @@ get_demand_components <- function(iso2s = "EU",
       select(date, heating, elec, others, heating_wc, elec_wc, others_wc)
 
     if (any(model_data$heating < 0, na.rm = TRUE) || any(model_data$others < 0, na.rm = TRUE)) {
-      warning(glue("Negative values for {iso2}: heating={sum(model_data$heating < 0, na.rm = TRUE)}, others={sum(model_data$others < 0, na.rm = TRUE)}"))
+      warning(glue("Negative values for {iso2}: heating={sum(model_data$heating < 0, na.rm =
+        TRUE)}, others={sum(model_data$others < 0, na.rm = TRUE)}"))
     }
 
     components <- base %>%

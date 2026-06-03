@@ -4,15 +4,19 @@ context("split_gas_to_elec_others and split_gas_to_elec_all")
 
 # Helper for easy comparison
 expect_gas_sectors <- function(df, date, expected_sectors, expected_values) {
-  res <- df %>% filter(date == as.Date(date)) %>% arrange(sector)
+  res <- df %>%
+    filter(date == as.Date(date)) %>%
+    arrange(sector)
   expect_equal(res$sector, sort(expected_sectors))
   expect_equal(res$value, expected_values)
 }
 
 # Helper to compare data frames ignoring column order
 expect_equal_ignore_order <- function(actual, expected) {
-  expect_equal(actual %>% arrange(across(everything())), 
-               expected %>% arrange(across(everything())))
+  expect_equal(
+    actual %>% arrange(across(everything())),
+    expected %>% arrange(across(everything()))
+  )
 }
 
 # 1. Only "all" and "electricity" present (should infer "others")
@@ -49,7 +53,8 @@ test_that("split_gas_to_elec_others returns unchanged if already split", {
 test_that("split_gas_to_elec_others returns unchanged if all sectors present", {
   test_data <- tibble(
     iso2 = "DE", geo = "DE", unit = "t", date = as.Date("2023-01-04"),
-    fuel = "gas", sector = c("all", "electricity", "others"), value = c(100, 40, 60), estimate = "central"
+    fuel = "gas", sector = c("all", "electricity", "others"), value = c(100, 40, 60), estimate =
+      "central"
   )
   result <- split_gas_to_elec_others(test_data)
   expect_gas_sectors(result, "2023-01-04", c("electricity", "others"), c(40, 60))
@@ -138,7 +143,9 @@ test_that("split_gas_to_elec_all infers 'all' from 'electricity' and 'others'", 
     fuel = "gas", sector = c("electricity", "others"), value = c(40, 60), estimate = "central"
   )
   result <- split_gas_to_elec_all(test_data)
-  res <- result %>% filter(date == as.Date("2023-02-01")) %>% arrange(sector)
+  res <- result %>%
+    filter(date == as.Date("2023-02-01")) %>%
+    arrange(sector)
   expect_equal(res$sector, c("all", "electricity"))
   expect_equal(res$value, c(100, 40))
 })
@@ -149,7 +156,9 @@ test_that("split_gas_to_elec_all returns unchanged if already combined", {
     fuel = "gas", sector = c("all", "electricity"), value = c(100, 40), estimate = "central"
   )
   result <- split_gas_to_elec_all(test_data)
-  res <- result %>% filter(date == as.Date("2023-02-02")) %>% arrange(sector)
+  res <- result %>%
+    filter(date == as.Date("2023-02-02")) %>%
+    arrange(sector)
   expect_equal(res$sector, c("all", "electricity"))
   expect_equal(res$value, c(100, 40))
 })

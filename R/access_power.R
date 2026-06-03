@@ -11,11 +11,13 @@
 #'
 #' @return Named list with `entsoe_daily`, `ember_monthly`, and `ember_yearly`.
 #' @keywords internal
-power_data_access_get_sources <- function(iso2s,
-                                          date_from,
-                                          date_to,
-                                          use_cache = TRUE,
-                                          data_masking = NULL) {
+power_data_access_get_sources <- function(
+  iso2s,
+  date_from,
+  date_to,
+  use_cache = TRUE,
+  data_masking = NULL
+) {
   date_from <- as.Date(date_from)
   date_to <- as.Date(date_to)
 

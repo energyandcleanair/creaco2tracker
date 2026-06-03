@@ -79,7 +79,7 @@ get_gas_demand <- function(iso2s = NULL,
   apparent_w_agsi <- get_gas_demand_apparent(
     entsog_data = entsog_data,
     years = years,
-    use_agsi_for_storage = T,
+    use_agsi_for_storage = TRUE,
     verbose = verbose,
     agsi_storage_data = agsi_storage_data
   )
@@ -177,13 +177,14 @@ get_gas_demand <- function(iso2s = NULL,
 #' @export
 #'
 #' @examples
-get_gas_demand_consdist <- function(entsog_data, years, verbose = F) {
+get_gas_demand_consdist <- function(entsog_data, years, verbose = FALSE) {
   entsog <- entsog_data %>%
     filter(type %in% c("consumption", "distribution"))
 
   consdist <- entsog %>%
     group_by(iso2 = destination_iso2, date) %>%
-    summarise(value_m3 = .summarise_masked_sum(value_m3, multiplier = -1), .groups = "drop_last") %>%
+    summarise(value_m3 = .summarise_masked_sum(value_m3, multiplier = -1), .groups =
+      "drop_last") %>%
     arrange(date) %>%
     mutate(preserve_na = is.na(value_m3)) %>%
     # Interpolate missing data
@@ -226,8 +227,8 @@ get_gas_demand_consdist <- function(entsog_data, years, verbose = F) {
 #' @examples
 get_gas_demand_apparent <- function(entsog_data,
                                     years,
-                                    use_agsi_for_storage = F,
-                                    verbose = F,
+                                    use_agsi_for_storage = FALSE,
+                                    verbose = FALSE,
                                     agsi_storage_data = NULL) {
   entsog <- entsog_data %>%
     filter(type %in% c("storage", "crossborder", "production"))
@@ -416,7 +417,7 @@ keep_best <- function(consumption,
     filter(date_from == min(date_from)) %>%
     filter(r2 == max(r2)) %>%
     # Sometimes apparent strictly equivalent to apparent_asgi
-    distinct(iso2, .keep_all = T)
+    distinct(iso2, .keep_all = TRUE)
 
   best %>%
     filter(valid) %>%

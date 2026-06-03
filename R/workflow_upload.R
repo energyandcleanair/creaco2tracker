@@ -7,11 +7,12 @@ get_pg_url <- function(production) {
   }
 }
 
-upload_co2_daily <- function(co2_daily, production = T, clear_all_first = F) {
+upload_co2_daily <- function(co2_daily, production = TRUE, clear_all_first = FALSE) {
   # Formatting / cleaning for db
   co2_daily_formatted <- format_co2_for_db(co2_daily)
 
-  print(sprintf("=== Uploading co2_daily (%s) ===", ifelse(production, "production", "development")))
+  print(sprintf("=== Uploading co2_daily (%s) ===", ifelse(production, "production",
+    "development")))
 
   unique_cols <- c("region", "date", "fuel", "sector", "unit", "frequency", "version")
 
@@ -33,8 +34,9 @@ upload_co2_daily <- function(co2_daily, production = T, clear_all_first = F) {
 }
 
 
-upload_corrected_demand <- function(corrected_demand, production = T, clear_all_first = F) {
-  print(sprintf("=== Uploading corrected_demand (%s) ===", ifelse(production, "production", "development")))
+upload_corrected_demand <- function(corrected_demand, production = TRUE, clear_all_first = FALSE) {
+  print(sprintf("=== Uploading corrected_demand (%s) ===", ifelse(production, "production",
+    "development")))
 
   unique_cols <- c("region_id", "date", "fuel", "data_source", "sector", "unit", "frequency")
 
@@ -58,8 +60,9 @@ upload_corrected_demand <- function(corrected_demand, production = T, clear_all_
 }
 
 
-upload_gas_demand <- function(gas_demand, production = T, clear_all_first = F) {
-  print(sprintf("=== Uploading gas demand (%s) ===", ifelse(production, "production", "development")))
+upload_gas_demand <- function(gas_demand, production = TRUE, clear_all_first = FALSE) {
+  print(sprintf("=== Uploading gas demand (%s) ===", ifelse(production, "production",
+    "development")))
 
   unique_cols <- c("region_id", "date", "fuel", "data_source", "sector", "unit", "frequency")
 

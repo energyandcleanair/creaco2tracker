@@ -42,13 +42,13 @@ validate_co2_historical <- function(co2 = NULL,
                                     iso2s = NULL,
                                     folder = "diagnostics",
                                     date_from = "1990-01-01",
-                                    by_country = T,
-                                    all_countries = T,
+                                    by_country = TRUE,
+                                    all_countries = TRUE,
                                     year_to = NULL,
                                     exclude_international_aviation = TRUE) {
   # Remove the get_validation_data() call since data is passed in
   # Rest of function remains the same
-  dir.create(folder, F, T)
+  dir.create(folder, FALSE, TRUE)
 
   if (is.null(iso2s)) {
     iso2s <- unique(co2$iso2)
@@ -61,7 +61,8 @@ validate_co2_historical <- function(co2 = NULL,
   if (exclude_international_aviation) {
     co2 <- remove_international_aviation(co2)
 
-    # Because international aviation is only available after 2010, we remove prior data for oil and total
+    # Because international aviation is only available after 2010, we remove prior data for oil and
+    # total
     co2 <- co2 %>%
       filter(!(fuel %in% c(FUEL_OIL, FUEL_TOTAL) & year(date) < 2010))
   }
@@ -143,15 +144,19 @@ validate_co2_historical <- function(co2 = NULL,
             }
           } +
           labs(
-            title = glue("CO2 emissions from fossil fuels{if(exclude_international_aviation) ' (without international aviation)' else ''}"),
-            subtitle = "Comparison between CREA and Global Carbon Project estimates, in billion tonne CO2 per year",
+            title =
+              glue("CO2 emissions from fossil fuels{if(exclude_international_aviation) ' (without
+              international aviation)' else ''}"),
+            subtitle = "Comparison between CREA and Global Carbon Project estimates,
+              in billion tonne CO2 per year",
             y = NULL,
             x = NULL,
             linewidth = "Source",
             linetype = NULL,
             alpha = "Source",
             color = "Source",
-            caption = "Source: CREA analysis and Global Carbon Budget 2025 (Friedlingstein et al., 2025, ESSD)."
+            caption = "Source: CREA analysis and Global Carbon Budget 2025 (Friedlingstein et al.,
+              2025, ESSD)."
           )
       }
 
@@ -160,8 +165,8 @@ validate_co2_historical <- function(co2 = NULL,
         plot = plt,
         width = 8,
         height = 10,
-        preview = F,
-        logo = F
+        preview = FALSE,
+        logo = FALSE
       )
 
       # Create a version for countries matching validation only (for the methodology doc)
@@ -174,8 +179,8 @@ validate_co2_historical <- function(co2 = NULL,
         plot = plt,
         width = 8,
         height = 10,
-        preview = F,
-        logo = F
+        preview = FALSE,
+        logo = FALSE
       )
     })
   }
@@ -235,7 +240,8 @@ validate_co2_historical <- function(co2 = NULL,
       )])
 
       ggplot(plot_data) +
-        geom_line(aes(year, value / 1e3, col = source, linewidth = source, alpha = source, linetype = type)) +
+        geom_line(aes(year, value / 1e3, col = source, linewidth = source, alpha = source,
+          linetype = type)) +
         scale_x_continuous(limits = c(min(co2_crea$year), year_to)) +
         scale_alpha_manual(values = alphas) +
         scale_linewidth_manual(values = linewidths) +
@@ -249,19 +255,22 @@ validate_co2_historical <- function(co2 = NULL,
         } +
         labs(
           title = glue("{iso2_to_name(iso2)} CO2 emissions from fossil fuels"),
-          subtitle = "Projection of historical sources using CREA CO2 tracker, in billion tonne CO2 per year",
+          subtitle = "Projection of historical sources using CREA CO2 tracker,
+            in billion tonne CO2 per year",
           y = NULL,
           x = NULL,
           linewidth = "Source",
           linetype = NULL,
           alpha = "Source",
           color = "Source",
-          caption = "Source: CREA analysis based on Climate Watch data. Agriculture and LULUCF are not included in this comparison."
+          caption =
+            "Source: CREA analysis based on Climate Watch data. Agriculture and LULUCF are not
+            included in this comparison."
         ) -> plt
 
       quicksave(file.path(folder, glue("validation_co2_{tolower(iso2)}.jpg")),
         plot = plt,
-        preview = F
+        preview = FALSE
       )
 
 
@@ -299,7 +308,7 @@ validate_co2_historical <- function(co2 = NULL,
         ) %>%
         group_by(iso2, year = year(date), fuel) %>%
         summarise(
-          value = sum(value, na.rm = T) / 1e6,
+          value = sum(value, na.rm = TRUE) / 1e6,
           unit = "mt",
           source = "CREA"
         ) %>%
@@ -349,19 +358,22 @@ validate_co2_historical <- function(co2 = NULL,
         facet_wrap(~ stringr::str_to_title(fuel), scales = "free_y") +
         labs(
           title = glue("{iso2_to_name(iso2)} CO2 emissions from fossil fuels"),
-          subtitle = "Projection of historical sources using CREA CO2 tracker, in billion tonne CO2 per year",
+          subtitle = "Projection of historical sources using CREA CO2 tracker,
+            in billion tonne CO2 per year",
           y = NULL,
           x = NULL,
           linewidth = "Source",
           linetype = NULL,
           alpha = "Source",
           color = "Source",
-          caption = "Source: CREA analysis based on Climate Watch data. Agriculture and LULUCF are not included in this comparison."
+          caption =
+            "Source: CREA analysis based on Climate Watch data. Agriculture and LULUCF are not
+            included in this comparison."
         ) -> plt
 
       quicksave(file.path(folder, glue("validation_co2_{tolower(iso2)}_byfuel.jpg")),
         plot = plt,
-        preview = F
+        preview = FALSE
       )
     })
   }
@@ -405,21 +417,24 @@ validate_co2_historical <- function(co2 = NULL,
           scale_x_continuous(limits = c(1940, NA)) +
           geom_hline(
             data = co2_extended %>% filter(year == max(year), source %in% c("PIK", "GCP")),
-            aes(yintercept = value / 1e3, col = source), linetype = "solid", alpha = 0.2, linewidth = 1,
-            show.legend = F
+            aes(yintercept = value / 1e3, col = source), linetype = "solid", alpha = 0.2,
+              linewidth = 1,
+            show.legend = FALSE
           ) +
           geom_vline(
             data = interpolated,
-            aes(xintercept = interpolated_year, col = source), linetype = "solid", alpha = 0.2, linewidth = 1,
-            show.legend = F
+            aes(xintercept = interpolated_year, col = source), linetype = "solid", alpha = 0.2,
+              linewidth = 1,
+            show.legend = FALSE
           ) +
           # Indicate the interpolated value
           ggrepel::geom_text_repel(
             data = interpolated,
             # inherit.aes = F,
-            aes(x = interpolated_year, y = 4, label = round(interpolated_year), col = source, alpha = "CREA"),
+            aes(x = interpolated_year, y = 4, label = round(interpolated_year), col = source,
+              alpha = "CREA"),
             size = 4,
-            show.legend = F,
+            show.legend = FALSE,
             segment.size = 0.2,
             segment.alpha = 0,
             segment.color = "grey50",
@@ -431,8 +446,10 @@ validate_co2_historical <- function(co2 = NULL,
           ) +
           labs(
             caption = paste(c(
-              "Source: Climate Watch and CREA's own estimates based on ENTSOE, ENTSOG, EUROSTAT and IPCC.",
-              "Agriculture and LULUCF are not included. GCP and PIK times series are extended to 2024 using CREA’s estimates."
+              "Source: Climate Watch and CREA's own estimates based on ENTSOE, ENTSOG,
+                EUROSTAT and IPCC.",
+              "Agriculture and LULUCF are not included. GCP and PIK times series are extended to
+                2024 using CREA’s estimates."
             ), collapse = "\n")
           ) -> plt_full)
 
@@ -530,7 +547,8 @@ validate_co2_timeseries <- function(co2, folder = "diagnostics") {
     is_daily <- any(day(co2$date) != 1)
 
     lapply(iso2s, function(iso2) {
-      country <- countrycode::countrycode(iso2, "iso2c", "country.name", custom_match = c("EU" = "European Union"))
+      country <- countrycode::countrycode(iso2, "iso2c", "country.name", custom_match = c("EU" =
+        "European Union"))
       plt_data <- co2 %>%
         filter(iso2 == !!iso2) %>%
         mutate(across(c(fuel, sector), tolower)) %>%
@@ -568,7 +586,7 @@ validate_co2_timeseries <- function(co2, folder = "diagnostics") {
         geom_line(aes(size = year)) +
         geom_ribbon(aes(ymin = lower / 1e6, ymax = upper / 1e6),
           color = "transparent",
-          alpha = 0.3, show.legend = F
+          alpha = 0.3, show.legend = FALSE
         ) +
         facet_wrap(~ glue("{str_to_title(fuel)} - {str_to_title(sector)}"), scales = "free_y") +
         expand_limits(y = 0) +
@@ -582,7 +600,8 @@ validate_co2_timeseries <- function(co2, folder = "diagnostics") {
         theme(legend.position = "right") +
         labs(
           title = glue("{country} CO2 emissions"),
-          subtitle = paste0("Million tonne CO2 per day", if_else(is_daily, "30-day moving average", "")),
+          subtitle = paste0("Million tonne CO2 per day", if_else(is_daily, "30-day moving average",
+            "")),
           caption = "Source: CREA analysis based on ENTSOG, ENTSOE, EUROSTAT and ASGI.",
           y = NULL,
           x = NULL,
@@ -599,7 +618,7 @@ validate_co2_timeseries <- function(co2, folder = "diagnostics") {
 
 
 validate_co2_monthly <- function(co2, folder = "diagnostics") {
-  dir.create(folder, showWarnings = FALSE, recursive = T)
+  dir.create(folder, showWarnings = FALSE, recursive = TRUE)
 
   co2_crea <- co2 %>%
     filter(fuel != "total", estimate == "central") %>%
@@ -617,12 +636,12 @@ validate_co2_monthly <- function(co2, folder = "diagnostics") {
   url <- "https://datas.carbonmonitor.org/API/downloadFullDataset.php?source=carbon_eu"
   filepath <- "data/CM_EU.csv"
   if (!file.exists(filepath)) {
-    dir.create(dirname(filepath), showWarnings = FALSE, recursive = T)
+    dir.create(dirname(filepath), showWarnings = FALSE, recursive = TRUE)
     download.file(url, filepath)
   }
 
   co2_carbonmonitor <- read_csv(filepath) %>%
-    distinct(country, date, sector, .keep_all = T)
+    distinct(country, date, sector, .keep_all = TRUE)
 
   co2_validate <- bind_rows(
     co2_carbonmonitor %>%
@@ -688,7 +707,8 @@ validate_co2_monthly <- function(co2, folder = "diagnostics") {
     scale_alpha_manual(values = c(0.9, 1, 1, 1, 1, 1, 1)) +
     scale_linewidth_manual(values = c(1.6, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5)) +
     # scale_linetype_manual(values=c('solid', 'dashed')) +
-    scale_color_manual(values = unname(rcrea::pal_crea[c("Blue", "Dark.red", "Orange", "Dark.blue", "Purple", "Green", "Red")])) +
+    scale_color_manual(values = unname(rcrea::pal_crea[c("Blue", "Dark.red", "Orange", "Dark.blue",
+      "Purple", "Green", "Red")])) +
     # geom_line(aes(col=source)) +
     #   theme(legend.position = "top",
     #         legend.title = element_blank(),
@@ -720,7 +740,7 @@ validate_co2_monthly <- function(co2, folder = "diagnostics") {
 
   quicksave(file.path(folder, "co2_benchmark_carbonmonitor_monthly.jpg"),
     plot = plt,
-    width = 12, height = 8, logo = F, preview = F
+    width = 12, height = 8, logo = FALSE, preview = FALSE
   )
 }
 
@@ -729,7 +749,7 @@ validate_co2_transport <- function(co2,
                                    folder = "diagnostics",
                                    date_from = "1990-01-01",
                                    year_to = NULL) {
-  dir.create(folder, showWarnings = FALSE, recursive = T)
+  dir.create(folder, showWarnings = FALSE, recursive = TRUE)
 
   if (is.null(year_to)) {
     year_to <- max(lubridate::year(co2$date), na.rm = TRUE)
@@ -751,10 +771,12 @@ validate_co2_transport <- function(co2,
       source = "EEA"
     )
 
-  url <- "https://sdi.eea.europa.eu/webdav/datastore/public/eea_t_national-emissions-reported_p_2024_v01_r00/CSV/UNFCCC_v27.csv"
+  url <- paste0("https://sdi.eea.europa.eu/webdav/datastore/public/eea_t",
+    "_national-emissions-reported_p_2024_v01_r00/CSV/UNFCCC_",
+    "v27.csv")
   filepath <- file.path("data", basename(url))
   if (!file.exists(filepath)) {
-    dir.create(dirname(filepath), showWarnings = FALSE, recursive = T)
+    dir.create(dirname(filepath), showWarnings = FALSE, recursive = TRUE)
     download.file(url, filepath)
   }
   eea_w_international <- read_csv(filepath) %>%
@@ -824,13 +846,15 @@ validate_co2_transport <- function(co2,
       # write_csv(file.path(folder, "validation_transport.csv")) %>%
       # filter(type=="estimated") %>%
       mutate(
-        source = factor(source, levels = c("CREA", "CREA (domestic only)", unique(co2_validate$source)))
+        source = factor(source, levels = c("CREA", "CREA (domestic only)",
+          unique(co2_validate$source)))
       )
 
     n_sources <- n_distinct(plot_data$source)
     alphas <- c(0.9, 0.9, rep(1, n_sources - 2))
     linewidths <- c(1.6, 1.6, rep(0.5, n_sources - 2))
-    colors <- unname(rcrea::pal_crea[c("Blue", "Dark.red", "Dark.blue", "Orange", "Red", "Yellow", "Dark.violet", "Turquoise")])
+    colors <- unname(rcrea::pal_crea[c("Blue", "Dark.red", "Dark.blue", "Orange", "Red", "Yellow",
+      "Dark.violet", "Turquoise")])
 
     ggplot(plot_data) +
       geom_line(aes(year, value / 1e3, col = source, linewidth = source, alpha = source)) +
@@ -847,7 +871,8 @@ validate_co2_transport <- function(co2,
       } +
       labs(
         title = glue("[DIAGNOSTICS] {iso2_to_name(iso2)} CO2 emissions in transport sector"),
-        subtitle = "Projection of historical sources using CREA CO2 tracker, in billion tonne CO2 per year",
+        subtitle = "Projection of historical sources using CREA CO2 tracker,
+          in billion tonne CO2 per year",
         y = NULL,
         x = NULL,
         linewidth = "Source",
@@ -860,7 +885,7 @@ validate_co2_transport <- function(co2,
     plt
     quicksave(file.path(folder, glue("validation_co2_transport_{tolower(iso2)}.jpg")),
       plot = plt,
-      preview = F,
+      preview = FALSE,
       width = 8,
       height = 5
     )
@@ -876,7 +901,8 @@ validate_co2_transport <- function(co2,
 #' @export
 #'
 #' @examples
-compare_co2_versions <- function(iso2s = "EU", versions = c("0.2", "0.3"), diagnostics_folder = "diagnostics") {
+compare_co2_versions <- function(iso2s = "EU", versions = c("0.2", "0.3"), diagnostics_folder =
+  "diagnostics") {
   # Read the data
   co2 <- lapply(versions, function(version) download_co2(iso2s = iso2s, version = version)) %>%
     bind_rows()
@@ -888,7 +914,7 @@ compare_co2_versions <- function(iso2s = "EU", versions = c("0.2", "0.3"), diagn
   (co2 %>%
     filter(fuel == "Total") %>%
     group_by(region, year = year(date), version) %>%
-    summarise(value = sum(value, na.rm = T), .groups = "drop") %>%
+    summarise(value = sum(value, na.rm = TRUE), .groups = "drop") %>%
     group_by(region, version) %>%
     arrange(year) %>%
     filter(year < 2024) %>%
@@ -906,7 +932,8 @@ compare_co2_versions <- function(iso2s = "EU", versions = c("0.2", "0.3"), diagn
       position = position_dodge(width = 0.9),
       size = 2.5
     ) +
-    ifelse(length(unique(co2$region)) > 1, facet_wrap(~region, scales = "free_y"), element_blank()) +
+    ifelse(length(unique(co2$region)) > 1, facet_wrap(~region, scales = "free_y"),
+      element_blank()) +
     rcrea::theme_crea() +
     scale_fill_crea_d() +
     scale_y_continuous(
@@ -922,7 +949,7 @@ compare_co2_versions <- function(iso2s = "EU", versions = c("0.2", "0.3"), diagn
   if (!is_null_or_empty(diagnostics_folder)) {
     quicksave(file.path(diagnostics_folder, "co2_comparison_versions.jpg"),
       plot = plt,
-      width = 8, height = 4, scale = 1, logo = F, dpi = 600
+      width = 8, height = 4, scale = 1, logo = FALSE, dpi = 600
     )
     # height=min(30,max(4, 1.5*length(unique(co2_crea$iso2)))),
   }
@@ -930,7 +957,7 @@ compare_co2_versions <- function(iso2s = "EU", versions = c("0.2", "0.3"), diagn
   (co2 %>%
     # filter(fuel!="Total") %>%
     group_by(region, year = year(date), version, fuel) %>%
-    summarise(value = sum(value, na.rm = T), .groups = "drop") %>%
+    summarise(value = sum(value, na.rm = TRUE), .groups = "drop") %>%
     group_by(region, fuel, version) %>%
     arrange(year) %>%
     filter(year < 2024) %>%
@@ -948,7 +975,8 @@ compare_co2_versions <- function(iso2s = "EU", versions = c("0.2", "0.3"), diagn
       position = position_dodge(width = 0.9),
       size = 2.5
     ) +
-    ifelse(length(unique(co2$region)) > 1, facet_wrap(~region, scales = "free_y"), element_blank()) +
+    ifelse(length(unique(co2$region)) > 1, facet_wrap(~region, scales = "free_y"),
+      element_blank()) +
     rcrea::theme_crea() +
     scale_fill_crea_d() +
     scale_y_continuous(
@@ -965,7 +993,7 @@ compare_co2_versions <- function(iso2s = "EU", versions = c("0.2", "0.3"), diagn
   if (!is_null_or_empty(diagnostics_folder)) {
     quicksave(file.path(diagnostics_folder, "co2_comparison_versions_by_fuel.jpg"),
       plot = plt,
-      width = 8, height = 7, scale = 1, logo = F
+      width = 8, height = 7, scale = 1, logo = FALSE
     )
     # height=min(30,max(4, 1.5*length(unique(co2_crea$iso2)))),
   }

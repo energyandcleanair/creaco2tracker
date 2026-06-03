@@ -15,11 +15,16 @@ collect_gas <- function(use_cache = FALSE) {
   gas_nrg_bal_yearly <- c(
     "IC_OBS", # Inland consumption - observed
     "FC_NE", # Final consumption - non-energy use
-    "TI_EHG_MAPE_E", # Transformation input - electricity and heat generation - main activity producers
-    # Monthly data doesn't have distinction between elec and heat only. We then include it to ensuire continuity
+    # Transformation input - electricity and heat generation - main activity producers
+    "TI_EHG_MAPE_E",
+    # Monthly data doesn't have distinction between elec and heat only. We then include it to
+    # ensuire continuity
     # even though this is technically innacurate
-    "TI_EHG_MAPH_E", # Transformation input - electricity and heat generation - HEAT ONLY
-    "TI_EHG_MAPCHP_E" # Transformation input - electricity and heat generation - main activity producer combined heat and power - energy use
+    # Transformation input - electricity and heat generation - HEAT ONLY
+    "TI_EHG_MAPH_E",
+    # Transformation input - electricity and heat generation - main activity producer
+    # combined heat and power - energy use
+    "TI_EHG_MAPCHP_E"
   )
 
   cons_yearly_raw <- get_eurostat_from_code(
@@ -76,23 +81,27 @@ process_gas <- function(x, pwr_generation) {
   has_gas_generation <- pwr_generation %>%
     filter(source == "Fossil Gas") %>%
     group_by(iso2, time = floor_date(date, "month")) %>%
-    summarise(value_mwh = sum(value_mwh, na.rm = T)) %>%
+    summarise(value_mwh = sum(value_mwh, na.rm = TRUE)) %>%
     mutate(
       value_mwh_threshold = quantile(value_mwh[value_mwh > 0], 0.1), # Could be due to stock changes
       has_gas_generation = value_mwh > value_mwh_threshold
     ) %>%
     ungroup() %>%
-    tidyr::complete(iso2, time = unique(x$time), fill = list(has_gas_generation = FALSE, value_mwh = NA)) %>%
+    tidyr::complete(iso2, time = unique(x$time), fill = list(has_gas_generation = FALSE,
+      value_mwh = NA)) %>%
     select(iso2, time, has_gas_generation) %>%
     mutate(freq = "Monthly")
 
 
   x_elec <- x %>%
     filter(
-      (freq == "Monthly" & nrg_bal == "Transformation input - electricity and heat generation - main activity producers") |
+      (freq == "Monthly" & nrg_bal == "Transformation input - electricity and heat generation -
+        main activity producers") |
         (freq == "Annual" & nrg_bal %in% c(
-          "Transformation input - electricity and heat generation - main activity producer electricity only - energy use",
-          "Transformation input - electricity and heat generation - main activity producer combined heat and power - energy use"
+          "Transformation input - electricity and heat generation -
+            main activity producer electricity only - energy use",
+          "Transformation input - electricity and heat generation -
+            main activity producer combined heat and power - energy use"
         )),
       grepl("Terajoule", unit),
       siec_code == SIEC_NATURAL_GAS
@@ -137,7 +146,8 @@ process_gas_yearly <- function(x, pwr_generation) {
 #' We use yearly ratio 'Gross inland deliveries - energy use' / 'Gross inland deliveries - observed'
 #' to update monthly data
 #'
-#' A more accurate way would be to predict this ratio using industrial production index (e.g. fertiliser, petrochemicals)
+#' A more accurate way would be to predict this ratio using industrial production index (e.g.
+#' fertiliser, petrochemicals)
 #' For a later version.
 #'
 #' @param cons_yearly_raw
@@ -218,7 +228,7 @@ fill_ng_elec_eu27 <- function(cons_monthly_raw) {
     filter(nrg_bal == nrg_bal_elec) %>%
     filter(iso2 %in% get_eu_iso2s()) %>%
     group_by(unit, time) %>%
-    summarise(values = sum(values, na.rm = T), .groups = "drop")
+    summarise(values = sum(values, na.rm = TRUE), .groups = "drop")
 
   eu27_ng_elec_old <- cons_monthly_raw %>%
     add_iso2() %>%

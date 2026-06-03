@@ -23,13 +23,14 @@ get_co2_from_eurostat_cons <- function(eurostat_cons,
       value_co2_tonne =
         case_when(
           unit == "Thousand tonnes" ~ values * ncv_kjkg / 1000 * co2_factor_t_per_TJ,
-          unit == "Terajoule (gross calorific value - GCV)" & fuel == FUEL_GAS ~ values * ncv_gcv_gas * co2_factor_t_per_TJ
+          unit == "Terajoule (gross calorific value - GCV)" & fuel == FUEL_GAS ~ values *
+            ncv_gcv_gas * co2_factor_t_per_TJ
         )
     ) %>%
     filter(!is.na(value_co2_tonne)) %>%
     group_by_at(group_by_cols) %>%
     summarise(
-      value = sum(value_co2_tonne, na.rm = T),
+      value = sum(value_co2_tonne, na.rm = TRUE),
       unit = "t",
       .groups = "drop"
     )

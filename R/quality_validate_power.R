@@ -15,9 +15,10 @@ validate_power <- function(pwr_generation = entsoe.get_power_generation(), folde
 
 
   filepath <- "data/ember_yearly_full_release_long_format.csv"
-  url <- "https://storage.googleapis.com/emb-prod-bkt-publicdata/public-downloads/yearly_full_release_long_format.csv"
+  url <- paste0("https://storage.googleapis.com/emb-prod-bkt-publicdata/",
+    "public-downloads/yearly_full_release_long_format.csv")
   if (!file.exists(filepath)) {
-    dir.create(dirname(filepath), showWarnings = FALSE, recursive = T)
+    dir.create(dirname(filepath), showWarnings = FALSE, recursive = TRUE)
     download.file(url, filepath)
   }
 
@@ -63,7 +64,7 @@ validate_power <- function(pwr_generation = entsoe.get_power_generation(), folde
       filter(country == "EU total", date < "2026-01-01") %>%
       group_by(year = year(date), source) %>%
       summarise(
-        value_twh = sum(value_mwh, na.rm = T) / 1e6,
+        value_twh = sum(value_mwh, na.rm = TRUE) / 1e6,
         data_source = "ENTSOE"
       )
   )
@@ -96,7 +97,7 @@ validate_power <- function(pwr_generation = entsoe.get_power_generation(), folde
     select(iso2, source, year, value_ember = Value) %>%
     left_join(pwr_generation %>%
       group_by(iso2, year = year(date), source) %>%
-      summarise(value_crea = sum(value_mwh, na.rm = T) / 1e6)) %>%
+      summarise(value_crea = sum(value_mwh, na.rm = TRUE) / 1e6)) %>%
     pivot_longer(c(value_ember, value_crea), names_to = "data_source", values_to = "value_twh") %>%
     ggplot() +
     geom_col(aes(iso2, value_twh, fill = data_source),
@@ -124,7 +125,7 @@ validate_power <- function(pwr_generation = entsoe.get_power_generation(), folde
       filter(date < "2026-01-01", source == "Total") %>%
       group_by(iso2, year = year(date)) %>%
       summarise(
-        value_twh = sum(value_mwh, na.rm = T) / 1e6,
+        value_twh = sum(value_mwh, na.rm = TRUE) / 1e6,
         data_source = "ENTSOE"
       )
   ) %>%

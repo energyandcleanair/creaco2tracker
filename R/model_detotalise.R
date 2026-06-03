@@ -3,8 +3,10 @@
 #'
 #' This is different from the split total elec:
 #' - it manages cases where the four "sectors" are available (used for oil and coal at the moment)
-#' - it works by date: i.e. the result could be a time period with only total sector over a certain period,
-#'  and sector-disaggregated values over the next period (e.g. for oil, where transport data is only available from 2011)
+#' - it works by date: i.e. the result could be a time period with only total sector over a certain
+#' period,
+#' and sector-disaggregated values over the next period (e.g. for oil, where transport data is only
+#' available from 2011)
 #'
 #'
 #' @param co2

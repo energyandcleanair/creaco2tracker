@@ -21,22 +21,26 @@
 #' @param station_source Source of station data (e.g., "gem"). Only used when region_type="station"
 #' @param date_from Start date for data retrieval (default: "2015-01-01")
 #' @param date_to End date for data retrieval (optional)
-#' @param use_local Logical, whether to use localhost:8080 instead of api.energyandcleanair.org (default: FALSE)
+#' @param use_local Logical, whether to use localhost:8080 instead of api.energyandcleanair.org
+#' (default: FALSE)
 #' @param use_cache Logical, whether to use cached data (default: TRUE)
 #' @param refresh_cache Logical, whether to refresh the cache (default: !use_cache)
 #' @param split_by Split API calls by year to avoid timeouts (default: "year")
 #' @param verbose Logical, whether to print verbose output (default: FALSE)
-#' @param aggregate_by Optional aggregation field (e.g., "region_iso2" to aggregate stations by country)
+#' @param aggregate_by Optional aggregation field (e.g., "region_iso2" to aggregate stations by
+#' country)
 #' @param aggregate_fn Optional aggregation function (e.g., "mean" for averaging)
 #'
-#' @return A data frame containing weather data with columns: date, variable, value, region_id, and other metadata
+#' @return A data frame containing weather data with columns: date, variable, value, region_id, and
+#' other metadata
 #'
 #' @examples
 #' # Get HDD and CDD for EU
 #' weather_eu <- get_weather(variable = "HDD,CDD", region_id = "EU")
 #'
 #' # Get solar radiation for Germany
-#' solar_de <- get_weather(variable = "solar_radiation", region_iso2 = "DE", region_type = "country")
+#' solar_de <- get_weather(variable = "solar_radiation", region_iso2 = "DE", region_type =
+#' "country")
 #'
 #' # Get wind speed from stations for France
 #' wind_fr <- get_weather(
@@ -48,19 +52,21 @@
 #' weather_local <- get_weather(variable = "HDD", region_id = "EU", use_local = TRUE)
 #'
 #' @export
-get_weather <- function(variable = "HDD,CDD",
-                        region_type = "country",
-                        region_id = NULL,
-                        region_iso2 = NULL,
-                        station_source = NULL,
-                        date_from = "2015-01-01",
-                        date_to = NULL,
-                        use_local = FALSE,
-                        use_cache = TRUE,
-                        split_by = "year",
-                        verbose = FALSE,
-                        aggregate_by = NULL,
-                        aggregate_fn = NULL) {
+get_weather <- function(
+  variable = "HDD,CDD",
+  region_type = "country",
+  region_id = NULL,
+  region_iso2 = NULL,
+  station_source = NULL,
+  date_from = "2015-01-01",
+  date_to = NULL,
+  use_local = FALSE,
+  use_cache = TRUE,
+  split_by = "year",
+  verbose = FALSE,
+  aggregate_by = NULL,
+  aggregate_fn = NULL
+) {
   # Build base URL
   base_url <- ifelse(use_local, "http://localhost:8080", "https://api.energyandcleanair.org")
   endpoint <- glue::glue("{base_url}/v1/weather")
@@ -72,7 +78,8 @@ get_weather <- function(variable = "HDD,CDD",
     date_from = date_from,
     split_by = split_by,
     # The meaning of use_cache is different
-    # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means weather or not to invalidate it
+    # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means
+    # weather or not to invalidate it
     use_cache = TRUE,
     refresh_cache = !use_cache,
     cache_folder = "cache",
@@ -124,7 +131,8 @@ get_weather <- function(variable = "HDD,CDD",
 #' Takes raw weather data from API and fills missing values using forward fill method.
 #' This function handles the data cleaning and gap filling for HDD and CDD data.
 #'
-#' @param weather_raw A data frame containing raw weather data with columns: date, variable (hdd/cdd),
+#' @param weather_raw A data frame containing raw weather data with columns: date, variable
+#' (hdd/cdd),
 #'                    value, region_id, and other metadata
 #'
 #' @return A data frame with filled weather data
@@ -137,7 +145,8 @@ fill_weather <- function(weather_raw) {
   # Fill na values using forward fill method
   weather_raw %>%
     mutate(date = lubridate::date(date)) %>%
-    group_by(variable, unit, region_id, region_type, region_iso2, averaging_period, source, region_name) %>%
+    group_by(variable, unit, region_id, region_type, region_iso2, averaging_period, source,
+      region_name) %>%
     group_modify(function(df, ...) {
       df %>%
         arrange(date) %>%
@@ -161,7 +170,8 @@ fill_weather <- function(weather_raw) {
 #' Creates focused weather diagnostics including yearly trends and tilemap visualizations
 #' to identify anomalies and missing data in HDD and CDD data.
 #'
-#' @param weather A data frame containing filled weather data with columns: date, variable (hdd/cdd),
+#' @param weather A data frame containing filled weather data with columns: date, variable
+#' (hdd/cdd),
 #'                value, region_id, and other metadata
 #' @param weather_raw A data frame containing raw weather data (before filling)
 #' @param diagnostics_folder Path to save diagnostic plots and outputs
@@ -173,7 +183,7 @@ diagnose_weather <- function(weather,
                              weather_raw = NULL,
                              diagnostics_folder = "diagnostics") {
   # Create diagnostics directory if it doesn't exist
-  if (!is.null(diagnostics_folder) & !dir.exists(diagnostics_folder)) {
+  if (!is.null(diagnostics_folder) && !dir.exists(diagnostics_folder)) {
     dir.create(diagnostics_folder, recursive = TRUE)
   }
 
@@ -188,7 +198,7 @@ diagnose_weather <- function(weather,
     group_by(region_id, variable) %>%
     mutate(
       plotdate = date %>% "year<-"(2000),
-      across(value, zoo::rollapplyr, FUN = mean, width = 30, fill = NA, na.rm = T)
+      across(value, zoo::rollapplyr, FUN = mean, width = 30, fill = NA, na.rm = TRUE)
     )
 
   plt <- running_plot_data %>%
@@ -210,7 +220,8 @@ diagnose_weather <- function(weather,
     scale_color_crea_d("change", col.index = c(7, 1), guide = "none") +
     scale_alpha_discrete(
       range = c(.33, 1),
-      # guide=guide_legend(nrow=1, override.aes = list(alpha=1, color=c('gray66', 'gray33', 'black')), title.position = 'left')
+      # guide=guide_legend(nrow=1, override.aes = list(alpha=1, color=c('gray66', 'gray33',
+      # 'black')), title.position = 'left')
     ) +
     scale_x_date(date_labels = "%b", expand = expansion(mult = .01)) +
     rcrea::scale_y_crea_zero() +

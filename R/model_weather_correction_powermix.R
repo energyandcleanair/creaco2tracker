@@ -12,7 +12,8 @@
 #' @param iso2s Character vector of ISO2 country codes or "EU" for EU aggregate
 #' @param date_from Start date (YYYY-MM-DD)
 #' @param date_to End date (YYYY-MM-DD), defaults to current date
-#' @param sources Character vector of renewable sources to correct. Default c("hydro", "solar", "wind")
+#' @param sources Character vector of renewable sources to correct. Default c("hydro", "solar",
+#' "wind")
 #' @param use_cache Logical, use cached data for weather corrections
 #' @param diagnostics_folder Optional folder path for saving diagnostic plots
 #'
@@ -69,7 +70,8 @@ get_weather_correction_powermix <- function(iso2s = "EU",
     diagnostics_folder = diagnostics_folder
   )
 
-  write_csv(weather_corrected_renewables, file.path(diagnostics_folder, "weather_corrected_renewables.csv"))
+  write_csv(weather_corrected_renewables, file.path(diagnostics_folder,
+    "weather_corrected_renewables.csv"))
 
   if (nrow(weather_corrected_renewables) == 0) {
     warning("No renewable generation data available")
@@ -84,7 +86,8 @@ get_weather_correction_powermix <- function(iso2s = "EU",
     diagnostics_folder = diagnostics_folder
   )
 
-  message(sprintf("Weather correction complete. Generated %d correction factors.", nrow(correction_factors)))
+  message(sprintf("Weather correction complete. Generated %d correction factors.",
+    nrow(correction_factors)))
 
   result <- list(
     weather_corrected_renewables = weather_corrected_renewables,
@@ -226,7 +229,8 @@ calculate_powermix_correction_factors <- function(
     pivot_wider(names_from = source_category, values_from = value_mwh, values_fill = 0) %>%
     left_join(renewable_agg %>% select(iso2, year, renewable_delta_mwh), by = c("iso2", "year")) %>%
     group_by(iso2) %>%
-    mutate(emission_correction_factor = calculate_powermix_correction_factor(thermal, renewable_delta_mwh)) %>%
+    mutate(emission_correction_factor = calculate_powermix_correction_factor(thermal,
+      renewable_delta_mwh)) %>%
     mutate(sector = SECTOR_ELEC) %>%
     select(iso2, year, sector, emission_correction_factor)
 
@@ -237,7 +241,8 @@ calculate_powermix_correction_factors <- function(
   return(correction_factors)
 }
 
-plot_weather_correction_factors <- function(correction_factors, diagnostics_folder = "diagnostics/weather_correction") {
+plot_weather_correction_factors <- function(correction_factors, diagnostics_folder =
+  "diagnostics/weather_correction") {
   create_dir(diagnostics_folder)
   limit <- max(abs(correction_factors$emission_correction_factor))
 
@@ -245,7 +250,8 @@ plot_weather_correction_factors <- function(correction_factors, diagnostics_fold
     geom_tile(aes(fill = emission_correction_factor)) +
     geom_text(aes(label = sprintf("%.2f", emission_correction_factor)), size = 2.5) +
     facet_wrap(~ sector_code_to_label(sector)) +
-    scale_fill_gradient2(low = "red", mid = "white", high = "green", midpoint = 1, na.value = "grey90") +
+    scale_fill_gradient2(low = "red", mid = "white", high = "green", midpoint = 1, na.value =
+      "grey90") +
     labs(
       title = "Weather Correction Factors",
       x = "Year",
@@ -273,7 +279,8 @@ plot_weather_correction_factors <- function(correction_factors, diagnostics_fold
 #'
 #' @return ggplot object
 #' @keywords internal
-plot_renewable_correction_by_source <- function(renewable_agg_by_source, diagnostics_folder = "diagnostics/weather_correction") {
+plot_renewable_correction_by_source <- function(renewable_agg_by_source, diagnostics_folder =
+  "diagnostics/weather_correction") {
   create_dir(diagnostics_folder)
 
   # Calculate average correction for ordering countries

@@ -7,9 +7,10 @@ library(tidyr)
 
 # Mock data creation functions
 create_growing_trend_data <- function(value_init = 0, add_per_period = 100,
-                                     date_min = as.Date("2020-01-01"), date_max = as.Date("2020-05-01"),
-                                     by = "month", # "day" or "month"
-                                     fuels = c("coal", "gas"), sectors = c("electricity", "all")) {
+                                      date_min = as.Date("2020-01-01"), date_max =
+                                        as.Date("2020-05-01"),
+                                      by = "month", # "day" or "month"
+                                      fuels = c("coal", "gas"), sectors = c("electricity", "all")) {
   # Create sequence based on period type
   date_sequence <- seq.Date(date_min, date_max, by = by)
 
@@ -32,8 +33,9 @@ create_growing_trend_data <- function(value_init = 0, add_per_period = 100,
 }
 
 create_pwr_generation_mock <- function(value_init = 0, add_daily = 10,
-                                      date_min = as.Date("2020-01-01"), date_max = as.Date("2020-07-15"),
-                                      fuels = c("coal", "gas"), sectors = c("electricity")) {
+                                       date_min = as.Date("2020-01-01"), date_max =
+                                         as.Date("2020-07-15"),
+                                       fuels = c("coal", "gas"), sectors = c("electricity")) {
   # Map fuels to power generation sources
   fuel_to_source <- c("coal" = "Coal", "gas" = "Fossil Gas")
 
@@ -61,8 +63,9 @@ create_pwr_generation_mock <- function(value_init = 0, add_daily = 10,
 }
 
 create_gas_demand_mock <- function(value_init = 0, add_daily = 2,
-                                  date_min = as.Date("2020-01-01"), date_max = as.Date("2020-07-15"),
-                                  fuels = c("gas"), sectors = c("all")) {
+                                   date_min = as.Date("2020-01-01"), date_max =
+                                     as.Date("2020-07-15"),
+                                   fuels = c("gas"), sectors = c("all")) {
   # Use the unified trend data function for daily data
   trend_data <- create_growing_trend_data(
     value_init = value_init,
@@ -83,8 +86,9 @@ create_gas_demand_mock <- function(value_init = 0, add_daily = 2,
 }
 
 create_eurostat_cons_mock <- function(value_init = 0, add_daily = 100,
-                                     date_min = as.Date("2020-01-01"), date_max = as.Date("2020-05-01"),
-                                     fuels = c("coal", "gas"), sectors = c("electricity", "all")) {
+                                      date_min = as.Date("2020-01-01"), date_max =
+                                        as.Date("2020-05-01"),
+                                      fuels = c("coal", "gas"), sectors = c("electricity", "all")) {
   # Create daily data first, then sum to monthly
   # Ensure date_max represents the last day of the month
   actual_date_max <- ceiling_date(date_max, "month") - 1
@@ -124,7 +128,6 @@ create_eurostat_cons_mock <- function(value_init = 0, add_daily = 100,
 
 
 test_that("Projection and downscaling work well together", {
-
   # We set up a case where eurostat, pwr_generation and gas_demand
   # grow at a constant incremental value per day
   # The linear relationship between the monthly values
@@ -143,14 +146,16 @@ test_that("Projection and downscaling work well together", {
     add_daily = 10,
     date_min = as.Date("2024-01-01"), date_max = as.Date("2025-07-15")
   )
-  ggplot(pwr_generation, aes(x = date, y = value_mw, color = fuel)) + geom_line()
+  ggplot(pwr_generation, aes(x = date, y = value_mw, color = fuel)) +
+    geom_line()
 
   gas_demand <- create_gas_demand_mock(
     value_init = 0,
     add_daily = 2,
     date_min = as.Date("2024-01-01"), date_max = as.Date("2025-07-15")
   )
-  ggplot(gas_demand, aes(x = date, y = value, color = fuel)) + geom_line()
+  ggplot(gas_demand, aes(x = date, y = value, color = fuel)) +
+    geom_line()
 
   eurostat_cons <- create_eurostat_cons_mock(
     value_init = 0,
@@ -158,7 +163,10 @@ test_that("Projection and downscaling work well together", {
     date_min = as.Date("2024-01-01"),
     date_max = as.Date("2025-05-01")
   )
-  ggplot(eurostat_cons %>% filter(sector=='electricity'), aes(x = time, y = values, color = fuel)) + geom_line() + geom_point()
+  ggplot(eurostat_cons %>% filter(sector == "electricity"), aes(x = time, y = values, color =
+    fuel)) +
+    geom_line() +
+    geom_point()
 
   # Minimal eurostat_indprod (unused in this scenario)
   eurostat_indprod <- tibble(
@@ -176,7 +184,9 @@ test_that("Projection and downscaling work well together", {
     diagnostics_folder = NULL,
     ncv_source = "ipcc"
   )
-  ggplot(co2_unprojected, aes(x = date, y = value, color = fuel)) + geom_line() + geom_point()
+  ggplot(co2_unprojected, aes(x = date, y = value, color = fuel)) +
+    geom_line() +
+    geom_point()
 
 
   # Test individual projection functions
@@ -195,13 +205,17 @@ test_that("Projection and downscaling work well together", {
     dts_month = projection_months
   )
 
-  ggplot(bind_rows(co2_gas_projected %>% mutate(type='projected'),
-                   co2_unprojected %>% mutate(type='unprojected')),
-         aes(x = date, y = value, color = fuel, linetype=type, size=type)) +
+  ggplot(
+    bind_rows(
+      co2_gas_projected %>% mutate(type = "projected"),
+      co2_unprojected %>% mutate(type = "unprojected")
+    ),
+    aes(x = date, y = value, color = fuel, linetype = type, size = type)
+  ) +
     geom_line() +
     geom_point() +
     facet_wrap(~sector) +
-    scale_size_manual(values=c('projected'=0.5, 'unprojected'=1))
+    scale_size_manual(values = c("projected" = 0.5, "unprojected" = 1))
 
   # Combine the projected results
   co2_monthly <- bind_rows(
@@ -211,7 +225,7 @@ test_that("Projection and downscaling work well together", {
     # We remove duplicates that are due to using both methods in parallel
     # rather than sequentially
     # For some reasons, there is an epsilon diff, hence our rounding
-    mutate(value = round(value, digits=2)) %>%
+    mutate(value = round(value, digits = 2)) %>%
     dplyr::distinct(iso2, date, fuel, sector, unit, value, .keep_all = TRUE) %>%
     mutate(estimate = "central")
 
@@ -220,7 +234,8 @@ test_that("Projection and downscaling work well together", {
   expect_true(setequal(projection_months, projected_months))
 
   # Then downscale to daily
-  co2_daily <- downscale_daily(co2_monthly, pwr_generation = pwr_generation, gas_demand = gas_demand, cut_latest_days=0)
+  co2_daily <- downscale_daily(co2_monthly, pwr_generation = pwr_generation, gas_demand =
+    gas_demand, cut_latest_days = 0)
 
   # Test 3: Check that daily data covers the expected date range
   co2_daily_valid_dates <- co2_daily %>%
@@ -242,17 +257,16 @@ test_that("Projection and downscaling work well together", {
     group_by(fuel, sector) %>%
     arrange(desc(date)) %>%
     mutate(
-      delta = value - lag(value)) %>%
+      delta = value - lag(value)
+    ) %>%
     group_by(fuel, sector) %>%
-    summarise(delta_mean = mean(delta, na.rm = TRUE),
-              delta_sd = sd(delta, na.rm = TRUE),
-              .groups = "drop")
+    summarise(
+      delta_mean = mean(delta, na.rm = TRUE),
+      delta_sd = sd(delta, na.rm = TRUE),
+      .groups = "drop"
+    )
 
   # Except for coal sector= all, the sd should be very close to 0
-  expect_true(max(abs(deltas$delta_sd[deltas$fuel != FUEL_COAL | deltas$sector != SECTOR_ALL])) < 0.1)
+  expect_true(max(abs(deltas$delta_sd[deltas$fuel != FUEL_COAL |
+    deltas$sector != SECTOR_ALL])) < 0.1)
 })
-
-
-
-
-

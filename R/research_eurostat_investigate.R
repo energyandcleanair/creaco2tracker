@@ -8,10 +8,10 @@ investigate_oil <- function(monthly_oil, monthly_filled_oil, yearly_oil, yearly_
     filter(nrg_bal_code %in% c("INTMARB") &
       siec_code %in% c(SIEC_FUEL_OIL, SIEC_GASOIL_DIESEL_XBIO)) %>%
     add_iso2() %>%
-    filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+    filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
     mutate(is_eu = iso2 == "EU") %>%
     group_by(is_eu, time, siec_code) %>%
-    summarise(values = sum(values, na.rm = T), n = n()) %>%
+    summarise(values = sum(values, na.rm = TRUE), n = n()) %>%
     arrange(desc(time)) %>%
     ggplot() +
     geom_line(aes(time, values, col = is_eu)) +
@@ -21,7 +21,7 @@ investigate_oil <- function(monthly_oil, monthly_filled_oil, yearly_oil, yearly_
     filter(nrg_bal_code %in% c("INTMARB") &
       siec_code %in% c(SIEC_FUEL_OIL)) %>%
     add_iso2() %>%
-    filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+    filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
     select(iso2, time, values) %>%
     spread(iso2, values) %>%
     arrange(desc(time)) %>%
@@ -31,7 +31,8 @@ investigate_oil <- function(monthly_oil, monthly_filled_oil, yearly_oil, yearly_
   # Discrepancy monthly - yearly
   bind_rows(
     # monthly_oil,
-    fill_oil_non_energy_use_monthly(yearly_filled_oil, monthly_oil) %>% mutate(freq = "Monthly filled"),
+    fill_oil_non_energy_use_monthly(yearly_filled_oil, monthly_oil) %>% mutate(freq =
+      "Monthly filled"),
     yearly_filled_oil
   ) %>%
     add_iso2() %>%
@@ -51,7 +52,7 @@ investigate_oil <- function(monthly_oil, monthly_filled_oil, yearly_oil, yearly_
       year = year(time)
     ) %>%
     summarise(
-      values = sum(values, na.rm = T),
+      values = sum(values, na.rm = TRUE),
       n = n()
     ) %>%
     filter(n == 12 | freq == "Annual") %>%
@@ -69,7 +70,8 @@ investigate_oil <- function(monthly_oil, monthly_filled_oil, yearly_oil, yearly_
         & siec_code %in% c(SIEC_ROAD_DIESEL, SIEC_MOTOR_GASOLINE_XBIO)) |
 
         # SECTOR_TRANSPORT: Kerosene
-        (nrg_bal_code %in% c("FC_TRA_DAVI_E", "INTAVI_E", "INTAVI_E+FC_TRA_DAVI_E") # Added in add_oil_transport function
+        (nrg_bal_code %in% c("FC_TRA_DAVI_E", "INTAVI_E",
+          "INTAVI_E+FC_TRA_DAVI_E") # Added in add_oil_transport function
         & siec_code %in% c(SIEC_KEROSENE_XBIO, SIEC_AVIATION_GASOLINE))
 
       # SECTOR_TRANSPORT: International maritime bunkers
@@ -98,7 +100,7 @@ investigate_oil <- function(monthly_oil, monthly_filled_oil, yearly_oil, yearly_
     ) %>%
     group_by(freq, year = year(time), siec_code, nrg_bal_code) %>%
     summarise(
-      values = sum(values, na.rm = T),
+      values = sum(values, na.rm = TRUE),
       .groups = "drop"
     ) %>%
     ggplot() +
@@ -142,12 +144,12 @@ investigate_coking_france <- function(monthly_solid, indprod) {
 
   indprod %>%
     filter(geo == "France") %>%
-    filter(grepl("coke", nace_r2, ignore.case = T)) %>%
+    filter(grepl("coke", nace_r2, ignore.case = TRUE)) %>%
     distinct(nace_r2_code)
 }
 
 investigate_solid <- function(monthly_solid, yearly_solid) {
-  solid <- collect_solid(T)
+  solid <- collect_solid(TRUE)
 
   result_monthly <- process_solid_monthly(solid$monthly, pwr_generation)
   result_yearly <- process_solid_yearly(solid$yearly)
@@ -161,7 +163,7 @@ investigate_solid <- function(monthly_solid, yearly_solid) {
       grepl("Europ", geo),
     ) %>%
     group_by(geo, time = floor_date(time, "year"), siec, sector, fuel, freq) %>%
-    summarise(values = sum(values, na.rm = T)) %>%
+    summarise(values = sum(values, na.rm = TRUE)) %>%
     ggplot() +
     geom_line(aes(time, values, color = sector, linetype = freq)) +
     facet_wrap(~siec) +
@@ -171,7 +173,7 @@ investigate_solid <- function(monthly_solid, yearly_solid) {
   # Compare sum of countries vs EU
   result_monthly %>%
     add_iso2() %>%
-    filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+    filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
     mutate(is_eu = case_when(iso2 == "EU" ~ "EU", TRUE ~ "EU member states")) %>%
     group_by(
       siec,
@@ -179,7 +181,7 @@ investigate_solid <- function(monthly_solid, yearly_solid) {
       time,
       is_eu
     ) %>%
-    summarise(value = sum(values, na.rm = T)) %>%
+    summarise(value = sum(values, na.rm = TRUE)) %>%
     ggplot() +
     geom_line(aes(time, value, color = is_eu, linetype = is_eu)) +
     facet_wrap(siec ~ sector, scales = "free_y")
@@ -188,7 +190,7 @@ investigate_solid <- function(monthly_solid, yearly_solid) {
   # Data availability: hard coal stops very early for EU
   result_monthly %>%
     add_iso2() %>%
-    filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+    filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
     filter(!is.na(values)) %>%
     group_by(
       siec,
@@ -208,12 +210,12 @@ investigate_solid <- function(monthly_solid, yearly_solid) {
     pwr_generation %>%
       filter(source == "Coal", iso2 == "SI") %>%
       group_by(time = floor_date(date, "month"), type = "coal power") %>%
-      summarise(values = sum(value_mwh, na.rm = T)),
+      summarise(values = sum(value_mwh, na.rm = TRUE)),
     result_monthly %>%
       add_iso2() %>%
       filter(iso2 == "SI", sector == SECTOR_ELEC) %>%
       group_by(time, type = "solid fuel") %>%
-      summarise(values = sum(values, na.rm = T))
+      summarise(values = sum(values, na.rm = TRUE))
   ) %>%
     group_by(type) %>%
     mutate(values = values / values[time == "2020-01-01"]) %>%
@@ -247,8 +249,10 @@ investigate_coking_emissions <- function(yearly_solid) {
 
   # Compute the ratio of hard coal emissions that should be accounted for
   # to account for coke oven gas (which is not available in monthly data)
-  hardcoal_coking_emissions <- get_co2_from_eurostat_cons(hardcoal_coking %>% mutate(fuel = FUEL_COAL, sector = SECTOR_ALL))
-  coke_gas_emissions <- get_co2_from_eurostat_cons(coke_gas %>% mutate(fuel = FUEL_GAS, sector = SECTOR_ALL))
+  hardcoal_coking_emissions <- get_co2_from_eurostat_cons(hardcoal_coking %>% mutate(fuel =
+    FUEL_COAL, sector = SECTOR_ALL))
+  coke_gas_emissions <- get_co2_from_eurostat_cons(coke_gas %>% mutate(fuel = FUEL_GAS, sector =
+    SECTOR_ALL))
 
   bind_rows(
     hardcoal_coking_emissions,
@@ -273,5 +277,5 @@ investigate_coking_emissions <- function(yearly_solid) {
     mutate(ratio = gas / coal) %>%
     filter(ratio != 0) %>%
     group_by(iso2) %>%
-    summarise(ratio = mean(ratio, na.rm = T))
+    summarise(ratio = mean(ratio, na.rm = TRUE))
 }

@@ -26,7 +26,7 @@ diagnostic_pwr <- function(pwr_generation, diagnostics_folder = "diagnostics") {
     plt <- plt_data %>%
       filter(date < max(date) - 3, year %in% 2023:2024, country == "EU total") %>%
       group_by(country) %>%
-      filter(mean(value_mw, na.rm = T) > 1e3) %>%
+      filter(mean(value_mw, na.rm = TRUE) > 1e3) %>%
       ggplot(aes(plotdate)) +
       facet_wrap(~source, scales = "free_y") +
       geom_ribbon(
@@ -119,7 +119,8 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly,
         rcrea::scale_y_crea_zero()
 
       ggsave(
-        filename = file.path(diagnostics_folder, glue("eurostat_annual_vs_monthly_yearly_{tolower(iso2)}.png")),
+        filename = file.path(diagnostics_folder,
+          glue("eurostat_annual_vs_monthly_yearly_{tolower(iso2)}.png")),
         plot = plt,
         width = 10,
         height = 8,
@@ -155,7 +156,8 @@ diagnostic_eurostat_cons_yearly_monthly <- function(cons_yearly,
   }
 }
 
-diagnostic_eurostat_cons <- function(eurostat_cons, iso2s = NULL, diagnostics_folder = "diagnostics") {
+diagnostic_eurostat_cons <- function(eurostat_cons, iso2s = NULL, diagnostics_folder =
+  "diagnostics") {
   # Plot heatmap of consumption by sector
   if (!is_null_or_empty(diagnostics_folder)) {
     create_dir(diagnostics_folder)
@@ -200,11 +202,11 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s = NULL, diagnostics_fo
 
     # Check data availability
     (eurostat_cons %>%
-      filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+      filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
       group_by(iso2, sector, fuel) %>%
       summarise(max_date = max(time)) %>%
       ggplot(aes(max_date, iso2)) +
-      geom_bar(stat = "identity", aes(fill = iso2 == "EU"), show.legend = F) +
+      geom_bar(stat = "identity", aes(fill = iso2 == "EU"), show.legend = FALSE) +
       geom_text(
         data = function(x) filter(x, iso2 == "EU"),
         aes(label = max_date),
@@ -237,7 +239,8 @@ diagnostic_eurostat_cons <- function(eurostat_cons, iso2s = NULL, diagnostics_fo
   }
 }
 
-diagnostic_eurostat_indprod <- function(eurostat_indprod, iso2s, diagnostics_folder = "diagnostics") {
+diagnostic_eurostat_indprod <- function(eurostat_indprod, iso2s, diagnostics_folder =
+  "diagnostics") {
   # Plot heatmap of consumption by sector
   if (!is_null_or_empty(diagnostics_folder)) {
     create_dir(diagnostics_folder)
@@ -252,11 +255,11 @@ diagnostic_eurostat_indprod <- function(eurostat_indprod, iso2s, diagnostics_fol
         unit == "Index, 2021=100",
         grepl("Calendar adjusted data", s_adj)
       ) %>%
-      filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+      filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
       group_by(iso2, nace_r2_code) %>%
       summarise(max_date = max(time)) %>%
       ggplot(aes(max_date, iso2)) +
-      geom_bar(stat = "identity", aes(fill = iso2 == "EU"), show.legend = F) +
+      geom_bar(stat = "identity", aes(fill = iso2 == "EU"), show.legend = FALSE) +
       geom_text(
         data = function(x) filter(x, iso2 == "EU"),
         aes(label = max_date),
@@ -300,7 +303,7 @@ diagnose_eu_vs_countries <- function(
 
     # Power demand --------------------------------------------------
     plt_data <- pwr_generation %>%
-      filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+      filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
       mutate(is_eu = case_when(iso2 == "EU" ~ "EU", TRUE ~ "EU member states")) %>%
       filter(date >= "2015-01-01") %>%
       group_by(
@@ -308,18 +311,18 @@ diagnose_eu_vs_countries <- function(
         year = year(date),
         is_eu
       ) %>%
-      summarise(value = sum(value_mwh, na.rm = T) / 1e6) %>%
+      summarise(value = sum(value_mwh, na.rm = TRUE) / 1e6) %>%
       arrange(desc(year))
 
 
     plt_data %>%
       group_by(source) %>%
       ggplot(aes(year, value, col = is_eu)) +
-      geom_line(show.legend = F) +
+      geom_line(show.legend = FALSE) +
       ggrepel::geom_text_repel(
         data = . %>% filter(year == max(year)),
         aes(label = is_eu), nudge_x = 0.5, nudge_y = 0.5,
-        show.legend = F,
+        show.legend = FALSE,
         # hide segment
         segment.color = NA,
         # vertically aligned
@@ -344,13 +347,13 @@ diagnose_eu_vs_countries <- function(
       ) -> plt
     quicksave(file.path(diagnostics_folder, "eu_vs_countries_power.png"),
       plot = plt,
-      width = 10, height = 8, bg = "white", scale = 1.5, preview = F
+      width = 10, height = 8, bg = "white", scale = 1.5, preview = FALSE
     )
 
 
     # Eurostat --------------------------------------------------
     plt_data <- eurostat_cons %>%
-      filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+      filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
       mutate(is_eu = case_when(iso2 == "EU" ~ "EU", TRUE ~ "EU member states")) %>%
       filter(time >= "2015-01-01") %>%
       group_by(
@@ -360,7 +363,7 @@ diagnose_eu_vs_countries <- function(
         is_eu
       ) %>%
       summarise(
-        value = sum(values, na.rm = T),
+        value = sum(values, na.rm = TRUE),
         n_iso2 = n_distinct(iso2)
       ) %>%
       arrange(desc(time))
@@ -368,11 +371,11 @@ diagnose_eu_vs_countries <- function(
     plt_data %>%
       group_by(siec, sector, is_eu) %>%
       ggplot(aes(time, value, col = is_eu, linetype = is_eu)) +
-      geom_line(show.legend = F) +
+      geom_line(show.legend = FALSE) +
       ggrepel::geom_text_repel(
         data = . %>% filter(time == max(time)),
         aes(label = is_eu), nudge_x = 0.5, nudge_y = 0.5,
-        show.legend = F,
+        show.legend = FALSE,
         # hide segment
         segment.color = NA,
         # vertically aligned
@@ -398,14 +401,14 @@ diagnose_eu_vs_countries <- function(
 
     quicksave(file.path(diagnostics_folder, "eu_vs_countries_eurostat.png"),
       plot = plt,
-      width = 10, height = 8, bg = "white", scale = 1.5, preview = F
+      width = 10, height = 8, bg = "white", scale = 1.5, preview = FALSE
     )
 
 
     # CO2 filled ---------------------------------------------------
     plt_data <- co2 %>%
       detotalise_co2() %>%
-      filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+      filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
       mutate(is_eu = case_when(iso2 == "EU" ~ "EU", TRUE ~ "EU member states")) %>%
       filter(date >= "2015-01-01") %>%
       group_by(
@@ -416,7 +419,7 @@ diagnose_eu_vs_countries <- function(
         estimate
       ) %>%
       summarise(
-        value = sum(value, na.rm = T) / 1e9,
+        value = sum(value, na.rm = TRUE) / 1e9,
         n_iso2 = n_distinct(iso2)
       ) %>%
       arrange(desc(date)) %>%
@@ -432,7 +435,7 @@ diagnose_eu_vs_countries <- function(
       plt_data %>%
         group_by(is_eu, date) %>%
         summarise(
-          value = sum(value, na.rm = T),
+          value = sum(value, na.rm = TRUE),
           fuel = "total",
           sector = "all",
           is_projected = any(is_projected)
@@ -444,7 +447,7 @@ diagnose_eu_vs_countries <- function(
       group_by(sector, fuel, is_eu) %>%
       arrange(date) %>%
       filter(!is_projected & lead(is_projected)) %>%
-      mutate(is_projected = T) %>%
+      mutate(is_projected = TRUE) %>%
       bind_rows(plt_data) -> plt_data
 
 
@@ -452,7 +455,7 @@ diagnose_eu_vs_countries <- function(
     plt_data %>%
       group_by(fuel) %>%
       ggplot(aes(date, value, col = is_eu, linetype = is_projected)) +
-      geom_line(show.legend = T) +
+      geom_line(show.legend = TRUE) +
       # ggrepel::geom_text_repel(
       #   data = . %>% filter(date==max(date)),
       #   aes(label=is_eu),
@@ -487,14 +490,14 @@ diagnose_eu_vs_countries <- function(
       ) -> plt
     quicksave(file.path(diagnostics_folder, "eu_vs_countries_co2_filled.png"),
       plot = plt,
-      width = 10, height = 8, bg = "white", scale = 1.8, preview = F
+      width = 10, height = 8, bg = "white", scale = 1.8, preview = FALSE
     )
 
 
     # CO2 before projection ---------------------------------------------------
     plt_data <- co2_unprojected %>%
       detotalise_co2() %>%
-      filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+      filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
       {
         n_countries <- n_distinct(.$iso2)
         print(n_countries)
@@ -509,7 +512,7 @@ diagnose_eu_vs_countries <- function(
         date = floor_date(date, "month"),
         is_eu
       ) %>%
-      summarise(value = sum(value, na.rm = T) / 1e9) %>%
+      summarise(value = sum(value, na.rm = TRUE) / 1e9) %>%
       arrange(desc(date))
 
     # Add total
@@ -518,7 +521,7 @@ diagnose_eu_vs_countries <- function(
       plt_data %>%
         group_by(is_eu, date) %>%
         summarise(
-          value = sum(value, na.rm = T),
+          value = sum(value, na.rm = TRUE),
           fuel = "total",
           sector = "all"
         )
@@ -528,11 +531,11 @@ diagnose_eu_vs_countries <- function(
     plt_data %>%
       group_by(fuel) %>%
       ggplot(aes(date, value, col = is_eu, linewidth = is_eu, alpha = is_eu)) +
-      geom_line(show.legend = F) +
+      geom_line(show.legend = FALSE) +
       ggrepel::geom_text_repel(
         data = . %>% filter(date == max(date)),
         aes(label = is_eu), nudge_x = 0.5, nudge_y = 0.5,
-        show.legend = F,
+        show.legend = FALSE,
         # hide segment
         segment.color = NA,
         # vertically aligned
@@ -568,7 +571,7 @@ diagnose_eu_vs_countries <- function(
     plt
     quicksave(file.path(diagnostics_folder, "eu_vs_countries_co2.png"),
       plot = plt,
-      width = 10, height = 8, bg = "white", scale = 1.5, preview = F
+      width = 10, height = 8, bg = "white", scale = 1.5, preview = FALSE
     )
   }
 }

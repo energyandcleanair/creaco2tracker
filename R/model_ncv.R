@@ -26,39 +26,46 @@ add_siec_code_to_iea <- function(conversion_raw) {
   siec_fuel <- create_siec_fuel_mapping()
 
   conversion_raw %>%
-    right_join(siec_fuel, by="product_raw", relationship='many-to-many')
+    right_join(siec_fuel, by = "product_raw", relationship = "many-to-many")
 }
 
 # Function to process and clean conversion factors
 process_conversion_factors <- function(conversion_raw) {
   # Brown coal consists of the addition of lignite and sub-bituminous coal.
-  # In 2021, lignite made up 99.6 % of the brown coal consumed in the EU,and sub-bituminous coal 0.4 %.
-  # https://ec.europa.eu/eurostat/statistics-explained/index.php?title=Production_of_lignite_in_the_Western_Balkans_-_statistics&oldid=627763
+  # In 2021, lignite made up 99.6% of the brown coal consumed in the EU,
+  # and sub-bituminous coal 0.4%.
+  # https://ec.europa.eu/eurostat/statistics-explained/index.php?
+  # title=Production_of_lignite_in_the_Western_Balkans_-_statistics&oldid=627763
   conversion <- conversion_raw %>%
-    filter(flow_raw=="NAVERAGE", unit=="KJ_KG", iso2 %in% get_eu_iso2s()) %>%
+    filter(flow_raw == "NAVERAGE", unit == "KJ_KG", iso2 %in% get_eu_iso2s()) %>%
     add_siec_code_to_iea() %>%
     filter(!is.na(value)) %>%
-    mutate(source="IEA") %>%
+    mutate(source = "IEA") %>%
     group_by(iso2, siec_code, year) %>%
-    summarise(ncv_kjkg=mean(value),
-              source="IEA",
-              .groups="drop"
+    summarise(
+      ncv_kjkg = mean(value),
+      source = "IEA",
+      .groups = "drop"
     ) %>%
     filter(!is.na(siec_code))
 
   # Remove outliers using z-score method
   conversion <- conversion %>%
     group_by(siec_code, iso2) %>%
-    summarise(ncv_kjkg=mean(ncv_kjkg),
-              .groups="drop") %>%
+    summarise(
+      ncv_kjkg = mean(ncv_kjkg),
+      .groups = "drop"
+    ) %>%
     group_by(siec_code) %>%
-    mutate(zscore=
-             case_when(
-               sd(ncv_kjkg)==0 ~ 0,
-               T ~ (ncv_kjkg-mean(ncv_kjkg))/sd(ncv_kjkg))
+    mutate(
+      zscore =
+        case_when(
+          sd(ncv_kjkg) == 0 ~ 0,
+          T ~ (ncv_kjkg - mean(ncv_kjkg)) / sd(ncv_kjkg)
+        )
     ) %>%
     arrange(desc(zscore)) %>%
-    filter(abs(zscore)<2) %>%
+    filter(abs(zscore) < 2) %>%
     select(-zscore, -ncv_kjkg) %>%
     left_join(conversion) %>%
     ungroup()
@@ -71,14 +78,18 @@ calculate_weighted_means <- function(conversion, x) {
   conversion %>%
     left_join(
       x %>%
-        group_by(iso2, year=year(time), siec_code) %>%
-        summarise(qty=sum(values),
-                  .groups="drop")
+        group_by(iso2, year = year(time), siec_code) %>%
+        summarise(
+          qty = sum(values),
+          .groups = "drop"
+        )
     ) %>%
-    mutate(qty=tidyr::replace_na(qty, 0)) %>%
+    mutate(qty = tidyr::replace_na(qty, 0)) %>%
     group_by(siec_code, year) %>%
-    summarise(ncv_kjkg_wmean=weighted.mean(ncv_kjkg, qty),
-              .groups="drop") %>%
+    summarise(
+      ncv_kjkg_wmean = weighted.mean(ncv_kjkg, qty),
+      .groups = "drop"
+    ) %>%
     filter(!is.na(ncv_kjkg_wmean))
 }
 
@@ -87,19 +98,19 @@ fill_missing_conversion_factors <- function(conversion, conversion_wmean, x) {
   result <- conversion %>%
     ungroup() %>%
     tidyr::complete(
-      iso2=unique(add_iso2(x)$iso2),
+      iso2 = unique(add_iso2(x)$iso2),
       siec_code,
-      year=seq(min(year(x$time)), max(year(x$time)), by=1)
+      year = seq(min(year(x$time)), max(year(x$time)), by = 1)
     ) %>%
     # Fill time wise
     group_by(iso2, siec_code) %>%
     fill(ncv_kjkg, .direction = "downup") %>%
     left_join(conversion_wmean) %>%
-    mutate(ncv_kjkg=coalesce(ncv_kjkg, ncv_kjkg_wmean)) %>%
+    mutate(ncv_kjkg = coalesce(ncv_kjkg, ncv_kjkg_wmean)) %>%
     fill(ncv_kjkg, .direction = "downup") %>%
     select(-c(ncv_kjkg_wmean)) %>%
     ungroup() %>%
-    mutate(source=coalesce(source, "IEA (weighted averaged)")) %>%
+    mutate(source = coalesce(source, "IEA (weighted averaged)")) %>%
     # Fill missing years
     group_by(iso2, siec_code) %>%
     arrange(year) %>%
@@ -122,9 +133,9 @@ fill_missing_conversion_factors <- function(conversion, conversion_wmean, x) {
 # Function to add NCV values to input data
 add_ncv_to_data <- function(x, conversion_filled) {
   x %>%
-    mutate(year=year(time)) %>%
+    mutate(year = year(time)) %>%
     add_iso2() %>%
-    left_join(conversion_filled, by=c("iso2", "siec_code", "year")) %>%
+    left_join(conversion_filled, by = c("iso2", "siec_code", "year")) %>%
     group_by(iso2, siec_code) %>%
     arrange(time) %>%
     tidyr::fill(ncv_kjkg, .direction = "downup")
@@ -134,10 +145,10 @@ add_ncv_to_data <- function(x, conversion_filled) {
 validate_ncv_completeness <- function(x_with_ncv) {
   # Check which records are missing NCV values
   missing_ncv <- x_with_ncv %>%
-    filter(iso2!='ME', !grepl("Terajoule", unit)) %>%
+    filter(iso2 != "ME", !grepl("Terajoule", unit)) %>%
     filter(is.na(ncv_kjkg))
 
-  if(nrow(missing_ncv) > 0) {
+  if (nrow(missing_ncv) > 0) {
     # Create detailed diagnostic information
     diagnostic_info <- missing_ncv %>%
       group_by(iso2, siec_code, unit) %>%
@@ -157,7 +168,7 @@ validate_ncv_completeness <- function(x_with_ncv) {
       distinct(siec_code) %>%
       anti_join(create_siec_fuel_mapping(), by = "siec_code")
 
-    if(nrow(unmapped_siec) > 0) {
+    if (nrow(unmapped_siec) > 0) {
       cat("\nUnmapped SIEC codes:\n")
       print(unmapped_siec)
     }
@@ -167,7 +178,7 @@ validate_ncv_completeness <- function(x_with_ncv) {
       distinct(iso2) %>%
       filter(!iso2 %in% get_eu_iso2s())
 
-    if(nrow(countries_without_ncv) > 0) {
+    if (nrow(countries_without_ncv) > 0) {
       cat("\nCountries without NCV data:\n")
       print(countries_without_ncv)
     }
@@ -182,7 +193,7 @@ validate_ncv_completeness <- function(x_with_ncv) {
 make_ncv_time_insensitive <- function(x_with_ncv) {
   x_with_ncv %>%
     group_by(iso2, siec_code) %>%
-    mutate(ncv_kjkg=mean(ncv_kjkg, na.rm=T))
+    mutate(ncv_kjkg = mean(ncv_kjkg, na.rm = TRUE))
 }
 
 
@@ -198,9 +209,9 @@ make_ncv_time_insensitive <- function(x_with_ncv) {
 #' @export
 #'
 #' @examples
-add_ncv_iea <- function(x, diagnostics_folder=NULL, use_cache=TRUE, ...){
-
-  conversion_raw <- iea.get_conversion_factors(iso2=c(get_eu_iso2s(), "EU"), use_cache=use_cache)
+add_ncv_iea <- function(x, diagnostics_folder = NULL, use_cache = TRUE, ...) {
+  conversion_raw <- iea.get_conversion_factors(iso2 = c(get_eu_iso2s(), "EU"), use_cache =
+    use_cache)
 
   # Process conversion factors
   conversion <- process_conversion_factors(conversion_raw)
@@ -212,7 +223,7 @@ add_ncv_iea <- function(x, diagnostics_folder=NULL, use_cache=TRUE, ...){
   conversion_filled <- fill_missing_conversion_factors(conversion, conversion_wmean, x)
 
   # Run comprehensive diagnostics if folder is provided
-  if(!is_null_or_empty(diagnostics_folder)){
+  if (!is_null_or_empty(diagnostics_folder)) {
     diagnose_ncv_data(conversion_filled, x, diagnostics_folder)
   }
 
@@ -229,7 +240,8 @@ add_ncv_iea <- function(x, diagnostics_folder=NULL, use_cache=TRUE, ...){
 }
 
 
-#' Add ncv values from IEA, but this time, apply the same ncv to all EU countries / all years per siec.
+#' Add ncv values from IEA, but this time, apply the same ncv to all EU countries / all years per
+#' siec.
 #'
 #' @param x
 #' @param diagnostics_folder
@@ -240,9 +252,9 @@ add_ncv_iea <- function(x, diagnostics_folder=NULL, use_cache=TRUE, ...){
 #' @export
 #'
 #' @examples
-add_ncv_iea_shared <- function(x, diagnostics_folder=NULL, use_cache=TRUE, ...){
-
-  conversion_raw <- iea.get_conversion_factors(iso2=get_eu_iso2s(include_eu = F), use_cache=use_cache)
+add_ncv_iea_shared <- function(x, diagnostics_folder = NULL, use_cache = TRUE, ...) {
+  conversion_raw <- iea.get_conversion_factors(iso2 = get_eu_iso2s(include_eu = FALSE), use_cache =
+    use_cache)
 
   # Process conversion factors
   conversion <- process_conversion_factors(conversion_raw)
@@ -254,17 +266,19 @@ add_ncv_iea_shared <- function(x, diagnostics_folder=NULL, use_cache=TRUE, ...){
   conversion_wmean <- conversion_wmean %>%
     arrange(year) %>%
     group_by(siec_code) %>%
-    summarise(ncv_kjkg=last(ncv_kjkg_wmean),
-              .groups="drop")
+    summarise(
+      ncv_kjkg = last(ncv_kjkg_wmean),
+      .groups = "drop"
+    )
 
   # Create all combinations
   conversion_filled <- x %>%
-    distinct(iso2, siec_code, year=year(time)) %>%
+    distinct(iso2, siec_code, year = year(time)) %>%
     left_join(conversion_wmean) %>%
-    mutate(source="IEA (shared EU average)")
+    mutate(source = "IEA (shared EU average)")
 
   # Run comprehensive diagnostics if folder is provided
-  if(!is_null_or_empty(diagnostics_folder)){
+  if (!is_null_or_empty(diagnostics_folder)) {
     diagnose_ncv_data(conversion_filled, x, diagnostics_folder)
   }
 
@@ -276,7 +290,6 @@ add_ncv_iea_shared <- function(x, diagnostics_folder=NULL, use_cache=TRUE, ...){
 
   x_with_ncv
 }
-
 
 
 # New function to get SIEC fuel mapping
@@ -302,21 +315,22 @@ get_siec_ipcc_fuel_mapping <- function() {
 
 
 get_ipcc_data <- function() {
-  read_csv(get_data_filepath('EFDB_output.csv'))
+  read_csv(get_data_filepath("EFDB_output.csv"))
 }
 
 get_ipcc_ncv <- function() {
   get_ipcc_data() %>%
-    filter(grepl('2006', `Type of parameter`)) %>%
-    filter(Unit %in% ("TJ/Gg"),
-           Description=="Net Calorific Value (NCV)") %>%
+    filter(grepl("2006", `Type of parameter`)) %>%
+    filter(
+      Unit %in% ("TJ/Gg"),
+      Description == "Net Calorific Value (NCV)"
+    ) %>%
     mutate(ncv_kjkg = as.numeric(Value) * 1e3) %>%
     select(fuel = `Fuel 2006`, ncv_kjkg)
 }
 
 
-add_ncv_ipcc <- function(x, diagnostics_folder=NULL, ...){
-
+add_ncv_ipcc <- function(x, diagnostics_folder = NULL, ...) {
   # Get IPCC data
   ipcc <- get_ipcc_ncv()
 
@@ -325,11 +339,11 @@ add_ncv_ipcc <- function(x, diagnostics_folder=NULL, ...){
 
   # Map SIEC codes to IPCC fuels
   ncvs <- siec_fuel %>%
-    left_join(ipcc, by="fuel") %>%
+    left_join(ipcc, by = "fuel") %>%
     select(-c(fuel))
 
   # Write diagnostics if folder is provided
-  if(!is_null_or_empty(diagnostics_folder)){
+  if (!is_null_or_empty(diagnostics_folder)) {
     ncvs %>%
       write_csv(file.path(diagnostics_folder, "ncv_ipcc.csv"))
   }
@@ -343,9 +357,11 @@ add_ncv_ipcc <- function(x, diagnostics_folder=NULL, ...){
     filter(is.na(ncv_kjkg)) %>%
     distinct(siec_code)
 
-  if(nrow(missing_ncvs) > 0) {
-    warning("Missing NCVs for the following SIEC codes: ",
-            paste(missing_ncvs$siec_code, collapse=", "))
+  if (nrow(missing_ncvs) > 0) {
+    warning(
+      "Missing NCVs for the following SIEC codes: ",
+      paste(missing_ncvs$siec_code, collapse = ", ")
+    )
   }
 
   return(x_with_ncv)
@@ -389,8 +405,8 @@ diagnose_ncv_data <- function(conversion_filled, x = NULL, diagnostics_folder = 
   p1 <- conversion_filled %>%
     filter(!is.na(ncv_kjkg)) %>%
     ggplot(aes(x = year, y = ncv_kjkg, color = iso2)) +
-    geom_line(alpha = 0.7, size = 0.5, show.legend = F) +
-    geom_point(alpha = 0.8, size = 1, show.legend = F) +
+    geom_line(alpha = 0.7, size = 0.5, show.legend = FALSE) +
+    geom_point(alpha = 0.8, size = 1, show.legend = FALSE) +
     geom_text_repel(
       data = latest_data,
       aes(label = iso2),
@@ -400,7 +416,7 @@ diagnose_ncv_data <- function(conversion_filled, x = NULL, diagnostics_folder = 
       segment.size = 0.2,
       segment.alpha = 0.5,
       max.overlaps = 20,
-      show.legend = F
+      show.legend = FALSE
     ) +
     facet_wrap(~siec_code, scales = "free_y", ncol = 4) +
     rcrea::scale_y_zero() +
@@ -413,9 +429,10 @@ diagnose_ncv_data <- function(conversion_filled, x = NULL, diagnostics_folder = 
     theme_minimal()
 
   # Save plot and summary stats if diagnostics folder is provided
-  if(!is_null_or_empty(diagnostics_folder)) {
+  if (!is_null_or_empty(diagnostics_folder)) {
     ggsave(file.path(diagnostics_folder, "ncv_time_series.png"), p1,
-           width = 16, height = 12, dpi = 300)
+      width = 16, height = 12, dpi = 300
+    )
 
     # Save summary statistics
     write_csv(summary_stats, file.path(diagnostics_folder, "ncv_summary_stats.csv"))

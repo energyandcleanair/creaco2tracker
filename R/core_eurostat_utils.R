@@ -4,7 +4,8 @@
 #' before the NA, suggesting that the NA should be treated as zero.
 #'
 #' @param x A numeric vector with possible NA values
-#' @param consecutive_required Number of consecutive small values required before filling NAs with zeros
+#' @param consecutive_required Number of consecutive small values required before filling NAs with
+#' zeros
 #' @param prob Probability threshold for determining "small" values (default: 0.05)
 #' @param beyond_last_na Whether to fill NAs that occur after the last non-NA value (default: FALSE)
 #' @return A numeric vector with appropriate NA values filled with zeros
@@ -28,7 +29,7 @@ fill_gaps_with_zero_when_suitable <- function(x,
   streak <- 0
 
   for (i in seq_along(out)) {
-    if (i > last_non_na_idx & !beyond_last_na) {
+    if (i > last_non_na_idx && !beyond_last_na) {
       # Once we pass the last non-NA, do nothing
       break
     }
@@ -65,13 +66,14 @@ fill_gaps_with_zero_when_suitable <- function(x,
 #' is low enough to suggest that interpolation is appropriate.
 #'
 #' @param x A numeric vector with possible NA values
-#' @param cv_threshold Coefficient of variation threshold below which interpolation is used (default: 0.1)
+#' @param cv_threshold Coefficient of variation threshold below which interpolation is used
+#' (default: 0.1)
 #' @param maxgap Maximum gap size to interpolate (default: 3)
 #' @return A numeric vector with appropriate NA values filled with interpolated values
 #' @export
 fill_gaps_with_interp_when_suitable <- function(x, cv_threshold = 0.1, maxgap = 3) {
   cv <- sd(x, na.rm = TRUE) / mean(x, na.rm = TRUE)
-  if (!is.na(cv) & cv < cv_threshold) {
+  if (!is.na(cv) && cv < cv_threshold) {
     return(zoo::na.approx(x, maxgap = maxgap, na.rm = FALSE))
   } else {
     return(x)
@@ -79,7 +81,8 @@ fill_gaps_with_interp_when_suitable <- function(x, cv_threshold = 0.1, maxgap = 
 }
 
 
-#' Fill missing EU values using the sum of EU member countries when the sum is historically close enough
+#' Fill missing EU values using the sum of EU member countries when the sum is historically close
+#' enough
 #'
 #' This function calculates the sum of values from EU member countries and uses it
 #' to fill missing values for the EU aggregate, but only when the relative difference
@@ -139,7 +142,7 @@ fill_eu_from_countries_sum <- function(data,
   projected_results <- list()
 
   # Loop through each distinct set of countries
-  for (i in 1:nrow(country_sets)) {
+  for (i in seq_len(nrow(country_sets))) {
     current_countries <- country_sets$available_countries[[i]]
 
     # Calculate sum for this set of countries
@@ -159,7 +162,8 @@ fill_eu_from_countries_sum <- function(data,
       filter(!is.na(values), !is.na(values_sum)) %>%
       group_by(across(all_of(setdiff(group_cols, "time")))) %>%
       summarise(
-        corr = list(check_proxy_correlation(values, values_sum, max_rel_diff = max_rel_diff, min_points = min_points)),
+        corr = list(check_proxy_correlation(values, values_sum, max_rel_diff = max_rel_diff,
+          min_points = min_points)),
         .groups = "drop"
       ) %>%
       # Expand list
@@ -213,8 +217,10 @@ fill_eu_from_countries_sum <- function(data,
 #' @param group_cols Column names to group by when filling gaps
 #' @param time_col Name of the column containing time values (default: "time")
 #' @param frequency Time frequency for completing missing periods ("year", "month", etc.)
-#' @param zero_consecutive_required Number of consecutive small values required before filling NAs with zeros
-#' @param zero_consecutive_required_beyond_last Number of consecutive small values required for filling beyond last non-NA
+#' @param zero_consecutive_required Number of consecutive small values required before filling NAs
+#' with zeros
+#' @param zero_consecutive_required_beyond_last Number of consecutive small values required for
+#' filling beyond last non-NA
 #' @param zero_prob Probability threshold for determining "small" values (default: 0.05)
 #' @param interp_cv_threshold Coefficient of variation threshold for interpolation (default: 0.1)
 #' @param interp_maxgap Maximum gap size to interpolate (default: 3)
@@ -343,7 +349,8 @@ eurostat_split_elec_others <- function(x) {
     return(x)
   }
   if (!all(sectors %in% c(SECTOR_ALL, SECTOR_ELEC, SECTOR_OTHERS))) {
-    stop("eurostat_split_elec_others shouldn't be applied to datasets with more than all, elec, and others")
+    stop("eurostat_split_elec_others shouldn't be applied to datasets with more than all, elec,
+      and others")
   }
 
   group_cols <- intersect(names(x), c("iso2", "time", "unit", "siec_code", "fuel"))

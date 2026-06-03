@@ -6,7 +6,8 @@
 #' @param iso2s
 #' @param downscale_daily
 #' @param min_year
-#' @param date_to End date for filtering data (YYYY-MM-DD). If NULL, no upper date filter is applied.
+#' @param date_to End date for filtering data (YYYY-MM-DD). If NULL, no upper date filter is
+#' applied.
 #' @param ncv_source iea, iea_shared, ipcc
 #' @param fill_mode one of "missing", "overwrite", or "ratio". Default is "missing".
 #' @param data_masking Optional named list of masking rules. See
@@ -17,9 +18,9 @@
 #'
 #' @examples
 get_co2 <- function(diagnostics_folder = "diagnostics",
-                    downscale_daily = T,
-                    use_cache = F,
-                    iso2s = get_eu_iso2s(include_eu = T),
+                    downscale_daily = TRUE,
+                    use_cache = FALSE,
+                    iso2s = get_eu_iso2s(include_eu = TRUE),
                     min_year = NULL,
                     date_to = today(),
                     ncv_source = "iea",
@@ -31,7 +32,7 @@ get_co2 <- function(diagnostics_folder = "diagnostics",
 
 
   # Add buffer to date_to if downscaling daily
-  if (downscale_daily & !is.null(date_to)) {
+  if (downscale_daily && !is.null(date_to)) {
     date_to_cut <- as.Date(date_to) + downscale_cut_latest_days
   } else {
     date_to_cut <- date_to

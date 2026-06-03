@@ -21,7 +21,8 @@ architecture_get_boundary_config <- function() {
   list(
     layer_names = layer_names,
     layer_file_patterns = layer_file_patterns,
-    data_access_files = sort(all_r_files[grepl(layer_file_patterns$access, all_r_files, perl = TRUE)]),
+    data_access_files = sort(all_r_files[grepl(layer_file_patterns$access, all_r_files, perl =
+      TRUE)]),
     client_files = sort(all_r_files[grepl(layer_file_patterns$client, all_r_files, perl = TRUE)]),
     front_layer_files = c(
       "model_co2.R",

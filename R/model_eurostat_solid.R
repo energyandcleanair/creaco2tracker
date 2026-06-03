@@ -63,7 +63,7 @@ process_solid_monthly <- function(x, pwr_generation) {
     times <- unique(x$time)
     x %>%
       filter(sector == !!sector, siec_code == !!siec_code) %>%
-      filter(iso2 %in% get_eu_iso2s(include_eu = T)) %>%
+      filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
       ungroup() %>%
       arrange(desc(time)) %>%
       tidyr::complete(
@@ -83,7 +83,8 @@ process_solid_monthly <- function(x, pwr_generation) {
   # Greece has started declaring 0 brown coal values for elec starting from 2015-09-01,
   # but apparently 100% of brown coal was used for elec before that
   to_add_greece <- by_sector %>%
-    filter((iso2 == "GR" & siec_code == SIEC_BROWN_COAL & time >= "2015-09-01" & nrg_bal_code == NRG_GID_CALCULATED)) %>%
+    filter((iso2 == "GR" & siec_code == SIEC_BROWN_COAL & time >= "2015-09-01" &
+      nrg_bal_code == NRG_GID_CALCULATED)) %>%
     mutate(
       sector = SECTOR_ELEC,
       nrg_bal_code = NRG_TRANS_ELEC
@@ -91,7 +92,8 @@ process_solid_monthly <- function(x, pwr_generation) {
 
   by_sector_fixed <- bind_rows(
     by_sector %>%
-      filter(!(iso2 == "GR" & siec_code == SIEC_BROWN_COAL & time >= "2015-09-01" & sector == SECTOR_ELEC)),
+      filter(!(iso2 == "GR" & siec_code == SIEC_BROWN_COAL & time >= "2015-09-01" &
+        sector == SECTOR_ELEC)),
     to_add_greece
   )
 
@@ -125,7 +127,8 @@ process_solid_monthly <- function(x, pwr_generation) {
       # For coking input, it stopped publishing data in around 2020-09
       # we ignore for now, but would be good to implement a better way to guess values
       # TODO Improve this
-      nrg_bal_code == NRG_TRANS_COKING & iso2 == "FR" & siec_code == SIEC_HARD_COAL & is.na(values) ~ 0,
+      nrg_bal_code == NRG_TRANS_COKING & iso2 == "FR" & siec_code == SIEC_HARD_COAL &
+        is.na(values) ~ 0,
       TRUE ~ values
     ))
 
@@ -153,7 +156,7 @@ process_solid_monthly <- function(x, pwr_generation) {
       TRUE ~ 1
     )) %>%
     group_by(iso2, siec_code, sector, fuel, unit, time) %>%
-    summarise(values = sum(values * factor, na.rm = F))
+    summarise(values = sum(values * factor, na.rm = FALSE))
 
 
   # Remove recent dates where fewer siec and sector per date are available
@@ -225,14 +228,15 @@ process_solid_yearly <- function(x) {
       TRUE ~ 1
     )) %>%
     group_by(iso2, time, siec_code, sector, fuel, unit) %>%
-    summarise(values = sum(values * factor, na.rm = T), .groups = "drop")
+    summarise(values = sum(values * factor, na.rm = TRUE), .groups = "drop")
 
   return(result)
 }
 
 siec_to_fuel <- function(siec_code) {
   dplyr::case_when(
-    siec_code %in% c(SIEC_BROWN_COAL, SIEC_HARD_COAL, SIEC_BROWN_COAL_BRIQUETTES, SIEC_OIL_SHALE) ~ FUEL_COAL,
+    siec_code %in% c(SIEC_BROWN_COAL, SIEC_HARD_COAL, SIEC_BROWN_COAL_BRIQUETTES, SIEC_OIL_SHALE) ~
+      FUEL_COAL,
     siec_code == SIEC_COKE_OVEN_COKE ~ FUEL_COKE,
     siec_code == SIEC_PEAT ~ FUEL_PEAT,
     TRUE ~ NA_character_

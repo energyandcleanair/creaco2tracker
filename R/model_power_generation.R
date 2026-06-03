@@ -389,11 +389,13 @@ get_power_generation <- function(iso2s = get_eu_iso2s(include_eu = TRUE),
       # Apply corrections
       value_mwh = case_when(
         # Tier 1: Scale ENTSOE by monthly factor (only if ENTSOE has data)
-        tier == 1 & !is.na(scale_factor) & !is.na(value_mwh_raw) & !entsoe_all_na ~ value_mwh_raw * scale_factor,
+        tier == 1 & !is.na(scale_factor) & !is.na(value_mwh_raw) & !entsoe_all_na ~ value_mwh_raw *
+          scale_factor,
         # Tier 1 but ENTSOE is all NA for month: use EMBER with constant distribution
         tier == 1 & !is.na(ember_mwh) & entsoe_all_na ~ ember_mwh / days_in_month,
         # Tier 2: Distribute EMBER monthly by daily share
-        tier == 2 & !is.na(ember_mwh) & !is.na(daily_share) & !entsoe_all_na ~ ember_mwh * daily_share,
+        tier == 2 & !is.na(ember_mwh) & !is.na(daily_share) & !entsoe_all_na ~ ember_mwh *
+          daily_share,
         # Tier 2 but ENTSOE is all NA for month: use EMBER with constant distribution
         tier == 2 & !is.na(ember_mwh) & entsoe_all_na ~ ember_mwh / days_in_month,
         # Fallback: use raw ENTSOE if no correction available
@@ -1063,7 +1065,8 @@ get_power_generation_tiers <- function(tier_threshold = c(0.7, 1.3),
       sd_ratio = sd(ratio, na.rm = TRUE),
       n_excellent = sum(ratio >= 0.95 & ratio <= 1.05, na.rm = TRUE),
       n_good = sum(ratio >= 0.90 & ratio <= 1.10 & !(ratio >= 0.95 & ratio <= 1.05), na.rm = TRUE),
-      n_moderate = sum(ratio >= 0.70 & ratio <= 1.30 & !(ratio >= 0.90 & ratio <= 1.10), na.rm = TRUE),
+      n_moderate = sum(ratio >= 0.70 & ratio <= 1.30 & !(ratio >= 0.90 & ratio <= 1.10), na.rm =
+        TRUE),
       n_problematic = sum(ratio < 0.70 | ratio > 1.30, na.rm = TRUE),
       .groups = "drop"
     )

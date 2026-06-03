@@ -4,7 +4,8 @@ library(testthat)
 library(dplyr)
 library(lubridate)
 
-test_that("get_weather_corrected_hydro with multiple countries, varying capacities, and exact calculations", {
+test_that("get_weather_corrected_hydro with multiple countries, varying capacities,
+  and exact calculations", {
   # Test with 3 countries, 3 years, varying capacities
   # DE: capacity increases (800 -> 1000 -> 1200 MW), CF varies (0.3 -> 0.4 -> 0.5)
   # FR: capacity constant (1000 MW), CF constant (0.4) - should have ratio = 1.0
@@ -20,9 +21,9 @@ test_that("get_weather_corrected_hydro with multiple countries, varying capaciti
       iso2 = "DE",
       source = "Hydro",
       value_mwh = case_when(
-        year(date) == 2020 ~ 0.3 * 800 * 24,   # CF=0.3, cap=800MW -> 5760 MWh
-        year(date) == 2021 ~ 0.4 * 1000 * 24,  # CF=0.4, cap=1000MW -> 9600 MWh
-        year(date) == 2022 ~ 0.5 * 1200 * 24   # CF=0.5, cap=1200MW -> 14400 MWh
+        year(date) == 2020 ~ 0.3 * 800 * 24, # CF=0.3, cap=800MW -> 5760 MWh
+        year(date) == 2021 ~ 0.4 * 1000 * 24, # CF=0.4, cap=1000MW -> 9600 MWh
+        year(date) == 2022 ~ 0.5 * 1200 * 24 # CF=0.5, cap=1200MW -> 14400 MWh
       )
     ),
     # FR: constant capacity and CF
@@ -30,7 +31,7 @@ test_that("get_weather_corrected_hydro with multiple countries, varying capaciti
       date = dates,
       iso2 = "FR",
       source = "Hydro",
-      value_mwh = 0.4 * 1000 * 24  # CF=0.4, cap=1000MW -> 9600 MWh (constant)
+      value_mwh = 0.4 * 1000 * 24 # CF=0.4, cap=1000MW -> 9600 MWh (constant)
     ),
     # IT: varying capacity and CF
     tibble(
@@ -38,9 +39,9 @@ test_that("get_weather_corrected_hydro with multiple countries, varying capaciti
       iso2 = "IT",
       source = "Hydro",
       value_mwh = case_when(
-        year(date) == 2020 ~ 0.5 * 1200 * 24,  # CF=0.5, cap=1200MW -> 14400 MWh
-        year(date) == 2021 ~ 0.4 * 1000 * 24,  # CF=0.4, cap=1000MW -> 9600 MWh
-        year(date) == 2022 ~ 0.3 * 800 * 24    # CF=0.3, cap=800MW -> 5760 MWh
+        year(date) == 2020 ~ 0.5 * 1200 * 24, # CF=0.5, cap=1200MW -> 14400 MWh
+        year(date) == 2021 ~ 0.4 * 1000 * 24, # CF=0.4, cap=1000MW -> 9600 MWh
+        year(date) == 2022 ~ 0.3 * 800 * 24 # CF=0.3, cap=800MW -> 5760 MWh
       )
     )
   )
@@ -61,7 +62,7 @@ test_that("get_weather_corrected_hydro with multiple countries, varying capaciti
       date = dates,
       iso2 = "FR",
       source = "Hydro",
-      value_mw = 1000  # Constant
+      value_mw = 1000 # Constant
     ),
     tibble(
       date = dates,
@@ -101,7 +102,7 @@ test_that("get_weather_corrected_hydro with multiple countries, varying capaciti
   #     Ratios: 0.4/0.5 = 0.8, 0.4/0.4 = 1.0, 0.4/0.3 = 1.333
 
   result_summary <- result %>%
-    filter(iso2 != "EU") %>%  # Exclude EU total for now
+    filter(iso2 != "EU") %>% # Exclude EU total for now
     mutate(year = year(date)) %>%
     group_by(iso2, year) %>%
     summarise(
@@ -119,10 +120,10 @@ test_that("get_weather_corrected_hydro with multiple countries, varying capaciti
   expect_equal(de_2020$actual_mean, 5760, tolerance = 0.1)
   expect_equal(de_2021$actual_mean, 9600, tolerance = 0.1)
   expect_equal(de_2022$actual_mean, 14400, tolerance = 0.1)
-  expect_equal(de_2020$ratio, 4/3, tolerance = 0.001)  # 0.4/0.3 = 1.333...
+  expect_equal(de_2020$ratio, 4 / 3, tolerance = 0.001) # 0.4/0.3 = 1.333...
   expect_equal(de_2021$ratio, 1.0, tolerance = 0.001)
   expect_equal(de_2022$ratio, 0.8, tolerance = 0.001)
-  expect_equal(de_2020$corrected_mean, 5760 * (4/3), tolerance = 0.1)
+  expect_equal(de_2020$corrected_mean, 5760 * (4 / 3), tolerance = 0.1)
   expect_equal(de_2022$corrected_mean, 14400 * 0.8, tolerance = 0.1)
 
   # FR: Constant CF, all ratios should be 1.0
@@ -139,11 +140,11 @@ test_that("get_weather_corrected_hydro with multiple countries, varying capaciti
   expect_equal(it_2020$actual_mean, 14400, tolerance = 0.1)
   expect_equal(it_2021$actual_mean, 9600, tolerance = 0.1)
   expect_equal(it_2022$actual_mean, 5760, tolerance = 0.1)
-  expect_equal(it_2020$ratio, 0.8, tolerance = 0.001)  # 0.4/0.5 = 0.8
+  expect_equal(it_2020$ratio, 0.8, tolerance = 0.001) # 0.4/0.5 = 0.8
   expect_equal(it_2021$ratio, 1.0, tolerance = 0.001)
-  expect_equal(it_2022$ratio, 4/3, tolerance = 0.001)  # 0.4/0.3 = 1.333...
+  expect_equal(it_2022$ratio, 4 / 3, tolerance = 0.001) # 0.4/0.3 = 1.333...
   expect_equal(it_2020$corrected_mean, 14400 * 0.8, tolerance = 0.1)
-  expect_equal(it_2022$corrected_mean, 5760 * (4/3), tolerance = 0.1)
+  expect_equal(it_2022$corrected_mean, 5760 * (4 / 3), tolerance = 0.1)
 
   # Verify that after correction, all years have the same CF (equal to average CF)
   # This is the key property: correction normalizes all years to average weather
@@ -204,8 +205,6 @@ test_that("get_weather_corrected_hydro with multiple countries, varying capaciti
   # (The correction normalizes to average weather, but capacity changes affect totals)
   de_sum <- sum_check %>% filter(iso2 == "DE")
   it_sum <- sum_check %>% filter(iso2 == "IT")
-  expect_true(abs(de_sum$sum_actual - de_sum$sum_corrected) > 100)  # Should differ
-  expect_true(abs(it_sum$sum_actual - it_sum$sum_corrected) > 100)  # Should differ
+  expect_true(abs(de_sum$sum_actual - de_sum$sum_corrected) > 100) # Should differ
+  expect_true(abs(it_sum$sum_actual - it_sum$sum_corrected) > 100) # Should differ
 })
-
-

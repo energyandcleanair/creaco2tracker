@@ -192,7 +192,8 @@ get_weather_corrected_wind <- function(iso2s = "EU",
     model_data <- model_data %>%
       select(where(~ !all(is.na(.))))
 
-    weather_vars <- grep(names(model_data), pattern = "^(ws_1|ws_2|ws_3|inv_temp|temp)_", value = TRUE)
+    weather_vars <- grep(names(model_data), pattern = "^(ws_1|ws_2|ws_3|inv_temp|temp)_", value =
+      TRUE)
     weather_iso2s <- unique(gsub("^(ws_1|ws_2|ws_3|inv_temp|temp)_", "", weather_vars))
 
     model_data_country <- model_data %>%
@@ -238,7 +239,8 @@ get_weather_corrected_wind <- function(iso2s = "EU",
         #
         # Attention: we should not predict at average weather for each yday,
         # because the curve is non-linear
-        # -> the generation at average weather is not the same as average of generation at actual weather
+        # -> the generation at average weather is not the same as average of generation at actual
+        # weather
         # see Jensen's inequality (E[f(X)] != f(E[X]) for non-linear f)
         crossed_weather <- model_data_country %>%
           mutate(yday = lubridate::yday(date)) %>%
@@ -409,7 +411,8 @@ get_weather_corrected_solar <- function(iso2s = "EU",
     }
 
     if (nrow(model_data_country) < 100) {
-      warning(sprintf("Insufficient data for %s (%d rows), skipping", iso2, nrow(model_data_country)))
+      warning(sprintf("Insufficient data for %s (%d rows), skipping", iso2,
+        nrow(model_data_country)))
       return(NULL)
     }
 
@@ -439,7 +442,8 @@ get_weather_corrected_solar <- function(iso2s = "EU",
         #
         # Attention: we should not predict at average weather for each yday,
         # because the curve is potentially non-linear
-        # -> the generation at average weather is not the same as average of generation at actual weather
+        # -> the generation at average weather is not the same as average of generation at actual
+        # weather
         # see Jensen's inequality (E[f(X)] != f(E[X]) for non-linear f)
         crossed_weather <- model_data_country %>%
           mutate(yday = lubridate::yday(date)) %>%
@@ -634,14 +638,15 @@ get_weather_corrected_hydro <- function(iso2s = "EU",
 #' @keywords internal
 plot_wind_power_curve <- function(model, model_data_country, iso2, diagnostics_folder) {
   # Create prediction grid for power curves
-  weather_vars <- grep(names(model_data_country), pattern = "^(ws_1|ws_2|ws_3|inv_temp|temp)_", value = TRUE)
+  weather_vars <- grep(names(model_data_country), pattern = "^(ws_1|ws_2|ws_3|inv_temp|temp)_",
+    value = TRUE)
   weather_iso2s <- unique(gsub("^(ws_1|ws_2|ws_3|inv_temp|temp)_", "", weather_vars))
   ws_1_vars <- glue("ws_1_{weather_iso2s}")
   ws_1 <- seq(0, max(model_data_country[, ws_1_vars], na.rm = TRUE), 0.1)
   temp_vars <- glue("temp_{weather_iso2s}")
   temp <- model_data_country[, temp_vars] %>%
     as.matrix() %>%
-    mean(na.rm = T)
+    mean(na.rm = TRUE)
 
   plot_curve_data <- tibble(
     ws_1 = ws_1,
@@ -789,7 +794,8 @@ plot_corrected_vs_ember <- function(model_data_country, iso2, source_type, diagn
       mutate(source = "Capacity (ENTSOE)")
   ) %>%
     group_by(source) %>%
-    mutate(value = if (n() > 0 && !all(is.na(value))) value / value[year == min(year)] * 100 else NA_real_) %>%
+    mutate(value = if (n() > 0 && !all(is.na(value))) value / value[year == min(year)] *
+      100 else NA_real_) %>%
     ungroup() %>%
     mutate(
       time_scale = "Yearly",
@@ -814,7 +820,8 @@ plot_corrected_vs_ember <- function(model_data_country, iso2, source_type, diagn
       mutate(source = "Capacity (ENTSOE)")
   ) %>%
     group_by(source) %>%
-    mutate(value = if (n() > 0 && !all(is.na(value))) value / value[year_month == min(year_month)] * 100 else NA_real_) %>%
+    mutate(value = if (n() > 0 && !all(is.na(value))) value /
+      value[year_month == min(year_month)] * 100 else NA_real_) %>%
     ungroup() %>%
     mutate(
       time_scale = "Monthly",

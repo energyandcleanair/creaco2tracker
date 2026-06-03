@@ -15,15 +15,17 @@ ember.get_power_generation <- function(frequency = "yearly", iso2s = "EU", use_c
   key <- Sys.getenv("EMBER_KEY")
 
   # To get entities
-  # glue("https://api.ember-energy.org/options/electricity-generation/yearly/entity?api_key={key}")
   result <- pbapply::pblapply(iso2s, function(iso2) {
     base_url <- "https://api.ember-energy.org"
     entity_field <- ifelse(iso2 == "EU", "entity", "entity_code")
     entity_value <- ifelse(iso2 == "EU", "EU", countrycode::countrycode(iso2, "iso2c", "iso3c"))
 
-    query_url <- paste0(
-      glue("{base_url}/v1/electricity-generation/{frequency}"),
-      glue("/?{entity_field}={entity_value}&is_aggregate_series=false&start_date=2000&api_key={key}")
+    query_url <- glue(
+      "{base_url}/v1/electricity-generation/{frequency}/",
+      "?{entity_field}={entity_value}",
+      "&is_aggregate_series=false",
+      "&start_date=2000",
+      "&api_key={key}"
     )
     tryCatch(
       {
@@ -87,7 +89,8 @@ ember.get_installed_capacity <- function(frequency = "monthly", iso2s = "EU", us
 
     query_url <- paste0(
       glue("{base_url}/v1/installed-capacity/{frequency}"),
-      glue("/?{entity_field}={entity_value}&is_aggregate_series=false&start_date=2000&api_key={key}")
+      glue(paste0("/?{entity_field}={entity_value}&is_aggregate_series=fal",
+        "se&start_date=2000&api_key={key}"))
     )
     tryCatch(
       {

@@ -3,7 +3,7 @@ library(dplyr)
 library(tibble)
 library(creahelpers)
 
-make_co2 <- function(dates, values){
+make_co2 <- function(dates, values) {
   tibble(
     iso2 = "BE",
     fuel = "gas",
@@ -14,7 +14,7 @@ make_co2 <- function(dates, values){
   )
 }
 
-make_proxy <- function(dates, values){
+make_proxy <- function(dates, values) {
   tibble(
     iso2 = "BE",
     fuel = "gas",
@@ -25,7 +25,6 @@ make_proxy <- function(dates, values){
 }
 
 test_that("project_until_now_lm supports overwrite and missing fill modes", {
-
   x <- make_co2(
     dates = c("2020-01-01", "2020-02-01", "2020-04-01"),
     values = c(10, 20, 40)
@@ -55,8 +54,11 @@ test_that("project_until_now_lm supports overwrite and missing fill modes", {
     value = c(10, 20, 30, 40, 50)
   )
 
-  normalize <- function(df){
-    df %>% arrange(date) %>% mutate(value = unname(value)) %>% select(date, value)
+  normalize <- function(df) {
+    df %>%
+      arrange(date) %>%
+      mutate(value = unname(value)) %>%
+      select(date, value)
   }
 
   expect_equal(normalize(res_overwrite), expected)
@@ -87,11 +89,12 @@ test_that("project_until_now_lm ratio fill propagates trends across gaps", {
     value = c(10, 20, 30, 40, 50)
   )
 
-  expect_equal(res_ratio %>% arrange(date) %>% mutate(value = unname(value)) %>% select(date, value), expected)
+  expect_equal(res_ratio %>% arrange(date) %>% mutate(value = unname(value)) %>% select(date,
+    value), expected)
 })
 
-test_that("project_until_now_lm fill modes diverge when observed values differ from model predictions", {
-
+test_that("project_until_now_lm fill modes diverge when observed values differ from model
+  predictions", {
   x <- make_co2(
     dates = c("2020-01-01", "2020-02-01", "2020-04-01"),
     values = c(100, 200, 250)
@@ -126,22 +129,21 @@ test_that("project_until_now_lm fill modes diverge when observed values differ f
   dates <- unname(res_overwrite$date)
 
   # Existing values
-  expect_true(all(res_missing$value[c(1,2,4)] == x$value[c(1,2,3)]))
-  expect_true(all(res_overwrite$value[c(1,2,4)] != x$value[c(1,2,3)]))
-  expect_true(all(res_ratio$value[c(1,2,4)] == x$value[c(1,2,3)]))
+  expect_true(all(res_missing$value[c(1, 2, 4)] == x$value[c(1, 2, 3)]))
+  expect_true(all(res_overwrite$value[c(1, 2, 4)] != x$value[c(1, 2, 3)]))
+  expect_true(all(res_ratio$value[c(1, 2, 4)] == x$value[c(1, 2, 3)]))
 
 
   # Filled gaps
-  expect_true(all(res_missing$value[c(3,5,6)] == preds[c(3,5,6)]))
-  expect_true(all(res_ratio$value[c(3,5,6)] != preds[c(3,5,6)]))
+  expect_true(all(res_missing$value[c(3, 5, 6)] == preds[c(3, 5, 6)]))
+  expect_true(all(res_ratio$value[c(3, 5, 6)] != preds[c(3, 5, 6)]))
 
   expect_true(res_ratio$value[3] / res_ratio$value[2] ==
-                preds[3] / preds[2])
+    preds[3] / preds[2])
 
   expect_true(res_ratio$value[5] / res_ratio$value[4] ==
-                preds[5] / preds[4])
+    preds[5] / preds[4])
 
   expect_true(res_ratio$value[6] / res_ratio$value[5] ==
-                preds[6] / preds[5])
-
+    preds[6] / preds[5])
 })

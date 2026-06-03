@@ -6,8 +6,10 @@
 #' @return Named list containing `oil`, `solid`, and `gas`, each with
 #'   `monthly` and `yearly` tibbles.
 #' @keywords internal
-eurostat_data_access_get_cons_sources <- function(use_cache = FALSE,
-                                                  data_masking = NULL) {
+eurostat_data_access_get_cons_sources <- function(
+  use_cache = FALSE,
+  data_masking = NULL
+) {
   cons_raw_oil <- collect_oil(use_cache = use_cache)
   cons_raw_solid <- collect_solid(use_cache = use_cache)
   cons_raw_gas <- collect_gas(use_cache = use_cache)
@@ -61,9 +63,11 @@ eurostat_data_access_get_cons_sources <- function(use_cache = FALSE,
 #'
 #' @return Tibble with Eurostat industrial production data.
 #' @keywords internal
-eurostat_data_access_get_indprod <- function(use_cache = FALSE,
-                                             iso2s = NULL,
-                                             data_masking = NULL) {
+eurostat_data_access_get_indprod <- function(
+  use_cache = FALSE,
+  iso2s = NULL,
+  data_masking = NULL
+) {
   get_eurostat_from_code(code = "sts_inpr_m", use_cache = use_cache, iso2s = iso2s) %>%
     add_iso2() %>%
     apply_source_data_mask(
@@ -73,13 +77,13 @@ eurostat_data_access_get_indprod <- function(use_cache = FALSE,
 }
 
 
-get_eurostat_from_code <- function(code, iso2s = NULL, use_cache = T, filters = NULL) {
+get_eurostat_from_code <- function(code, iso2s = NULL, use_cache = TRUE, filters = NULL) {
   # Create a digest of iso2s and filters
   create_dir("cache")
   digest <- digest::digest(list(iso2s, filters))
   filepath <- file.path("cache", glue("eurostat_{code}_{digest}.rds"))
 
-  if (use_cache & file.exists(filepath)) {
+  if (use_cache && file.exists(filepath)) {
     return(readRDS(filepath))
   }
 
@@ -87,11 +91,13 @@ get_eurostat_from_code <- function(code, iso2s = NULL, use_cache = T, filters = 
     filters$geo <- iso2s
   }
 
-  raw <- eurostat::get_eurostat(code, filters = filters, keepFlags = T)
+  raw <- eurostat::get_eurostat(code, filters = filters, keepFlags = TRUE)
   keep_code <- intersect(names(raw), c("nrg_bal", "siec", "nace_r2", "prod_nrg"))
   if (length(keep_code) == 0) keep_code <- NULL
   raw %>%
-    eurostat::label_eurostat(code = keep_code, fix_duplicated = T) %>% # Keep nrg_bal code as well
-    dplyr::rename(dplyr::any_of(c(time = "TIME_PERIOD"))) %T>% # Column changed with new EUROSTAT version
+    # Keep nrg_bal code as well
+    eurostat::label_eurostat(code = keep_code, fix_duplicated = TRUE) %>%
+    # Column changed with new EUROSTAT version
+    dplyr::rename(dplyr::any_of(c(time = "TIME_PERIOD"))) %T>%
     saveRDS(filepath)
 }

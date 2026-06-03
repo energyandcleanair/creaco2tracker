@@ -2,11 +2,11 @@ entsoe.get_power_generation <- function(
   date_from = "2015-01-01",
   date_to = today(),
   iso2s = "EU",
-  use_cache = T,
-  use_local = F
+  use_cache = TRUE,
+  use_local = FALSE
 ) {
   if (all(iso2s == "EU")) {
-    iso2s_fetch <- get_eu_iso2s(include_eu = F)
+    iso2s_fetch <- get_eu_iso2s(include_eu = FALSE)
   } else {
     iso2s_fetch <- iso2s
   }
@@ -20,18 +20,19 @@ entsoe.get_power_generation <- function(
     data_source = "entsoe",
     split_by = "year",
     # The meaning of use_cache is different
-    # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means weather or not to invalidate it
+    # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means
+    # whether or not to invalidate it
     use_cache = TRUE,
     refresh_cache = !use_cache,
     cache_folder = "cache",
-    verbose = T
+    verbose = TRUE
   )
 
   # add total generation
   pwr <- pwr %>%
     filter(source != "Total") %>%
     group_by(iso2, region, country, date) %>%
-    dplyr::summarise_at(c("value_mw", "value_mwh"), sum, na.rm = T) %>%
+    dplyr::summarise_at(c("value_mw", "value_mwh"), sum, na.rm = TRUE) %>%
     mutate(
       source = "Total",
       data_source = "entsoe"
@@ -48,7 +49,7 @@ entsoe.get_power_generation <- function(
     # Get the last non-NA value
     last_val <- x[last_pos]
 
-    if (last_val == 0 & last_pos < length(x)) {
+    if (last_val == 0 && last_pos < length(x)) {
       # Only fill NAs that come after the last position
       x[(last_pos + 1):length(x)] <- 0
     }
@@ -73,11 +74,11 @@ entsoe.get_power_generation <- function(
 
 
   # add EU total if we have all EU countries, except Cyprus and Malta that are missing from ENTSOE
-  if (all(setdiff(get_eu_iso2s(include_eu = F), c("CY", "MT")) %in% pwr$iso2)) {
+  if (all(setdiff(get_eu_iso2s(include_eu = FALSE), c("CY", "MT")) %in% pwr$iso2)) {
     pwr <- pwr %>%
-      filter(iso2 %in% get_eu_iso2s(include_eu = F)) %>%
+      filter(iso2 %in% get_eu_iso2s(include_eu = FALSE)) %>%
       group_by(date, source) %>%
-      dplyr::summarise_at(c("value_mw", "value_mwh"), sum, na.rm = T) %>%
+      dplyr::summarise_at(c("value_mw", "value_mwh"), sum, na.rm = TRUE) %>%
       mutate(
         country = "EU total",
         iso2 = "EU"
@@ -93,9 +94,16 @@ entsoe.get_power_generation <- function(
 }
 
 
-entsoe.get_installed_capacity <- function(date_from = "2015-01-01", date_to = today(), iso2s = "EU", use_cache = T, refresh_cache = !use_cache, use_local = F) {
+entsoe.get_installed_capacity <- function(
+  date_from = "2015-01-01",
+  date_to = today(),
+  iso2s = "EU",
+  use_cache = TRUE,
+  refresh_cache = !use_cache,
+  use_local = FALSE
+) {
   if (all(iso2s == "EU")) {
-    iso2s <- get_eu_iso2s(include_eu = F)
+    iso2s <- get_eu_iso2s(include_eu = FALSE)
   }
 
   base_url <- ifelse(use_local, "http://localhost:8080", "https://api.energyandcleanair.org")
@@ -107,17 +115,18 @@ entsoe.get_installed_capacity <- function(date_from = "2015-01-01", date_to = to
     data_source = "entsoe",
     split_by = "year",
     # The meaning of use_cache is different
-    # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means weather or not to invalidate it
+    # for creahelpers, use_cache means whether or not to use memoise, and refresh
+    # cache means whether or not to invalidate it
     use_cache = TRUE,
     refresh_cache = !use_cache,
     cache_folder = "cache",
-    verbose = T
+    verbose = TRUE
   )
 
   # Add EU total if we have all EU countries, except Cyprus and Malta that are missing from ENTSOE
-  if (all(setdiff(get_eu_iso2s(include_eu = F), c("CY", "MT")) %in% capacity$iso2)) {
+  if (all(setdiff(get_eu_iso2s(include_eu = FALSE), c("CY", "MT")) %in% capacity$iso2)) {
     capacity <- capacity %>%
-      filter(iso2 %in% get_eu_iso2s(include_eu = F)) %>%
+      filter(iso2 %in% get_eu_iso2s(include_eu = FALSE)) %>%
       group_by(date, source) %>%
       summarise(value_mw = sum(value_mw, na.rm = TRUE), .groups = "drop") %>%
       mutate(

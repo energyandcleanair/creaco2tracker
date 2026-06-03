@@ -92,7 +92,8 @@ diagnose_demand_components <- function(components,
       )
 
       plt_monthly <- monthly_data %>%
-        ggplot(aes(month, value, color = series, linetype = ifelse(is_wc, "weather corrected", "actual"))) +
+        ggplot(aes(month, value, color = series, linetype = ifelse(is_wc, "weather corrected",
+          "actual"))) +
         geom_line(linewidth = 0.7) +
         scale_color_manual(values = color_map) +
         scale_linetype_manual(values = c("actual" = "solid", "weather corrected" = "dashed")) +
@@ -130,7 +131,8 @@ diagnose_demand_components <- function(components,
         ungroup()
 
       plt_yearly <- yearly_data %>%
-        ggplot(aes(year, value, color = series, linetype = ifelse(is_wc, "weather corrected", "actual"))) +
+        ggplot(aes(year, value, color = series, linetype = ifelse(is_wc, "weather corrected",
+          "actual"))) +
         geom_line(linewidth = 0.7) +
         geom_point(size = 1.5) +
         ggrepel::geom_text_repel(

@@ -7,7 +7,8 @@
 #' @param iso2s Character vector of ISO2 country codes. Default is "EU".
 #' @param date_from Start date for analysis. Default is "2020-01-01".
 #' @param date_to End date for analysis. Default is today.
-#' @param demand_fuels Character vector of demand types to correct. Default c("electricity", "fossil_gas").
+#' @param demand_fuels Character vector of demand types to correct. Default c("electricity",
+#' "fossil_gas").
 #'   Valid values: "electricity", "fossil_gas"
 #' @param use_cache Whether to use cached data. Default is TRUE.
 #' @param diagnostics_folder Optional folder path for saving diagnostic plots.
@@ -101,7 +102,7 @@ get_weather_correction_demand_elec <- function(iso2s = "EU",
 
   # Get weather data (HDD and CDD)
   weather_iso2s <- if ("EU" %in% iso2s) {
-    get_eu_iso2s(include_eu = F)
+    get_eu_iso2s(include_eu = FALSE)
   } else {
     iso2s
   }
@@ -176,7 +177,8 @@ get_weather_correction_demand_elec <- function(iso2s = "EU",
     model <- lm(formula, data = model_data)
 
     # Show model summary
-    summary_file <- file.path(diagnostics_folder, paste0("demand_correction_elec_summary_", iso2, ".txt"))
+    summary_file <- file.path(diagnostics_folder, paste0("demand_correction_elec_summary_", iso2,
+      ".txt"))
     writeLines(capture.output(summary(model)), summary_file)
 
     # Predict at ACTUAL weather (fitted values)
@@ -201,7 +203,8 @@ get_weather_correction_demand_elec <- function(iso2s = "EU",
 
     # Return correction factors
     model_data_averaged %>%
-      select(date, correction_factor, value_actual = value_mwh, value_weather_corrected = value_mwh_corrected) %>%
+      select(date, correction_factor, value_actual = value_mwh, value_weather_corrected =
+        value_mwh_corrected) %>%
       mutate(unit = "MWh") %>%
       tidyr::complete(
         date = seq(as.Date(date_from), as.Date(date_to), by = "day"),
@@ -264,7 +267,7 @@ get_weather_correction_demand_gas <- function(iso2s = "EU",
 
   # Get weather data (HDD only for gas)
   weather_iso2s <- if ("EU" %in% iso2s) {
-    get_eu_iso2s(include_eu = F)
+    get_eu_iso2s(include_eu = FALSE)
   } else {
     iso2s
   }
@@ -330,12 +333,15 @@ get_weather_correction_demand_gas <- function(iso2s = "EU",
     # Fit regression model: gas demand ~ HDD:country
     # We don't introduce a year interaction because we only have nyears * 12 data points
     # and already n_countries predictors
-    formula <- as.formula(paste("value ~ as.factor(wday) + value_mw + ", paste(formula_terms, collapse = " + ")))
-    model <- lm(formula, data = model_data %>% group_by(floor_date(date, "month")) %>% filter(date == min(date)))
+    formula <- as.formula(paste("value ~ as.factor(wday) + value_mw + ", paste(formula_terms,
+      collapse = " + ")))
+    model <- lm(formula, data = model_data %>% group_by(floor_date(date, "month")) %>%
+      filter(date == min(date)))
 
     # Show model summary
     # summary(model)
-    summary_file <- file.path(diagnostics_folder, paste0("demand_correction_gas_summary_", iso2, ".txt"))
+    summary_file <- file.path(diagnostics_folder, paste0("demand_correction_gas_summary_", iso2,
+      ".txt"))
     writeLines(capture.output(summary(model)), summary_file)
 
 
@@ -349,7 +355,8 @@ get_weather_correction_demand_gas <- function(iso2s = "EU",
       ungroup()
 
     # Predict at NORMAL weather (weather-averaged)
-    model_data_averaged$fitted_normal <- predict(model, model_data_averaged %>% mutate(value_mw = 0))
+    model_data_averaged$fitted_normal <- predict(model, model_data_averaged %>% mutate(value_mw =
+      0))
 
     # Calculate correction factor: 1 + (fitted_normal - fitted_actual) / value
     model_data_averaged <- model_data_averaged %>%
@@ -405,7 +412,8 @@ plot_demand_correction <- function(correction_factors, diagnostics_folder) {
     ) +
     labs(
       title = "Demand Weather Correction Factors",
-      subtitle = "Averaged per year and sector. Weather-corrected demand = Correction factor * Observed demand",
+      subtitle = "Averaged per year and sector. Weather-corrected demand = Correction factor *
+        Observed demand",
       x = NULL,
       y = NULL
     ) +
@@ -417,6 +425,6 @@ plot_demand_correction <- function(correction_factors, diagnostics_folder) {
     plot = p,
     width = 12,
     height = 8,
-    preview = F
+    preview = FALSE
   )
 }

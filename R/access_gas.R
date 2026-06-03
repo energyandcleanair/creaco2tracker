@@ -7,10 +7,12 @@
 #'
 #' @return Tibble with ENTSOG flow data.
 #' @keywords internal
-gas_data_access_get_entsog_flow <- function(years,
-                                            use_cache = TRUE,
-                                            verbose = FALSE,
-                                            data_masking = NULL) {
+gas_data_access_get_entsog_flow <- function(
+  years,
+  use_cache = TRUE,
+  verbose = FALSE,
+  data_masking = NULL
+) {
   creahelpers::api.get(
     "https://api.russiafossiltracker.com/v0/entsogflow",
     date_from = glue("{min(years)}-01-01}"),
@@ -38,11 +40,13 @@ gas_data_access_get_entsog_flow <- function(years,
 #'
 #' @return Tibble with AGSI storage change data.
 #' @keywords internal
-gas_data_access_get_agsi_storage <- function(date_from,
-                                             date_to,
-                                             iso2,
-                                             verbose = FALSE,
-                                             data_masking = NULL) {
+gas_data_access_get_agsi_storage <- function(
+  date_from,
+  date_to,
+  iso2,
+  verbose = FALSE,
+  data_masking = NULL
+) {
   agsi.get_storage_change(
     date_from = date_from,
     date_to = date_to,

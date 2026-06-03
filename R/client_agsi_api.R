@@ -1,4 +1,4 @@
-agsi.get_storage_change <- function(date_from, date_to, iso2, verbose = F) {
+agsi.get_storage_change <- function(date_from, date_to, iso2, verbose = FALSE) {
   pbapply::pblapply(iso2, function(iso2) {
     message(glue("Getting storage change data for {iso2} from {date_from} to {date_to}"))
 
@@ -14,8 +14,8 @@ agsi.get_storage_change <- function(date_from, date_to, iso2, verbose = F) {
       iso2, date_from, date_to
     )
 
-    httpResponse <- httr::GET(url, httr::add_headers("x-key" = api_key), httr::accept_json())
-    data <- jsonlite::fromJSON(httr::content(httpResponse, "text", encoding = "UTF-8"))
+    http_response <- httr::GET(url, httr::add_headers("x-key" = api_key), httr::accept_json())
+    data <- jsonlite::fromJSON(httr::content(http_response, "text", encoding = "UTF-8"))
     data <- data$data
 
     if (nrow(data) == 0 || !"netWithdrawal" %in% names(data)) {

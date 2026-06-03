@@ -21,12 +21,12 @@ plot_vs_targets <- function(co2,
     filter(iso2 %in% iso2s, estimate == "central", fuel != FUEL_TOTAL) %>%
     filter(sector != SECTOR_TRANSPORT_INTERNATIONAL_AVIATION) %>%
     group_by(year = year(date), date = floor_date(date, "year"), sector) %>%
-    summarise(value = sum(value, na.rm = T) / 1e9, .groups = "drop")
+    summarise(value = sum(value, na.rm = TRUE) / 1e9, .groups = "drop")
 
   # Get 2010 baseline for EU target calculation
   baseline_2010 <- co2_filtered %>%
     filter(year == 2010) %>%
-    summarise(value = sum(value, na.rm = T)) %>%
+    summarise(value = sum(value, na.rm = TRUE)) %>%
     pull(value)
 
   # Calculate targets
@@ -45,7 +45,7 @@ plot_vs_targets <- function(co2,
   # Create target projection data
   latest_total <- co2_filtered %>%
     filter(year == year_f) %>%
-    summarise(value = sum(value, na.rm = T)) %>%
+    summarise(value = sum(value, na.rm = TRUE)) %>%
     pull(value)
 
   target_projection_2030 <- tibble(
@@ -106,8 +106,10 @@ plot_vs_targets <- function(co2,
       caption = paste0(
         c(
           "Source: CREA estimates based on EUROSTAT, IPCC and Climate Action Tracker (CAT).",
-          "Targets are based on CAT interpretation of 2023 EU NDCs: 44% reduction by 2030 and 93% by 2050 compared to 2010 levels.",
-          "Estimates include emissions from fossil fuel combustion alone and excludes LULUCF and international aviation."
+          "Targets are based on CAT interpretation of 2023 EU NDCs: 44% reduction by 2030 and 93%
+            by 2050 compared to 2010 levels.",
+          "Estimates include emissions from fossil fuel combustion alone and excludes LULUCF and
+            international aviation."
         ),
         collapse = "\n"
       ),

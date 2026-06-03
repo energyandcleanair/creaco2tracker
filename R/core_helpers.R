@@ -1,4 +1,4 @@
-get_eu_iso2s <- function(eurostat = F, include_eu = F) {
+get_eu_iso2s <- function(eurostat = FALSE, include_eu = FALSE) {
   cl <- countrycode::codelist
   iso2s <- cl$iso2c[which(cl$eu28 == "EU" & cl$iso2c != "GB")]
   if (eurostat) iso2s[iso2s == "GR"] <- "EL"
@@ -11,7 +11,8 @@ recode_siec <- function(x) {
   x %>%
     mutate(siec = recode(
       siec,
-      "Crude oil, NGL, refinery feedstocks, additives and oxygenates and other hydrocarbons" = "Crude oil",
+      "Crude oil, NGL, refinery feedstocks, additives and oxygenates and other hydrocarbons" =
+        "Crude oil",
       "Oil shale and oil sands" = "Oil shale"
     ))
 }
@@ -125,7 +126,8 @@ split_gas_to_elec_others <- function(co2) {
     add_missing_cols(c("all", "others", "electricity")) %>%
     mutate(
       others = suppressWarnings(coalesce(others, all - electricity)), # calculate others value
-      electricity = suppressWarnings(coalesce(electricity, all - others)) # calculate electricity value
+      electricity = suppressWarnings(coalesce(electricity, all -
+        others)) # calculate electricity value
     ) %>%
     select(-all) %>%
     pivot_longer(
@@ -234,7 +236,8 @@ add_total_co2 <- function(co2) {
 }
 
 combine_coke_coal <- function(co2) {
-  group_by_cols <- intersect(names(co2), c("iso2", "geo", "region", "date", "fuel", "sector", "unit"))
+  group_by_cols <- intersect(names(co2), c("iso2", "geo", "region", "date", "fuel", "sector",
+    "unit"))
   co2 %>%
     filter(fuel %in% c(FUEL_COAL, FUEL_COKE)) %>%
     mutate(fuel = FUEL_COAL) %>%
@@ -327,8 +330,8 @@ check_no_double_counting <- function(x) {
 }
 
 create_dir <- function(folder) {
-  if (!is.null(folder) & !rlang::is_empty(folder)) {
-    dir.create(folder, showWarnings = F, recursive = T)
+  if (!is.null(folder) && !rlang::is_empty(folder)) {
+    dir.create(folder, showWarnings = FALSE, recursive = TRUE)
   }
 }
 
@@ -346,8 +349,10 @@ sector_label_to_code <- function(sector_label) {
     sector_label == str_to_title(SECTOR_ELEC) ~ SECTOR_ELEC,
     sector_label == str_to_title(SECTOR_TRANSPORT) ~ SECTOR_TRANSPORT,
     sector_label == str_to_title(SECTOR_TRANSPORT_DOMESTIC) ~ SECTOR_TRANSPORT_DOMESTIC,
-    sector_label == str_to_title(SECTOR_TRANSPORT_INTERNATIONAL_AVIATION) ~ SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,
-    sector_label == str_to_title(SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING) ~ SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING,
+    sector_label == str_to_title(SECTOR_TRANSPORT_INTERNATIONAL_AVIATION) ~
+      SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,
+    sector_label == str_to_title(SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING) ~
+      SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING,
     sector_label == str_to_title(SECTOR_OTHERS) ~ SECTOR_OTHERS,
     sector_label == str_to_title(SECTOR_ALL) ~ SECTOR_ALL,
     TRUE ~ NA_character_

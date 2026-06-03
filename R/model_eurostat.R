@@ -13,7 +13,7 @@
 get_eurostat_cons <- function(
   pwr_generation,
   diagnostics_folder = "diagnostics/eurostat",
-  use_cache = F,
+  use_cache = FALSE,
   iso2s = NULL,
   data_masking = NULL
 ) {
@@ -49,7 +49,7 @@ get_eurostat_cons <- function(
   aggregate <- function(x) {
     x %>%
       group_by(iso2, sector, time, unit, siec_code, fuel) %>%
-      summarise_at("values", sum, na.rm = T) %>%
+      summarise_at("values", sum, na.rm = TRUE) %>%
       ungroup()
   }
 
@@ -67,8 +67,10 @@ get_eurostat_cons <- function(
   # Process data
   cons_monthly <- list(
     oil = process_oil_monthly(cons_raw_oil$monthly),
-    solid = process_solid_monthly(cons_raw_solid$monthly, pwr_generation = pwr_generation) %>% eurostat_split_elec_others(),
-    gas = process_gas_monthly(cons_raw_gas$monthly, pwr_generation = pwr_generation) %>% eurostat_split_elec_others()
+    solid = process_solid_monthly(cons_raw_solid$monthly, pwr_generation = pwr_generation) %>%
+      eurostat_split_elec_others(),
+    gas = process_gas_monthly(cons_raw_gas$monthly, pwr_generation = pwr_generation) %>%
+      eurostat_split_elec_others()
   ) %>%
     bind_rows() %>%
     aggregate() %>%
@@ -78,7 +80,8 @@ get_eurostat_cons <- function(
   cons_yearly <- list(
     oil = process_oil_yearly(cons_raw_oil$yearly),
     solid = process_solid_yearly(cons_raw_solid$yearly) %>% eurostat_split_elec_others(),
-    gas = process_gas_yearly(cons_raw_gas$yearly, pwr_generation = pwr_generation) %>% eurostat_split_elec_others()
+    gas = process_gas_yearly(cons_raw_gas$yearly, pwr_generation = pwr_generation) %>%
+      eurostat_split_elec_others()
   ) %>%
     bind_rows() %>%
     aggregate() %>%
@@ -86,7 +89,7 @@ get_eurostat_cons <- function(
     select(iso2, sector, time, unit, siec_code, fuel, values)
 
   # Check that there is no na value
-  if (any(!complete.cases(cons_monthly)) | any(!complete.cases(cons_yearly))) {
+  if (any(!complete.cases(cons_monthly)) || any(!complete.cases(cons_yearly))) {
     stop("There are NA values in the data (except in the 'values' column).")
   }
 
@@ -156,7 +159,7 @@ get_eurostat_cons <- function(
 #' @examples
 apply_seasonal_adjustment <- function(cons_yearly, cons_monthly) {
   # Check that there is no na value
-  if (any(!complete.cases(cons_monthly)) | any(!complete.cases(cons_yearly))) {
+  if (any(!complete.cases(cons_monthly)) || any(!complete.cases(cons_yearly))) {
     stop("There are NA values in the data (except in the 'values' column).")
   }
 
@@ -166,9 +169,9 @@ apply_seasonal_adjustment <- function(cons_yearly, cons_monthly) {
     mutate(count = n()) %>%
     filter(count == 12) %>%
     group_by(sector, siec_code, unit, iso2, fuel, month = lubridate::month(time)) %>%
-    summarise(values = sum(values, na.rm = T), .groups = "drop") %>%
+    summarise(values = sum(values, na.rm = TRUE), .groups = "drop") %>%
     group_by(sector, siec_code, unit, iso2, fuel) %>%
-    mutate(month_share = values / sum(values, na.rm = T)) %>%
+    mutate(month_share = values / sum(values, na.rm = TRUE)) %>%
     mutate(
       month_share = replace_na(month_share, 1 / 12),
       month_share = case_when(
@@ -237,7 +240,7 @@ remove_last_incomplete <- function(cons) {
 #'
 #' @examples
 get_eurostat_indprod <- function(diagnostics_folder = NULL,
-                                 use_cache = F,
+                                 use_cache = FALSE,
                                  iso2s = NULL,
                                  data_masking = NULL) {
   indprod_raw <- eurostat_data_access_get_indprod(

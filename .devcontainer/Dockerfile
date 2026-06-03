@@ -34,6 +34,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg-dev \
     && rm -rf /var/lib/apt/lists/*
 
+RUN mkdir /workspaces && \
+    chown rstudio:rstudio /workspaces && \
+    chmod 755 /workspaces
+
+USER rstudio
+
 COPY Rprofile.site /usr/local/lib/R/etc/Rprofile.site
 COPY Renviron.site /usr/local/lib/R/etc/Renviron.site
 

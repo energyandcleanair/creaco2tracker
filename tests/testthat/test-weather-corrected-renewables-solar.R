@@ -5,15 +5,18 @@ library(lubridate)
 # Helper function to mock get_weather for solar
 mock_weather_function_solar <- function(mock_data) {
   # Try to get the function from the package namespace
-  ns_name <- tryCatch({
-    if (exists("get_weather", envir = asNamespace("creaco2tracker"))) {
-      "creaco2tracker"
-    } else {
-      stop("Namespace not found")
+  ns_name <- tryCatch(
+    {
+      if (exists("get_weather", envir = asNamespace("creaco2tracker"))) {
+        "creaco2tracker"
+      } else {
+        stop("Namespace not found")
+      }
+    },
+    error = function(e) {
+      NULL
     }
-  }, error = function(e) {
-    NULL
-  })
+  )
 
   original_func <- if (!is.null(ns_name)) {
     get("get_weather", envir = asNamespace(ns_name))
@@ -62,16 +65,19 @@ test_that("get_weather_corrected_solar with multiple countries and varying weath
       region_iso2 = "DE",
       variable = "solar_radiation",
       value = case_when(
-        year(date) == 2020 ~ 2.0 + 1.0 * sin(2 * pi * lubridate::yday(date) / 365),  # Low base, seasonal
-        year(date) == 2021 ~ 3.0 + 1.0 * sin(2 * pi * lubridate::yday(date) / 365),  # Avg base, seasonal
-        year(date) == 2022 ~ 4.0 + 1.0 * sin(2 * pi * lubridate::yday(date) / 365)   # High base, seasonal
+        # Low base, seasonal
+        year(date) == 2020 ~ 2.0 + 1.0 * sin(2 * pi * lubridate::yday(date) / 365),
+        # Avg base, seasonal
+        year(date) == 2021 ~ 3.0 + 1.0 * sin(2 * pi * lubridate::yday(date) / 365),
+        # High base, seasonal
+        year(date) == 2022 ~ 4.0 + 1.0 * sin(2 * pi * lubridate::yday(date) / 365)
       )
     ),
     tibble(
       date = dates,
       region_iso2 = "FR",
       variable = "solar_radiation",
-      value = 3.0 + 1.0 * sin(2 * pi * lubridate::yday(date) / 365)  # Constant base, seasonal
+      value = 3.0 + 1.0 * sin(2 * pi * lubridate::yday(date) / 365) # Constant base, seasonal
     )
   )
 
@@ -85,7 +91,7 @@ test_that("get_weather_corrected_solar with multiple countries and varying weath
       mutate(
         iso2 = "DE",
         source = "Solar",
-        value_mwh = value * 100  # Direct correlation with weather
+        value_mwh = value * 100 # Direct correlation with weather
       ) %>%
       select(date, iso2, source, value_mwh),
     # FR: generation proportional to solar radiation
@@ -94,7 +100,7 @@ test_that("get_weather_corrected_solar with multiple countries and varying weath
       mutate(
         iso2 = "FR",
         source = "Solar",
-        value_mwh = value * 100  # Direct correlation with weather
+        value_mwh = value * 100 # Direct correlation with weather
       ) %>%
       select(date, iso2, source, value_mwh)
   )
@@ -139,9 +145,9 @@ test_that("get_weather_corrected_solar with multiple countries and varying weath
   de_2022 <- result_summary %>% filter(iso2 == "DE", year == 2022)
 
   # With seasonal variation, means should be close to base * 100
-  expect_true(de_2020$actual_mean > 150 && de_2020$actual_mean < 250)  # Around 200
-  expect_true(de_2021$actual_mean > 250 && de_2021$actual_mean < 350)  # Around 300
-  expect_true(de_2022$actual_mean > 350 && de_2022$actual_mean < 450)  # Around 400
+  expect_true(de_2020$actual_mean > 150 && de_2020$actual_mean < 250) # Around 200
+  expect_true(de_2021$actual_mean > 250 && de_2021$actual_mean < 350) # Around 300
+  expect_true(de_2022$actual_mean > 350 && de_2022$actual_mean < 450) # Around 400
 
   # FR: Should be around 300 with seasonal variation
   fr_all <- result_summary %>% filter(iso2 == "FR")
@@ -156,15 +162,16 @@ test_that("get_weather_corrected_solar with multiple countries and varying weath
   correction_2022 <- de_2022$corrected_mean - de_2022$actual_mean
 
   # 2020 (low year) should be corrected upward (positive correction)
-  expect_true(correction_2020 > -50)  # Allow some tolerance, but should be positive or small negative
+  # Allow some tolerance, but should be positive or small negative
+  expect_true(correction_2020 > -50)
 
   # 2022 (high year) should be corrected downward (negative correction)
-  expect_true(correction_2022 < 50)  # Allow some tolerance, but should be negative or small positive
+  expect_true(correction_2022 < 50) # Allow some tolerance, but should be negative or small positive
 
   # FR: With constant weather, correction should be minimal
   # (all years should have similar corrected values, close to actual)
   fr_correction_range <- max(fr_all$corrected_mean) - min(fr_all$corrected_mean)
-  expect_true(fr_correction_range < 50)  # Small variation
+  expect_true(fr_correction_range < 50) # Small variation
 
   # Verify sum conservation for constant weather (FR)
   # With constant weather, sum should be approximately conserved
@@ -178,4 +185,3 @@ test_that("get_weather_corrected_solar with multiple countries and varying weath
   # Sum should be close (within 5% due to model fitting)
   expect_true(abs(fr_sum$sum_actual - fr_sum$sum_corrected) / fr_sum$sum_actual < 0.05)
 })
-

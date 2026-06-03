@@ -16,7 +16,7 @@ get_validity_metrics <- function(
   max_mae = 0.03
 ) {
   # Get validation data first (similar to validate_co2 function)
-  if (is.null(validation_data) | !all(unique(co2$iso2) %in% unique(validation_data$iso2))) {
+  if (is.null(validation_data) || !all(unique(co2$iso2) %in% unique(validation_data$iso2))) {
     validation_data <- get_validation_data(region = unique(co2$iso2))
   }
 
@@ -69,10 +69,12 @@ get_validity_metrics <- function(
     pivot_wider(names_from = source, values_from = yoy) %>%
     group_by(iso2) %>%
     summarise(
-      rmse = sqrt(mean((CREA - `Global Carbon Budget 2025`)^2, na.rm = TRUE)), # Root Mean Square Error
+      rmse = sqrt(mean((CREA - `Global Carbon Budget 2025`)^2, na.rm = TRUE)),
+        # Root Mean Square Error
       mae = mean(abs(CREA - `Global Carbon Budget 2025`), na.rm = TRUE), # Mean Absolute Error
       correlation = cor(CREA, `Global Carbon Budget 2025`, use = "complete.obs"), # Correlation
-      n_years = sum(!is.na(CREA) & !is.na(`Global Carbon Budget 2025`)), # Number of comparable years
+      n_years = sum(!is.na(CREA) & !is.na(`Global Carbon Budget 2025`)),
+        # Number of comparable years
       .groups = "drop"
     ) %>%
     mutate(

@@ -4,7 +4,8 @@ downscale_daily <- function(co2, pwr_generation, gas_demand, cut_latest_days = 3
     split_gas_to_elec_all()
 
 
-  daily_proxy <- get_daily_proxy(pwr_generation = pwr_generation, gas_demand = gas_demand, cut_latest_days = cut_latest_days)
+  daily_proxy <- get_daily_proxy(pwr_generation = pwr_generation, gas_demand = gas_demand,
+    cut_latest_days = cut_latest_days)
 
   # identify variable combos with data
   grps <- co2 %>%
@@ -76,7 +77,8 @@ downscale_daily <- function(co2, pwr_generation, gas_demand, cut_latest_days = 3
   ) %>%
     filter(!is.na(value_before) | !is.na(value_after))
 
-  stopifnot("Error: changed monthly total" = all(near(comparison$value_before, comparison$value_after, tol = 0.1)))
+  stopifnot("Error: changed monthly total" = all(near(comparison$value_before,
+    comparison$value_after, tol = 0.1)))
 
   return(co2_daily)
 }

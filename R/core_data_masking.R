@@ -195,7 +195,8 @@ data_masking_as_of_batch <- function(dates, lags = default_source_lags()) {
     if (lag_days <= 0) {
       return(lubridate::floor_date(reference_date, "year"))
     }
-    return(as.Date(sprintf("%d-01-01", as.integer(format(lubridate::floor_date(cutoff_date, "year"), "%Y")) - 1L)))
+    return(as.Date(sprintf("%d-01-01", as.integer(format(lubridate::floor_date(cutoff_date,
+      "year"), "%Y")) - 1L)))
   }
 
   cutoff_date
@@ -419,7 +420,8 @@ apply_source_data_mask <- function(x, source_name, data_masking = NULL) {
   specs <- .data_source_mask_specs()[[source_key]]
 
   if (is.null(specs)) {
-    warning(glue::glue("Unknown source '{source_name}' for masking. Returning data unchanged."), call. = FALSE)
+    warning(glue::glue("Unknown source '{source_name}' for masking. Returning data unchanged."),
+      call. = FALSE)
     return(x)
   }
 
@@ -433,7 +435,8 @@ apply_source_data_mask <- function(x, source_name, data_masking = NULL) {
 
   date_col <- specs$date_col
   if (!date_col %in% names(x)) {
-    warning(glue::glue("Date column '{date_col}' missing for source '{source_key}'. Returning unchanged."), call. = FALSE)
+    warning(glue::glue("Date column '{date_col}' missing for source '{source_key}'. Returning
+      unchanged."), call. = FALSE)
     return(x)
   }
 

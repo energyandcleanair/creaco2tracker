@@ -9,12 +9,14 @@
 #'
 #' @return Tibble with filled weather data.
 #' @keywords internal
-weather_data_access_get_filled <- function(variable = "HDD,CDD",
-                                           region_id,
-                                           date_from,
-                                           date_to,
-                                           use_cache = TRUE,
-                                           data_masking = NULL) {
+weather_data_access_get_filled <- function(
+  variable = "HDD,CDD",
+  region_id,
+  date_from,
+  date_to,
+  use_cache = TRUE,
+  data_masking = NULL
+) {
   get_weather(
     variable = variable,
     region_id = region_id,

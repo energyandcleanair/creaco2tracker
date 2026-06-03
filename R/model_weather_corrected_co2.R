@@ -10,7 +10,8 @@
 #' @param apply_powermix_correction Logical, apply power generation mix correction (default TRUE)
 #' @param sources Character vector of renewable sources to use in powermix correction.
 #'   Default c("hydro", "solar", "wind"). Passed to get_weather_correction_powermix().
-#' @param demand_fuels Character vector of demand types to correct. Default c("electricity", "fossil_gas").
+#' @param demand_fuels Character vector of demand types to correct. Default c("electricity",
+#' "fossil_gas").
 #'   Valid values: "electricity", "fossil_gas". Passed to get_weather_correction_demand().
 #' @param use_cache Logical, use cached data (default TRUE)
 #' @param diagnostics_folder Optional folder for diagnostic plots
@@ -18,12 +19,15 @@
 #' @return A list containing:
 #'   - \code{co2_weather_corrected}: CO2 data frame with weather corrections applied.
 #'     Contains original columns plus:
-#'     - \code{correction_factor_powermix}: Power mix correction ratio (if apply_powermix_correction=TRUE)
+#' - \code{correction_factor_powermix}: Power mix correction ratio (if
+#' apply_powermix_correction=TRUE)
 #'     - \code{correction_factor_demand}: Demand correction ratio (if apply_demand_correction=TRUE)
 #'     - \code{correction_factor_total}: Combined correction (product of applicable factors)
 #'     - \code{value}: Weather-corrected emissions (original value column is modified)
-#'   - \code{weather_correction_powermix}: Power mix correction factors data frame (if apply_powermix_correction=TRUE)
-#'   - \code{weather_correction_demand}: Demand correction factors data frame (if apply_demand_correction=TRUE)
+#' - \code{weather_correction_powermix}: Power mix correction factors data frame (if
+#' apply_powermix_correction=TRUE)
+#' - \code{weather_correction_demand}: Demand correction factors data frame (if
+#' apply_demand_correction=TRUE)
 #'
 #'
 #' @export
@@ -97,7 +101,8 @@ get_weather_corrected_co2 <- function(co2,
     # Expand fuel total to all fuels
     fuels_total <- c(FUEL_COAL, FUEL_OIL, FUEL_GAS, FUEL_OIL)
     wc_demand_w_fuels <- wc_demand %>%
-      full_join(tibble(fuel = FUEL_TOTAL, fuels = fuels_total), by = "fuel", relationship = "many-to-many") %>%
+      full_join(tibble(fuel = FUEL_TOTAL, fuels = fuels_total), by = "fuel", relationship =
+        "many-to-many") %>%
       mutate(fuel = coalesce(fuels, fuel)) %>%
       select(-fuels)
 
