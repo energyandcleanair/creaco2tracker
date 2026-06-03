@@ -92,11 +92,13 @@ get_weather_correction_demand <- function(
 #' @inheritParams get_weather_correction_demand
 #' @return Tibble with electricity demand correction factors
 #' @keywords internal
-get_weather_correction_demand_elec <- function(iso2s = "EU",
-                                               date_from = "2015-01-01",
-                                               date_to = Sys.Date(),
-                                               use_cache = TRUE,
-                                               diagnostics_folder = NULL) {
+get_weather_correction_demand_elec <- function(
+  iso2s = "EU",
+  date_from = "2015-01-01",
+  date_to = Sys.Date(),
+  use_cache = TRUE,
+  diagnostics_folder = NULL
+) {
   # Get power generation data
   pwr <- get_power_generation(date_from = date_from, use_cache = use_cache)
 
@@ -123,12 +125,14 @@ get_weather_correction_demand_elec <- function(iso2s = "EU",
     # Check if we have sufficient data
     if (nrow(country_pwr) < 100) {
       warning(glue("Insufficient power data for {iso2}, returning factor=1.0"))
-      return(tibble(
-        iso2 = iso2,
-        date = seq(as.Date(date_from), as.Date(date_to), by = "day"),
-        sector = SECTOR_ELEC,
-        correction_factor = 1.0
-      ))
+      return(
+        tibble(
+          iso2 = iso2,
+          date = seq(as.Date(date_from), as.Date(date_to), by = "day"),
+          sector = SECTOR_ELEC,
+          correction_factor = 1.0
+        )
+      )
     }
 
     # Get country-specific weather
@@ -159,26 +163,34 @@ get_weather_correction_demand_elec <- function(iso2s = "EU",
     # Check for sufficient merged data
     if (nrow(model_data) < 100) {
       warning(glue("Insufficient merged data for {country}, returning factor=1.0"))
-      return(tibble(
-        iso2 = iso2,
-        date = seq(as.Date(date_from), as.Date(date_to), by = "day"),
-        sector = SECTOR_ELEC,
-        correction_factor = 1.0
-      ))
+      return(
+        tibble(
+          iso2 = iso2,
+          date = seq(as.Date(date_from), as.Date(date_to), by = "day"),
+          sector = SECTOR_ELEC,
+          correction_factor = 1.0
+        )
+      )
     }
 
     # Fit regression model: demand ~ HDD + CDD + day-of-week + HDD:year + CDD:year
-    formula <- as.formula(paste(
-      "value_mwh ~", paste(formula_terms, collapse = " + "),
-      " + ",
-      paste(paste0(formula_terms, ":year_c"), collapse = " + "),
-      "+ as.factor(wday)"
-    ))
+    formula <- as.formula(
+      paste(
+        "value_mwh ~", paste(formula_terms, collapse = " + "),
+        " + ",
+        paste(paste0(formula_terms, ":year_c"), collapse = " + "),
+        "+ as.factor(wday)"
+      )
+    )
     model <- lm(formula, data = model_data)
 
     # Show model summary
-    summary_file <- file.path(diagnostics_folder, paste0("demand_correction_elec_summary_", iso2,
-      ".txt"))
+    summary_file <- file.path(
+      diagnostics_folder, paste0(
+        "demand_correction_elec_summary_", iso2,
+        ".txt"
+      )
+    )
     writeLines(capture.output(summary(model)), summary_file)
 
     # Predict at ACTUAL weather (fitted values)
@@ -203,8 +215,11 @@ get_weather_correction_demand_elec <- function(iso2s = "EU",
 
     # Return correction factors
     model_data_averaged %>%
-      select(date, correction_factor, value_actual = value_mwh, value_weather_corrected =
-        value_mwh_corrected) %>%
+      select(
+        date, correction_factor,
+        value_actual = value_mwh, value_weather_corrected =
+          value_mwh_corrected
+      ) %>%
       mutate(unit = "MWh") %>%
       tidyr::complete(
         date = seq(as.Date(date_from), as.Date(date_to), by = "day"),
@@ -228,38 +243,19 @@ get_weather_correction_demand_elec <- function(iso2s = "EU",
 #' @inheritParams get_weather_correction_demand
 #' @return Tibble with gas demand correction factors
 #' @keywords internal
-get_weather_correction_demand_gas <- function(iso2s = "EU",
-                                              date_from = "2015-01-01",
-                                              date_to = Sys.Date(),
-                                              use_cache = TRUE,
-                                              diagnostics_folder = NULL) {
+get_weather_correction_demand_gas <- function(
+  iso2s = "EU",
+  date_from = "2015-01-01",
+  date_to = Sys.Date(),
+  use_cache = TRUE,
+  diagnostics_folder = NULL
+) {
   # Expand EU to member countries
   stopifnot("demand correction at country level is not supported yet" = all(iso2s == "EU"))
 
 
   # NEW APPROACH: We use daily gas demand
   gas_demand <- download_gas_demand(iso2 = iso2s, use_cache = use_cache)
-
-
-  # OLD APPROACH: We used gas-others derived from our previous co2 computations
-  # co2 <- download_co2()
-  #
-  # # Extract gas demand (excluding power sector)
-  # gas_demand <- co2 %>%
-  #   filter(fuel == FUEL_GAS,
-  #          !sector %in% c(SECTOR_ELEC, SECTOR_ALL)) %>%
-  #   group_by(iso2, date) %>%
-  #   summarise(value = sum(value, na.rm = TRUE), .groups = "drop") %>%
-  #   select(iso2, date, value) %>%
-  #   filter(date >= as.Date(date_from))
-  #
-  # non_power_sectors <- co2 %>%
-  #   filter(
-  #     fuel == FUEL_GAS,
-  #     !sector %in% c(SECTOR_ELEC, SECTOR_ALL)) %>%
-  #   distinct(sector) %>%
-  #   pull(sector)
-  # }
 
   # Get power generation data
   pwr_gas <- get_power_generation(date_from = date_from, use_cache = use_cache) %>%
@@ -321,27 +317,33 @@ get_weather_correction_demand_gas <- function(iso2s = "EU",
     # Check for sufficient merged data
     if (nrow(model_data) < 100) {
       warning(glue("Insufficient merged data for {iso2}, returning factor=1.0"))
-      return(tibble(
-        iso2 = iso2,
-        date = seq(as.Date(date_from), as.Date(date_to), by = "day"),
-        fuel = FUEL_GAS,
-        correction_factor = 1.0
-      ) %>%
-        tidyr::crossing(sector = non_power_sectors))
+      return(
+        tibble(
+          iso2 = iso2,
+          date = seq(as.Date(date_from), as.Date(date_to), by = "day"),
+          fuel = FUEL_GAS,
+          correction_factor = 1.0
+        ) %>%
+          tidyr::crossing(sector = non_power_sectors)
+      )
     }
 
     # Fit regression model: gas demand ~ HDD:country
     # We don't introduce a year interaction because we only have nyears * 12 data points
     # and already n_countries predictors
     formula <- as.formula(paste("value ~ as.factor(wday) + value_mw + ", paste(formula_terms,
-      collapse = " + ")))
+      collapse = " + "
+    )))
     model <- lm(formula, data = model_data %>% group_by(floor_date(date, "month")) %>%
       filter(date == min(date)))
 
     # Show model summary
-    # summary(model)
-    summary_file <- file.path(diagnostics_folder, paste0("demand_correction_gas_summary_", iso2,
-      ".txt"))
+    summary_file <- file.path(
+      diagnostics_folder, paste0(
+        "demand_correction_gas_summary_", iso2,
+        ".txt"
+      )
+    )
     writeLines(capture.output(summary(model)), summary_file)
 
 
@@ -355,8 +357,12 @@ get_weather_correction_demand_gas <- function(iso2s = "EU",
       ungroup()
 
     # Predict at NORMAL weather (weather-averaged)
-    model_data_averaged$fitted_normal <- predict(model, model_data_averaged %>% mutate(value_mw =
-      0))
+    model_data_averaged$fitted_normal <- predict(
+      model, model_data_averaged %>% mutate(
+        value_mw =
+          0
+      )
+    )
 
     # Calculate correction factor: 1 + (fitted_normal - fitted_actual) / value
     model_data_averaged <- model_data_averaged %>%

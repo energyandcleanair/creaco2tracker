@@ -44,13 +44,15 @@
 #'   scale factor is carried forward.
 #'
 #' @export
-get_gas_demand <- function(iso2s = NULL,
-                           date_to = NULL,
-                           diagnostics_folder = "diagnostics/gas_demand",
-                           verbose = FALSE,
-                           use_cache = TRUE,
-                           correct_to_eurostat = FALSE,
-                           data_masking = NULL) {
+get_gas_demand <- function(
+  iso2s = NULL,
+  date_to = NULL,
+  diagnostics_folder = "diagnostics/gas_demand",
+  verbose = FALSE,
+  use_cache = TRUE,
+  correct_to_eurostat = FALSE,
+  data_masking = NULL
+) {
   years <- seq(2015, lubridate::year(lubridate::today()))
 
   create_dir(diagnostics_folder)
@@ -183,8 +185,10 @@ get_gas_demand_consdist <- function(entsog_data, years, verbose = FALSE) {
 
   consdist <- entsog %>%
     group_by(iso2 = destination_iso2, date) %>%
-    summarise(value_m3 = .summarise_masked_sum(value_m3, multiplier = -1), .groups =
-      "drop_last") %>%
+    summarise(
+      value_m3 = .summarise_masked_sum(value_m3, multiplier = -1), .groups =
+        "drop_last"
+    ) %>%
     arrange(date) %>%
     mutate(preserve_na = is.na(value_m3)) %>%
     # Interpolate missing data
@@ -225,11 +229,13 @@ get_gas_demand_consdist <- function(entsog_data, years, verbose = FALSE) {
 #' @export
 #'
 #' @examples
-get_gas_demand_apparent <- function(entsog_data,
-                                    years,
-                                    use_agsi_for_storage = FALSE,
-                                    verbose = FALSE,
-                                    agsi_storage_data = NULL) {
+get_gas_demand_apparent <- function(
+  entsog_data,
+  years,
+  use_agsi_for_storage = FALSE,
+  verbose = FALSE,
+  agsi_storage_data = NULL
+) {
   entsog <- entsog_data %>%
     filter(type %in% c("storage", "crossborder", "production"))
 
@@ -356,11 +362,13 @@ get_eurostat_gas <- function(years = NULL, data_masking = NULL) {
 }
 
 
-keep_best <- function(consumption,
-                      diagnostics_folder,
-                      min_comparison_points = 24,
-                      min_r2 = 0.95, max_rrse = 0.4,
-                      data_masking = NULL) {
+keep_best <- function(
+  consumption,
+  diagnostics_folder,
+  min_comparison_points = 24,
+  min_r2 = 0.95, max_rrse = 0.4,
+  data_masking = NULL
+) {
   eurostat <- get_eurostat_gas(data_masking = data_masking) %>% filter(type == "consumption")
   rsq <- function(x, y) cor(x, y)^2
   min_start <- min(consumption$date)
@@ -383,9 +391,11 @@ keep_best <- function(consumption,
   bests <- pbapply::pblapply(date_froms, function(date_from) {
     consumption_monthly %>%
       filter(date >= date_from) %>%
-      left_join(eurostat %>%
-        rename(value_m3_eurostat = value_m3) %>%
-        select(-c(method))) %>%
+      left_join(
+        eurostat %>%
+          rename(value_m3_eurostat = value_m3) %>%
+          select(-c(method))
+      ) %>%
       filter(!is.na(value_m3_eurostat)) %>%
       group_by(iso2, method) %>%
       summarise(
@@ -504,7 +514,8 @@ keep_best <- function(consumption,
     ) %>%
     left_join(
       monthly_factors %>%
-        select(iso2, year, month,
+        select(
+          iso2, year, month,
           scale_factor = scale_factor_filled,
           ratio, is_extrapolated
         ),
@@ -534,9 +545,11 @@ keep_best <- function(consumption,
 #' @param diagnostics_folder Folder for diagnostics output
 #'
 #' @keywords internal
-.generate_gas_diagnostics <- function(gas_demand_raw,
-                                      gas_demand_corrected,
-                                      diagnostics_folder) {
+.generate_gas_diagnostics <- function(
+  gas_demand_raw,
+  gas_demand_corrected,
+  diagnostics_folder
+) {
   message("Generating gas demand diagnostics...")
   create_dir(diagnostics_folder)
 
@@ -590,7 +603,8 @@ keep_best <- function(consumption,
   plot_data <- plot_data %>%
     filter(iso2 %in% unique(gas_demand_raw$iso2)) %>%
     mutate(
-      country = countrycode::countrycode(iso2, "iso2c", "country.name",
+      country = countrycode::countrycode(
+        iso2, "iso2c", "country.name",
         custom_match = c("EU" = "EU")
       ),
       method = factor(method, levels = method_levels)

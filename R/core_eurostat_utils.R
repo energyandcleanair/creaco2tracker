@@ -10,10 +10,12 @@
 #' @param beyond_last_na Whether to fill NAs that occur after the last non-NA value (default: FALSE)
 #' @return A numeric vector with appropriate NA values filled with zeros
 #' @export
-fill_gaps_with_zero_when_suitable <- function(x,
-                                              consecutive_required = 3,
-                                              prob = 0.05,
-                                              beyond_last_na = FALSE) {
+fill_gaps_with_zero_when_suitable <- function(
+  x,
+  consecutive_required = 3,
+  prob = 0.05,
+  beyond_last_na = FALSE
+) {
   # 1. Determine threshold
   threshold <- quantile(x, probs = prob, na.rm = TRUE)
 
@@ -96,11 +98,13 @@ fill_gaps_with_interp_when_suitable <- function(x, cv_threshold = 0.1, maxgap = 
 #' @param min_points Minimum number of non-NA points required for correlation check (default: 12)
 #' @return A dataframe with filled EU values
 #' @export
-fill_eu_from_countries_sum <- function(data,
-                                       group_cols,
-                                       min_countries = 20,
-                                       max_rel_diff = 0.05,
-                                       min_points = 12) {
+fill_eu_from_countries_sum <- function(
+  data,
+  group_cols,
+  min_countries = 20,
+  max_rel_diff = 0.05,
+  min_points = 12
+) {
   # Add iso2 and time to group_cols if in data cols and not in group_cols
   group_cols <- unique(c(group_cols, "iso2", "time"))
 
@@ -162,8 +166,13 @@ fill_eu_from_countries_sum <- function(data,
       filter(!is.na(values), !is.na(values_sum)) %>%
       group_by(across(all_of(setdiff(group_cols, "time")))) %>%
       summarise(
-        corr = list(check_proxy_correlation(values, values_sum, max_rel_diff = max_rel_diff,
-          min_points = min_points)),
+        corr = list(
+          check_proxy_correlation(
+            values, values_sum,
+            max_rel_diff = max_rel_diff,
+            min_points = min_points
+          )
+        ),
         .groups = "drop"
       ) %>%
       # Expand list
@@ -227,14 +236,16 @@ fill_eu_from_countries_sum <- function(data,
 #' @param exclude_iso2s Vector of ISO2 codes to exclude from gap filling (default: "EU")
 #' @return A dataframe with filled gaps
 #' @export
-fill_gaps_in_time_series <- function(data,
-                                     group_cols,
-                                     zero_consecutive_required = 3,
-                                     zero_consecutive_required_beyond_last = 12,
-                                     zero_prob = 0.05,
-                                     interp_cv_threshold = 0.1,
-                                     interp_maxgap = 3,
-                                     exclude_iso2s = "EU") {
+fill_gaps_in_time_series <- function(
+  data,
+  group_cols,
+  zero_consecutive_required = 3,
+  zero_consecutive_required_beyond_last = 12,
+  zero_prob = 0.05,
+  interp_cv_threshold = 0.1,
+  interp_maxgap = 3,
+  exclude_iso2s = "EU"
+) {
   # Ensure data has iso2 column
   data <- add_iso2(data)
 
@@ -315,11 +326,13 @@ check_proxy_correlation <- function(target, proxy, max_rel_diff = 0.05, min_poin
     filter(!is.na(target), !is.na(proxy))
 
   if (nrow(valid_data) < min_points) {
-    return(list(
-      rel_diff = 1,
-      n_points = nrow(valid_data),
-      is_good_enough = FALSE
-    ))
+    return(
+      list(
+        rel_diff = 1,
+        n_points = nrow(valid_data),
+        is_good_enough = FALSE
+      )
+    )
   }
 
   # Calculate relative difference
@@ -349,8 +362,10 @@ eurostat_split_elec_others <- function(x) {
     return(x)
   }
   if (!all(sectors %in% c(SECTOR_ALL, SECTOR_ELEC, SECTOR_OTHERS))) {
-    stop("eurostat_split_elec_others shouldn't be applied to datasets with more than all, elec,
-      and others")
+    stop(
+      "eurostat_split_elec_others shouldn't be applied to datasets with more than all, elec,
+      and others"
+    )
   }
 
   group_cols <- intersect(names(x), c("iso2", "time", "unit", "siec_code", "fuel"))

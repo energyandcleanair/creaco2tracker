@@ -74,15 +74,17 @@ gas_data_access_get_eurostat_monthly_for_correction <- function(data_masking = N
       unit == "MIO_M3",
       siec == "G3000"
     ) %>%
-    mutate(type = recode(
-      nrg_bal,
-      IC_OBS = "consumption",
-      IPRD = "production",
-      IMP = "imports",
-      EXP = "minus_exports",
-      STK_CHG_MG = "storage",
-      .default = NA_character_
-    )) %>%
+    mutate(
+      type = recode(
+        nrg_bal,
+        IC_OBS = "consumption",
+        IPRD = "production",
+        IMP = "imports",
+        EXP = "minus_exports",
+        STK_CHG_MG = "storage",
+        .default = NA_character_
+      )
+    ) %>%
     filter(!is.na(type)) %>%
     mutate(values = ifelse(type %in% c("minus_exports", "storage"), -values, values)) %>%
     select(iso2 = geo, date = TIME_PERIOD, value_m3 = values, type) %>%

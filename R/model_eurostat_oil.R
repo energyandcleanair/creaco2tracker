@@ -112,10 +112,18 @@ process_oil <- function(x) {
   # 2. Deduction rules - which fuels to subtract from which base fuels
   deduction_rules <- tribble(
     ~base_siec_code, ~nrg_bal_code, ~deduct_siec_codes,
-    SIEC_OIL_PRODUCTS, "GID_OBS", list(c(SIEC_FUEL_OIL, SIEC_HEATING_GASOIL, SIEC_BIOGASOLINE,
-      SIEC_BIODIESEL)),
-    SIEC_OIL_PRODUCTS, "GID_NE", list(c(SIEC_FUEL_OIL, SIEC_HEATING_GASOIL, SIEC_BIOGASOLINE,
-      SIEC_BIODIESEL)),
+    SIEC_OIL_PRODUCTS, "GID_OBS", list(
+      c(
+        SIEC_FUEL_OIL, SIEC_HEATING_GASOIL, SIEC_BIOGASOLINE,
+        SIEC_BIODIESEL
+      )
+    ),
+    SIEC_OIL_PRODUCTS, "GID_NE", list(
+      c(
+        SIEC_FUEL_OIL, SIEC_HEATING_GASOIL, SIEC_BIOGASOLINE,
+        SIEC_BIODIESEL
+      )
+    ),
     SIEC_ROAD_DIESEL, "FC_TRA_E", list(c(SIEC_BIODIESEL)),
     SIEC_OIL_PRODUCTS, "TI_EHG_MAP", list(c(SIEC_FUEL_OIL, SIEC_HEATING_GASOIL)),
     SIEC_OIL_PRODUCTS, "TI_EHG_MAPE", list(c(SIEC_FUEL_OIL, SIEC_HEATING_GASOIL)),
@@ -400,10 +408,12 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
           siec_code == SIEC_MOTOR_GASOLINE_XBIO,
           nrg_bal_code %in% c("GID_OBS", "GID_NE")
         ) %>%
-        mutate(factor = case_when(
-          nrg_bal_code == "GID_NE" ~ -1,
-          T ~ 1
-        )) %>%
+        mutate(
+          factor = case_when(
+            nrg_bal_code == "GID_NE" ~ -1,
+            T ~ 1
+          )
+        ) %>%
         group_by(geo, time, siec_code) %>%
         summarise(values = sum(values * factor, na.rm = TRUE)),
       by = c("geo", "time", "siec_code")
@@ -542,10 +552,12 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
           siec_code == SIEC_MOTOR_GASOLINE_XBIO,
           nrg_bal_code %in% c("GID_OBS", "GID_NE")
         ) %>%
-        mutate(factor = case_when(
-          nrg_bal_code == "GID_NE" ~ -1,
-          T ~ 1
-        )) %>%
+        mutate(
+          factor = case_when(
+            nrg_bal_code == "GID_NE" ~ -1,
+            T ~ 1
+          )
+        ) %>%
         group_by(geo, time, siec_code) %>%
         summarise(values = sum(values * factor, na.rm = TRUE)),
       by = c("geo", "time", "siec_code")
@@ -566,8 +578,10 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
   # Assumption 3: Road diesel and motor gasoline are the only fuels used in road transportation
   share_gasoline_diesel_road <- yearly %>%
     filter(
-      siec_code %in% c(SIEC_OIL_PRODUCTS, SIEC_ROAD_DIESEL, SIEC_MOTOR_GASOLINE_XBIO,
-        SIEC_BIOGASOLINE),
+      siec_code %in% c(
+        SIEC_OIL_PRODUCTS, SIEC_ROAD_DIESEL, SIEC_MOTOR_GASOLINE_XBIO,
+        SIEC_BIOGASOLINE
+      ),
       nrg_bal_code == "FC_TRA_ROAD_E"
     ) %>%
     group_by(geo, time, siec_code) %>%
@@ -692,8 +706,10 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
   # Assumption 6: Motor gasoline, road diesel and kerosene represent most of the transport sector
   share_transport <- yearly %>%
     filter(
-      siec_code %in% c(SIEC_MOTOR_GASOLINE_XBIO, SIEC_ROAD_DIESEL, SIEC_KEROSENE_XBIO,
-        SIEC_BIOGASOLINE, SIEC_OIL_PRODUCTS),
+      siec_code %in% c(
+        SIEC_MOTOR_GASOLINE_XBIO, SIEC_ROAD_DIESEL, SIEC_KEROSENE_XBIO,
+        SIEC_BIOGASOLINE, SIEC_OIL_PRODUCTS
+      ),
       nrg_bal_code == "FC_TRA_E"
     ) %>%
     group_by(geo, time, siec_code) %>%
@@ -899,8 +915,10 @@ fill_oil_non_energy_use_monthly <- function(yearly, monthly) {
 #' "FR", "IT", "ES"))
 #' @return The dataframe with EU values set to NA where any important country is missing
 #' @export
-fix_eu_when_important_countries_missing <- function(data,
-                                                    important_iso2s = c("DE", "FR", "IT", "ES")) {
+fix_eu_when_important_countries_missing <- function(
+  data,
+  important_iso2s = c("DE", "FR", "IT", "ES")
+) {
   # Ensure 'iso2' and 'time' columns exist in the data
   stopifnot("iso2" %in% names(data), "time" %in% names(data))
 
@@ -930,8 +948,10 @@ fix_eu_when_important_countries_missing <- function(data,
 
   # Print information if rows were removed
   if (nrow(to_remove) > 0) {
-    cat("Rows removed for EU where not all important countries are present: ", nrow(to_remove),
-      "\n")
+    cat(
+      "Rows removed for EU where not all important countries are present: ", nrow(to_remove),
+      "\n"
+    )
   }
 
   return(data)

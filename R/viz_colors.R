@@ -46,24 +46,27 @@ get_colors <- function() {
 
 recode_sector_names <- function(x, power_sector_name = "Power Generation") {
   x %>%
-    mutate(sector = factor(sector,
-      levels = c(
-        SECTOR_ELEC,
-        SECTOR_TRANSPORT,
-        SECTOR_TRANSPORT_DOMESTIC,
-        SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,
-        SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING,
-        SECTOR_OTHERS,
-        SECTOR_ALL
-      ),
-      labels = c(
-        power_sector_name,
-        "Transport",
-        "Transport (Domestic)",
-        "Transport (International Aviation)",
-        "Transport (International Shipping)",
-        "Others (Industry & Buildings)",
-        "Total"
+    mutate(
+      sector = factor(
+        sector,
+        levels = c(
+          SECTOR_ELEC,
+          SECTOR_TRANSPORT,
+          SECTOR_TRANSPORT_DOMESTIC,
+          SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,
+          SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING,
+          SECTOR_OTHERS,
+          SECTOR_ALL
+        ),
+        labels = c(
+          power_sector_name,
+          "Transport",
+          "Transport (Domestic)",
+          "Transport (International Aviation)",
+          "Transport (International Shipping)",
+          "Others (Industry & Buildings)",
+          "Total"
+        )
       )
-    ))
+    )
 }

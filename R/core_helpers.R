@@ -9,12 +9,14 @@ get_eu_iso2s <- function(eurostat = FALSE, include_eu = FALSE) {
 
 recode_siec <- function(x) {
   x %>%
-    mutate(siec = recode(
-      siec,
-      "Crude oil, NGL, refinery feedstocks, additives and oxygenates and other hydrocarbons" =
-        "Crude oil",
-      "Oil shale and oil sands" = "Oil shale"
-    ))
+    mutate(
+      siec = recode(
+        siec,
+        "Crude oil, NGL, refinery feedstocks, additives and oxygenates and other hydrocarbons" =
+          "Crude oil",
+        "Oil shale and oil sands" = "Oil shale"
+      )
+    )
 }
 
 add_iso2 <- function(x, country_col = "geo") {
@@ -28,16 +30,18 @@ add_iso2 <- function(x, country_col = "geo") {
   }
 
   x %>%
-    mutate(iso2 = coalesce(
-      iso2,
-      countrycode::countrycode(!!sym(country_col), "country.name", "iso2c",
-        custom_match = c(
-          "European Union - 27 countries (from 2020)" = "EU",
-          "EU27 & UK" = "EU28",
-          "Kosovo*" = "XK"
+    mutate(
+      iso2 = coalesce(
+        iso2,
+        countrycode::countrycode(!!sym(country_col), "country.name", "iso2c",
+          custom_match = c(
+            "European Union - 27 countries (from 2020)" = "EU",
+            "EU27 & UK" = "EU28",
+            "Kosovo*" = "XK"
+          )
         )
       )
-    ))
+    )
 }
 
 add_missing_cols <- function(df, cols) {
@@ -126,8 +130,11 @@ split_gas_to_elec_others <- function(co2) {
     add_missing_cols(c("all", "others", "electricity")) %>%
     mutate(
       others = suppressWarnings(coalesce(others, all - electricity)), # calculate others value
-      electricity = suppressWarnings(coalesce(electricity, all -
-        others)) # calculate electricity value
+      electricity = suppressWarnings(
+        coalesce(
+          electricity, all -
+          others)
+      ) # calculate electricity value
     ) %>%
     select(-all) %>%
     pivot_longer(
@@ -188,10 +195,12 @@ split_gas_to_elec_all <- function(co2) {
 #' @examples
 recombine_fuels <- function(co2) {
   co2 %>%
-    mutate(fuel = case_when(
-      fuel == FUEL_PEAT ~ FUEL_COAL,
-      TRUE ~ fuel
-    )) %>%
+    mutate(
+      fuel = case_when(
+        fuel == FUEL_PEAT ~ FUEL_COAL,
+        TRUE ~ fuel
+      )
+    ) %>%
     group_by(across(c(-value))) %>%
     summarise(
       value = sum(value, na.rm = TRUE),
@@ -213,10 +222,12 @@ add_total_co2 <- function(co2) {
     summarise(
       # First calculate central value and std dev
       central_value = sum(value[estimate == "central"], na.rm = TRUE),
-      std_dev = sqrt(sum(
-        # Convert confidence intervals to standard deviations
-        (value[estimate == "upper"] - value[estimate == "central"])^2
-      )),
+      std_dev = sqrt(
+        sum(
+          # Convert confidence intervals to standard deviations
+          (value[estimate == "upper"] - value[estimate == "central"])^2
+        )
+      ),
       .groups = "drop"
     ) %>%
     # Create three rows for each group with the different estimates
@@ -236,8 +247,10 @@ add_total_co2 <- function(co2) {
 }
 
 combine_coke_coal <- function(co2) {
-  group_by_cols <- intersect(names(co2), c("iso2", "geo", "region", "date", "fuel", "sector",
-    "unit"))
+  group_by_cols <- intersect(names(co2), c(
+    "iso2", "geo", "region", "date", "fuel", "sector",
+    "unit"
+  ))
   co2 %>%
     filter(fuel %in% c(FUEL_COAL, FUEL_COKE)) %>%
     mutate(fuel = FUEL_COAL) %>%
@@ -245,10 +258,12 @@ combine_coke_coal <- function(co2) {
     summarise(
       # First calculate central value and std dev
       central_value = sum(value[estimate == "central"], na.rm = TRUE),
-      std_dev = sqrt(sum(
-        # Convert confidence intervals to standard deviations
-        (value[estimate == "upper"] - value[estimate == "central"])^2
-      )),
+      std_dev = sqrt(
+        sum(
+          # Convert confidence intervals to standard deviations
+          (value[estimate == "upper"] - value[estimate == "central"])^2
+        )
+      ),
       .groups = "drop"
     ) %>%
     # Create three rows for each group with the different estimates
@@ -270,14 +285,16 @@ combine_coke_coal <- function(co2) {
 
 combine_transport <- function(x) {
   x %>%
-    mutate(sector = case_when(
-      sector %in% c(
-        SECTOR_TRANSPORT_DOMESTIC,
-        SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,
-        SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING
-      ) ~ SECTOR_TRANSPORT,
-      TRUE ~ sector
-    ))
+    mutate(
+      sector = case_when(
+        sector %in% c(
+          SECTOR_TRANSPORT_DOMESTIC,
+          SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,
+          SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING
+        ) ~ SECTOR_TRANSPORT,
+        TRUE ~ sector
+      )
+    )
 }
 
 
@@ -301,11 +318,13 @@ format_co2_for_db <- function(co2, cut_tail_days = 3) {
 check_no_duplicate <- function(x) {
   group_by_cols <- intersect(names(x), c("iso2", "geo", "date", "fuel", "sector", "estimate"))
   # Check no duplicate
-  stopifnot(1 == x %>%
-    group_by_at(group_by_cols) %>%
-    summarise(n = n(), .groups = "drop") %>%
-    pull(n) %>%
-    max())
+  stopifnot(
+    1 == x %>%
+      group_by_at(group_by_cols) %>%
+      summarise(n = n(), .groups = "drop") %>%
+      pull(n) %>%
+      max()
+  )
 }
 
 #' Check that CO2 can basically be summed

@@ -7,13 +7,15 @@
 #' @return Data frame with actual and weather-corrected renewable generation
 #'
 #' @keywords internal
-get_weather_corrected_renewables <- function(iso2s,
-                                             date_from,
-                                             date_to = NULL,
-                                             pwr_generation,
-                                             sources = c("wind", "solar", "hydro"),
-                                             use_cache = TRUE,
-                                             diagnostics_folder = diagnostics_folder) {
+get_weather_corrected_renewables <- function(
+  iso2s,
+  date_from,
+  date_to = NULL,
+  pwr_generation,
+  sources = c("wind", "solar", "hydro"),
+  use_cache = TRUE,
+  diagnostics_folder = diagnostics_folder
+) {
   renewable_data <- list()
 
   # Get weather-corrected wind
@@ -75,13 +77,15 @@ get_weather_corrected_renewables <- function(iso2s,
 #'   generation format (columns: date, iso2, source, value_mw, value_mwh, etc.)
 #'
 #' @export
-get_weather_corrected_wind <- function(iso2s = "EU",
-                                       pwr_generation,
-                                       date_from = "2015-01-01",
-                                       date_to = NULL,
-                                       diagnostics_folder = "diagnostics/weather_correction/wind",
-                                       use_cache = TRUE,
-                                       use_local = FALSE) {
+get_weather_corrected_wind <- function(
+  iso2s = "EU",
+  pwr_generation,
+  date_from = "2015-01-01",
+  date_to = NULL,
+  diagnostics_folder = "diagnostics/weather_correction/wind",
+  use_cache = TRUE,
+  use_local = FALSE
+) {
   create_dir(diagnostics_folder)
 
   # Ensure this is daily data
@@ -192,8 +196,10 @@ get_weather_corrected_wind <- function(iso2s = "EU",
     model_data <- model_data %>%
       select(where(~ !all(is.na(.))))
 
-    weather_vars <- grep(names(model_data), pattern = "^(ws_1|ws_2|ws_3|inv_temp|temp)_", value =
-      TRUE)
+    weather_vars <- grep(names(model_data),
+      pattern = "^(ws_1|ws_2|ws_3|inv_temp|temp)_", value =
+        TRUE
+    )
     weather_iso2s <- unique(gsub("^(ws_1|ws_2|ws_3|inv_temp|temp)_", "", weather_vars))
 
     model_data_country <- model_data %>%
@@ -219,7 +225,6 @@ get_weather_corrected_wind <- function(iso2s = "EU",
           paste(glue("ws_2_{weather_iso2s}"), collapse = " + "), "+",
           paste0(glue("ws_3_{weather_iso2s}*inv_temp_{weather_iso2s}"), collapse = " + ")
         )
-        # formula_str <- paste("value_mwh ~ 0 + year  + ws_1 + ws_2 + ws_3*inv_temp")
         model_formula <- as.formula(formula_str)
         model <- gbm::gbm(
           model_formula,
@@ -307,13 +312,15 @@ get_weather_corrected_wind <- function(iso2s = "EU",
 #'   generation format (columns: date, iso2, source, value_mwh, etc.)
 #'
 #' @export
-get_weather_corrected_solar <- function(iso2s = "EU",
-                                        pwr_generation,
-                                        date_from = "2020-01-01",
-                                        date_to = NULL,
-                                        diagnostics_folder = "diagnostics/weather_correction/solar",
-                                        use_cache = TRUE,
-                                        use_local = FALSE) {
+get_weather_corrected_solar <- function(
+  iso2s = "EU",
+  pwr_generation,
+  date_from = "2020-01-01",
+  date_to = NULL,
+  diagnostics_folder = "diagnostics/weather_correction/solar",
+  use_cache = TRUE,
+  use_local = FALSE
+) {
   create_dir(diagnostics_folder)
 
   # Ensure this is daily data
@@ -411,8 +418,12 @@ get_weather_corrected_solar <- function(iso2s = "EU",
     }
 
     if (nrow(model_data_country) < 100) {
-      warning(sprintf("Insufficient data for %s (%d rows), skipping", iso2,
-        nrow(model_data_country)))
+      warning(
+        sprintf(
+          "Insufficient data for %s (%d rows), skipping", iso2,
+          nrow(model_data_country)
+        )
+      )
       return(NULL)
     }
 
@@ -510,13 +521,15 @@ get_weather_corrected_solar <- function(iso2s = "EU",
 #'   generation format (columns: date, iso2, source, value_mwh, etc.)
 #'
 #' @export
-get_weather_corrected_hydro <- function(iso2s = "EU",
-                                        pwr_generation,
-                                        date_from = "2015-01-01",
-                                        date_to = NULL,
-                                        diagnostics_folder = "diagnostics/weather_correction/hydro",
-                                        use_cache = TRUE,
-                                        use_local = FALSE) {
+get_weather_corrected_hydro <- function(
+  iso2s = "EU",
+  pwr_generation,
+  date_from = "2015-01-01",
+  date_to = NULL,
+  diagnostics_folder = "diagnostics/weather_correction/hydro",
+  use_cache = TRUE,
+  use_local = FALSE
+) {
   create_dir(diagnostics_folder)
 
   # Ensure this is daily data
@@ -569,10 +582,12 @@ get_weather_corrected_hydro <- function(iso2s = "EU",
     ungroup() %>%
     # Fill countries with no capacity data with constant value
     group_by(iso2) %>%
-    mutate(capacity_mw = case_when(
-      all(is.na(capacity_mw)) ~ 1,
-      TRUE ~ capacity_mw
-    )) %>%
+    mutate(
+      capacity_mw = case_when(
+        all(is.na(capacity_mw)) ~ 1,
+        TRUE ~ capacity_mw
+      )
+    ) %>%
     ungroup()
 
   # We don't have much more than 10 years of data, so we use a simple average
@@ -638,8 +653,10 @@ get_weather_corrected_hydro <- function(iso2s = "EU",
 #' @keywords internal
 plot_wind_power_curve <- function(model, model_data_country, iso2, diagnostics_folder) {
   # Create prediction grid for power curves
-  weather_vars <- grep(names(model_data_country), pattern = "^(ws_1|ws_2|ws_3|inv_temp|temp)_",
-    value = TRUE)
+  weather_vars <- grep(names(model_data_country),
+    pattern = "^(ws_1|ws_2|ws_3|inv_temp|temp)_",
+    value = TRUE
+  )
   weather_iso2s <- unique(gsub("^(ws_1|ws_2|ws_3|inv_temp|temp)_", "", weather_vars))
   ws_1_vars <- glue("ws_1_{weather_iso2s}")
   ws_1 <- seq(0, max(model_data_country[, ws_1_vars], na.rm = TRUE), 0.1)
@@ -794,8 +811,12 @@ plot_corrected_vs_ember <- function(model_data_country, iso2, source_type, diagn
       mutate(source = "Capacity (ENTSOE)")
   ) %>%
     group_by(source) %>%
-    mutate(value = if (n() > 0 && !all(is.na(value))) value / value[year == min(year)] *
-      100 else NA_real_) %>%
+    mutate(value = if (n() > 0 && !all(is.na(value))) {
+      value / value[year == min(year)] *
+        100
+    } else {
+      NA_real_
+    }) %>%
     ungroup() %>%
     mutate(
       time_scale = "Yearly",
@@ -820,8 +841,12 @@ plot_corrected_vs_ember <- function(model_data_country, iso2, source_type, diagn
       mutate(source = "Capacity (ENTSOE)")
   ) %>%
     group_by(source) %>%
-    mutate(value = if (n() > 0 && !all(is.na(value))) value /
-      value[year_month == min(year_month)] * 100 else NA_real_) %>%
+    mutate(value = if (n() > 0 && !all(is.na(value))) {
+      value /
+        value[year_month == min(year_month)] * 100
+    } else {
+      NA_real_
+    }) %>%
     ungroup() %>%
     mutate(
       time_scale = "Monthly",

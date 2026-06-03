@@ -65,10 +65,12 @@ process_gas <- function(x, pwr_generation) {
     ) %>%
     group_by(across(-c(nrg_bal, nrg_bal_code, values))) %>%
     summarise(
-      values = sum(values * case_when(
-        nrg_bal == "Inland consumption - observed" ~ 1,
-        T ~ -1
-      )),
+      values = sum(
+        values * case_when(
+          nrg_bal == "Inland consumption - observed" ~ 1,
+          T ~ -1
+        )
+      ),
       .groups = "drop"
     ) %>%
     mutate(
@@ -87,22 +89,26 @@ process_gas <- function(x, pwr_generation) {
       has_gas_generation = value_mwh > value_mwh_threshold
     ) %>%
     ungroup() %>%
-    tidyr::complete(iso2, time = unique(x$time), fill = list(has_gas_generation = FALSE,
-      value_mwh = NA)) %>%
+    tidyr::complete(iso2, time = unique(x$time), fill = list(
+      has_gas_generation = FALSE,
+      value_mwh = NA
+    )) %>%
     select(iso2, time, has_gas_generation) %>%
     mutate(freq = "Monthly")
 
 
   x_elec <- x %>%
     filter(
-      (freq == "Monthly" & nrg_bal == "Transformation input - electricity and heat generation -
+      (
+        freq == "Monthly" & nrg_bal == "Transformation input - electricity and heat generation -
         main activity producers") |
-        (freq == "Annual" & nrg_bal %in% c(
-          "Transformation input - electricity and heat generation -
+        (
+          freq == "Annual" & nrg_bal %in% c(
+            "Transformation input - electricity and heat generation -
             main activity producer electricity only - energy use",
-          "Transformation input - electricity and heat generation -
+            "Transformation input - electricity and heat generation -
             main activity producer combined heat and power - energy use"
-        )),
+          )),
       grepl("Terajoule", unit),
       siec_code == SIEC_NATURAL_GAS
     ) %>%
@@ -205,10 +211,12 @@ add_gas_non_energy <- function(cons_monthly_raw, cons_yearly_raw) {
     ) %>%
     select(-c(share_non_energy, year))
 
-  return(bind_rows(
-    cons_monthly_raw,
-    cons_monthly_raw_non_energy
-  ))
+  return(
+    bind_rows(
+      cons_monthly_raw,
+      cons_monthly_raw_non_energy
+    )
+  )
 }
 
 
@@ -235,14 +243,6 @@ fill_ng_elec_eu27 <- function(cons_monthly_raw) {
     filter(nrg_bal == nrg_bal_elec) %>%
     filter(iso2 == "EU")
 
-  # ggplot(bind_rows(
-  #   eu27_ng_elec_new %>% mutate(source = "new"),
-  #   eu27_ng_elec_old %>% mutate(source = "old"),
-  # )) +
-  #   geom_line(aes(time, values, col = source, linetype = source)) +
-  #   facet_wrap(~unit)
-
-
   eu27_ng_elec <- eu27_ng_elec_old %>%
     group_by(unit) %>%
     tidyr::complete(
@@ -250,8 +250,10 @@ fill_ng_elec_eu27 <- function(cons_monthly_raw) {
       tidyr::nesting(nrg_bal_code, nrg_bal, siec, siec_code, freq),
       tidyr::nesting(geo, iso2)
     ) %>%
-    left_join(eu27_ng_elec_new %>%
-      select(unit, time, values_filler = values)) %>%
+    left_join(
+      eu27_ng_elec_new %>%
+        select(unit, time, values_filler = values)
+    ) %>%
     mutate(values = coalesce(values, values_filler)) %>%
     select(-c(values_filler)) %>%
     ungroup()

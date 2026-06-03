@@ -1,6 +1,9 @@
-download_co2 <- function(date_from = "2015-01-01", use_cache = FALSE, version = NULL, iso2s =
-  NULL) {
-  creahelpers::api.get("api.energyandcleanair.org/emission/co2",
+download_co2 <- function(
+  date_from = "2015-01-01", use_cache = FALSE, version = NULL, iso2s =
+    NULL
+) {
+  creahelpers::api.get(
+    "api.energyandcleanair.org/emission/co2",
     date_from = date_from,
     # The meaning of use_cache is different
     # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means
@@ -21,11 +24,13 @@ download_co2 <- function(date_from = "2015-01-01", use_cache = FALSE, version = 
     )
 }
 
-download_gas_demand <- function(iso2 = NULL,
-                                use_cache = FALSE,
-                                refresh_cache = FALSE,
-                                date_from = "2015-01-01",
-                                date_to = NULL) {
+download_gas_demand <- function(
+  iso2 = NULL,
+  use_cache = FALSE,
+  refresh_cache = FALSE,
+  date_from = "2015-01-01",
+  date_to = NULL
+) {
   params <- list(
     fuel = "fossil_gas",
     data_source = "crea",
@@ -38,7 +43,8 @@ download_gas_demand <- function(iso2 = NULL,
   # Remove null elements
   params <- purrr::compact(params)
 
-  creahelpers::api.get("api.energyandcleanair.org/energy/demand",
+  creahelpers::api.get(
+    "api.energyandcleanair.org/energy/demand",
     params = params,
     # The meaning of use_cache is different
     # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means
@@ -52,10 +58,12 @@ download_gas_demand <- function(iso2 = NULL,
 }
 
 
-download_corrected_demand <- function(region_id = NULL,
-                                      sector = "total",
-                                      date_from = "2015-01-01",
-                                      use_cache = FALSE) {
+download_corrected_demand <- function(
+  region_id = NULL,
+  sector = "total",
+  date_from = "2015-01-01",
+  use_cache = FALSE
+) {
   params <- list(
     fuel = "electricity_temperature_corrected,fossil_gas_temperature_corrected",
     sector = sector,
@@ -67,7 +75,8 @@ download_corrected_demand <- function(region_id = NULL,
   # Remove null elements
   params <- purrr::compact(params)
 
-  creahelpers::api.get("api.energyandcleanair.org/energy/demand",
+  creahelpers::api.get(
+    "api.energyandcleanair.org/energy/demand",
     params = params,
     # The meaning of use_cache is different
     # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means

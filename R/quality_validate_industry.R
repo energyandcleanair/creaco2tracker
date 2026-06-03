@@ -46,8 +46,6 @@ validate_industry <- function(industrial_indexes, industrial_prodtrade, industri
       mutate(source = "trade")
   ) %>%
     filter(year >= 2015, year < 2025) %>%
-    # group_by(iso2, nace_r2_code, source) %>%
-    # mutate(value=value/value[year==2020]) %>%
     filter(iso2 == "EU") %>%
     left_join(
       industrial_indexes %>%
@@ -57,5 +55,4 @@ validate_industry <- function(industrial_indexes, industrial_prodtrade, industri
   ggplot(plt_data, aes(year, value, col = source)) +
     geom_line() +
     facet_wrap(~ glue("{nace_r2_code}-{nace_r2}"), scales = "free_y")
-  # rcrea::scale_y_zero()
 }

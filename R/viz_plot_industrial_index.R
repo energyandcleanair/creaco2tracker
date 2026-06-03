@@ -11,18 +11,15 @@
 #' @export
 #'
 #' @examples
-plot_industrial_index_bar_yoy <- function(industrial_indexes,
-                                          iso2 = "EU",
-                                          by_fuel = TRUE,
-                                          year_f = year(today()) - 1,
-                                          filepath = NULL,
-                                          width = 10,
-                                          height = 6) {
-  # industrial_indexes %>%
-  #   distinct(nace_r2_code, nace_r2) %>%
-  #   mutate(label=shorten_nace(nace_r2)) %>%
-  #   View()
-
+plot_industrial_index_bar_yoy <- function(
+  industrial_indexes,
+  iso2 = "EU",
+  by_fuel = TRUE,
+  year_f = year(today()) - 1,
+  filepath = NULL,
+  width = 10,
+  height = 6
+) {
   colors <- get_colors()
 
   plt_data <- industrial_indexes %>%
@@ -32,7 +29,8 @@ plot_industrial_index_bar_yoy <- function(industrial_indexes,
     ) %>%
     # Set product to "All" if by_fuel is FALSE
     mutate(product = if (!by_fuel) "Total" else product) %>%
-    group_by(iso2, geo, estimate, nace_r2,
+    group_by(
+      iso2, geo, estimate, nace_r2,
       product, # Now we can always include product
       nace_r2_code,
       year = year(date)
@@ -72,12 +70,17 @@ plot_industrial_index_bar_yoy <- function(industrial_indexes,
       subtitle = "2024 vs 2023 in TeraJoule",
       x = NULL,
       y = NULL,
-      caption = paste0(c(
-        glue("Note: This chart assumes no change in energy intensity per sector{ifelse(by_fuel,
-          'and fuel','')}."),
-        "Only sectors with the most significant changes are shown.",
-        "Source: CREA analysis based on EUROSTAT."
-      ), collapse = "\n")
+      caption = paste0(
+        c(
+          glue(
+            "Note: This chart assumes no change in energy intensity per sector",
+            "{ifelse(by_fuel,'and fuel','')}."
+          ),
+          "Only sectors with the most significant changes are shown.",
+          "Source: CREA analysis based on EUROSTAT."
+        ),
+        collapse = "\n"
+      )
     ) +
     theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7))
 
@@ -117,13 +120,15 @@ shorten_nace <- function(x) {
   )
 }
 
-plot_industrial_scatter <- function(industrial_indexes,
-                                    industrial_trade,
-                                    industrial_production,
-                                    year_f = year(today()) - 1,
-                                    filepath = NULL,
-                                    width = 8,
-                                    height = 6) {
+plot_industrial_scatter <- function(
+  industrial_indexes,
+  industrial_trade,
+  industrial_production,
+  year_f = year(today()) - 1,
+  filepath = NULL,
+  width = 8,
+  height = 6
+) {
   plt_data <- industrial_indexes %>%
     filter(
       iso2 == "EU",
@@ -176,8 +181,14 @@ plot_industrial_scatter <- function(industrial_indexes,
   xmax <- max(abs(plt_data$import_change))
   ymax <- max(abs(plt_data$production_change))
 
-  ggplot(plt_data, aes(import_change_capped, production_change_capped, label = label, col = label,
-    fill = label)) +
+  ggplot(
+    plt_data,
+    aes(
+      import_change_capped, production_change_capped,
+      label = label, col = label,
+      fill = label
+    )
+  ) +
     geom_point(aes(size = energy_pj), alpha = 0.6, show.legend = TRUE) +
     geom_hline(yintercept = 0, color = "gray70") +
     geom_vline(xintercept = 0, color = "gray70") +
@@ -206,15 +217,17 @@ plot_industrial_scatter <- function(industrial_indexes,
     ) +
     labs(
       title = "Changes in EU industrial production and trade, 2023-2024",
-      # subtitle="",
       x = "Change in net imports volume (% of 2023 production)",
       y = "Change in production volume (% of 2023 production)",
       size = "Annual energy\nconsumption (PJ)",
-      caption = paste0(c(
-        "Note:  Changes in net imports are expressed as percentage of production to be comparable.",
-        "Only the top 10 sectors by energy consumption are shown.",
-        "Source: CREA analysis based on EUROSTAT data."
-      ), collapse = "\n")
+      caption = paste0(
+        c(
+          "Note:  Changes in net imports are expressed as percentage of production to be comparable.",
+          "Only the top 10 sectors by energy consumption are shown.",
+          "Source: CREA analysis based on EUROSTAT data."
+        ),
+        collapse = "\n"
+      )
     ) -> plt
 
   plt

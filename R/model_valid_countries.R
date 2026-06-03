@@ -1,8 +1,10 @@
-get_valid_countries <- function(co2,
-                                validation_data = NULL,
-                                min_year = 2020,
-                                min_correlation = 0.9,
-                                max_mae = 0.03) {
+get_valid_countries <- function(
+  co2,
+  validation_data = NULL,
+  min_year = 2020,
+  min_correlation = 0.9,
+  max_mae = 0.03
+) {
   get_validity_metrics(co2, validation_data, min_year, min_correlation, max_mae) %>%
     filter(ok) %>%
     pull(iso2)
@@ -70,11 +72,11 @@ get_validity_metrics <- function(
     group_by(iso2) %>%
     summarise(
       rmse = sqrt(mean((CREA - `Global Carbon Budget 2025`)^2, na.rm = TRUE)),
-        # Root Mean Square Error
+      # Root Mean Square Error
       mae = mean(abs(CREA - `Global Carbon Budget 2025`), na.rm = TRUE), # Mean Absolute Error
       correlation = cor(CREA, `Global Carbon Budget 2025`, use = "complete.obs"), # Correlation
       n_years = sum(!is.na(CREA) & !is.na(`Global Carbon Budget 2025`)),
-        # Number of comparable years
+      # Number of comparable years
       .groups = "drop"
     ) %>%
     mutate(

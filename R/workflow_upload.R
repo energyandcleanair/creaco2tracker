@@ -12,7 +12,8 @@ upload_co2_daily <- function(co2_daily, production = TRUE, clear_all_first = FAL
   co2_daily_formatted <- format_co2_for_db(co2_daily)
 
   print(sprintf("=== Uploading co2_daily (%s) ===", ifelse(production, "production",
-    "development")))
+    "development"
+  )))
 
   unique_cols <- c("region", "date", "fuel", "sector", "unit", "frequency", "version")
 
@@ -36,7 +37,8 @@ upload_co2_daily <- function(co2_daily, production = TRUE, clear_all_first = FAL
 
 upload_corrected_demand <- function(corrected_demand, production = TRUE, clear_all_first = FALSE) {
   print(sprintf("=== Uploading corrected_demand (%s) ===", ifelse(production, "production",
-    "development")))
+    "development"
+  )))
 
   unique_cols <- c("region_id", "date", "fuel", "data_source", "sector", "unit", "frequency")
 
@@ -48,11 +50,13 @@ upload_corrected_demand <- function(corrected_demand, production = TRUE, clear_a
     url = get_pg_url(production = production)
   )
   if (clear_all_first) {
-    dbx::dbxExecute(db, sprintf(
-      "DELETE FROM energy.demand WHERE data_source='%s' and fuel = any(ARRAY['%s']);",
-      unique(p$data_source),
-      paste(unique(p$fuel), collapse = "','")
-    ))
+    dbx::dbxExecute(
+      db, sprintf(
+        "DELETE FROM energy.demand WHERE data_source='%s' and fuel = any(ARRAY['%s']);",
+        unique(p$data_source),
+        paste(unique(p$fuel), collapse = "','")
+      )
+    )
   }
   table <- DBI::Id(schema = "energy", table = "demand")
   dbx::dbxUpsert(db, table, p, where_cols = unique_cols)
@@ -62,7 +66,8 @@ upload_corrected_demand <- function(corrected_demand, production = TRUE, clear_a
 
 upload_gas_demand <- function(gas_demand, production = TRUE, clear_all_first = FALSE) {
   print(sprintf("=== Uploading gas demand (%s) ===", ifelse(production, "production",
-    "development")))
+    "development"
+  )))
 
   unique_cols <- c("region_id", "date", "fuel", "data_source", "sector", "unit", "frequency")
 
@@ -74,12 +79,14 @@ upload_gas_demand <- function(gas_demand, production = TRUE, clear_all_first = F
     url = get_pg_url(production = production)
   )
   if (clear_all_first) {
-    dbx::dbxExecute(db, sprintf(
-      "DELETE FROM energy.demand WHERE fuel='%s' and sector='%s' and data_source='%s';",
-      unique(gas_demand$fuel),
-      unique(gas_demand$sector),
-      unique(gas_demand$data_source)
-    ))
+    dbx::dbxExecute(
+      db, sprintf(
+        "DELETE FROM energy.demand WHERE fuel='%s' and sector='%s' and data_source='%s';",
+        unique(gas_demand$fuel),
+        unique(gas_demand$sector),
+        unique(gas_demand$data_source)
+      )
+    )
   }
   table <- DBI::Id(schema = "energy", table = "demand")
   dbx::dbxUpsert(db, table, p, where_cols = unique_cols)

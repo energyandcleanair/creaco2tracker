@@ -210,8 +210,10 @@ make_ncv_time_insensitive <- function(x_with_ncv) {
 #'
 #' @examples
 add_ncv_iea <- function(x, diagnostics_folder = NULL, use_cache = TRUE, ...) {
-  conversion_raw <- iea.get_conversion_factors(iso2 = c(get_eu_iso2s(), "EU"), use_cache =
-    use_cache)
+  conversion_raw <- iea.get_conversion_factors(
+    iso2 = c(get_eu_iso2s(), "EU"), use_cache =
+      use_cache
+  )
 
   # Process conversion factors
   conversion <- process_conversion_factors(conversion_raw)
@@ -253,8 +255,10 @@ add_ncv_iea <- function(x, diagnostics_folder = NULL, use_cache = TRUE, ...) {
 #'
 #' @examples
 add_ncv_iea_shared <- function(x, diagnostics_folder = NULL, use_cache = TRUE, ...) {
-  conversion_raw <- iea.get_conversion_factors(iso2 = get_eu_iso2s(include_eu = FALSE), use_cache =
-    use_cache)
+  conversion_raw <- iea.get_conversion_factors(
+    iso2 = get_eu_iso2s(include_eu = FALSE), use_cache =
+      use_cache
+  )
 
   # Process conversion factors
   conversion <- process_conversion_factors(conversion_raw)
@@ -440,7 +444,5 @@ diagnose_ncv_data <- function(conversion_filled, x = NULL, diagnostics_folder = 
     cat("2. PLOT AND SUMMARY STATS SAVED TO:", diagnostics_folder, "\n")
   }
 
-  # Display plot
-  # print(p1)
   return(p1)
 }

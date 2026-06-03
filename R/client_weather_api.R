@@ -39,8 +39,10 @@
 #' weather_eu <- get_weather(variable = "HDD,CDD", region_id = "EU")
 #'
 #' # Get solar radiation for Germany
-#' solar_de <- get_weather(variable = "solar_radiation", region_iso2 = "DE", region_type =
-#' "country")
+#' solar_de <- get_weather(
+#'   variable = "solar_radiation", region_iso2 = "DE", region_type =
+#'     "country"
+#' )
 #'
 #' # Get wind speed from stations for France
 #' wind_fr <- get_weather(
@@ -145,8 +147,10 @@ fill_weather <- function(weather_raw) {
   # Fill na values using forward fill method
   weather_raw %>%
     mutate(date = lubridate::date(date)) %>%
-    group_by(variable, unit, region_id, region_type, region_iso2, averaging_period, source,
-      region_name) %>%
+    group_by(
+      variable, unit, region_id, region_type, region_iso2, averaging_period, source,
+      region_name
+    ) %>%
     group_modify(function(df, ...) {
       df %>%
         arrange(date) %>%
@@ -179,9 +183,11 @@ fill_weather <- function(weather_raw) {
 #'
 #' @return A list containing diagnostic plots and summary statistics
 #' @export
-diagnose_weather <- function(weather,
-                             weather_raw = NULL,
-                             diagnostics_folder = "diagnostics") {
+diagnose_weather <- function(
+  weather,
+  weather_raw = NULL,
+  diagnostics_folder = "diagnostics"
+) {
   # Create diagnostics directory if it doesn't exist
   if (!is.null(diagnostics_folder) && !dir.exists(diagnostics_folder)) {
     dir.create(diagnostics_folder, recursive = TRUE)

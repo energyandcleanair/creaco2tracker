@@ -14,10 +14,12 @@
 #'   date, unit, value, fuel, sector, data_source, frequency, region_id, region_type
 #'
 #' @export
-get_corrected_demand <- function(diagnostics_folder = "diagnostics",
-                                 use_cache = TRUE,
-                                 model_type = c("gam", "lm"),
-                                 data_masking = NULL) {
+get_corrected_demand <- function(
+  diagnostics_folder = "diagnostics",
+  use_cache = TRUE,
+  model_type = c("gam", "lm"),
+  data_masking = NULL
+) {
   model_type <- match.arg(model_type)
   create_dir(diagnostics_folder)
 

@@ -5,7 +5,6 @@ get_validation_data <- function(region = "EU", source_name = NULL, ...) {
     # External validation sources
     "Climate Watch" = load_climatewatch_csv,
     "UNFCCC" = load_climatewatch_csv,
-    # "GCP" = load_climatewatch_csv,
     "PIK" = load_climatewatch_csv,
     "Global Carbon Budget 2025" = load_gcb,
 
@@ -31,12 +30,15 @@ get_validation_data <- function(region = "EU", source_name = NULL, ...) {
   }) %>%
     bind_rows() %>%
     # Fill/homogenise country
-    mutate(country = countrycode::countrycode(iso2, "iso2c", "country.name",
-      custom_match = c(
-        "EU" = "European Union",
-        "EU28" = "EU28"
+    mutate(
+      country = countrycode::countrycode(
+        iso2, "iso2c", "country.name",
+        custom_match = c(
+          "EU" = "European Union",
+          "EU28" = "EU28"
+        )
       )
-    )) %>%
+    ) %>%
     filter(is.null(region) | iso2 %in% region)
 }
 
@@ -135,9 +137,11 @@ load_carbonmonitor <- function(source_name, region, ...) {
 # Load PRIMAP data
 load_primap <- function(source_name, region, version = "2.6", ...) {
   filepath <- "data/Guetschow_et_al_2024a-PRIMAP-hist_v2.6_final_13-Sep-2024.csv"
-  url <- paste0("https://zenodo.org/records/13752654/files/Guetschow_et_",
+  url <- paste0(
+    "https://zenodo.org/records/13752654/files/Guetschow_et_",
     "al_2024a-PRIMAP-hist_v2.6_final_13-Sep-2024.csv?downloa",
-    "d=1")
+    "d=1"
+  )
 
   if (!file.exists(filepath)) {
     dir.create(dirname(filepath), showWarnings = FALSE, recursive = TRUE)

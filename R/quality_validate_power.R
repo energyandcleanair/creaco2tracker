@@ -1,12 +1,15 @@
 validate_power <- function(pwr_generation = entsoe.get_power_generation(), folder = "validation") {
   ember_explorer <- ember.get_power_generation(iso2s = get_eu_iso2s())
   ember_1 <- ember_explorer %>%
-    mutate(source = recode(source,
-      Gas = "Fossil Gas",
-      Bioenergy = "Other",
-      `Other Fossil` = "Other",
-      `Other Renewables` = "Other"
-    )) %>%
+    mutate(
+      source = recode(
+        source,
+        Gas = "Fossil Gas",
+        Bioenergy = "Other",
+        `Other Fossil` = "Other",
+        `Other Renewables` = "Other"
+      )
+    ) %>%
     group_by(year = year(date), source) %>%
     summarise(
       value_twh = sum(value_mwh) / 1e6,
@@ -15,8 +18,10 @@ validate_power <- function(pwr_generation = entsoe.get_power_generation(), folde
 
 
   filepath <- "data/ember_yearly_full_release_long_format.csv"
-  url <- paste0("https://storage.googleapis.com/emb-prod-bkt-publicdata/",
-    "public-downloads/yearly_full_release_long_format.csv")
+  url <- paste0(
+    "https://storage.googleapis.com/emb-prod-bkt-publicdata/",
+    "public-downloads/yearly_full_release_long_format.csv"
+  )
   if (!file.exists(filepath)) {
     dir.create(dirname(filepath), showWarnings = FALSE, recursive = TRUE)
     download.file(url, filepath)
@@ -32,16 +37,21 @@ validate_power <- function(pwr_generation = entsoe.get_power_generation(), folde
       Unit == "TWh",
       Category == "Electricity generation"
     ) %>%
-    filter(Variable %in% c(
-      "Coal", "Gas", "Hydro", "Nuclear", "Other Fossil", "Other Renewables",
-      "Solar", "Wind", "Bioenergy"
-    )) %>%
-    mutate(source = recode(Variable,
-      Gas = "Fossil Gas",
-      Bioenergy = "Other",
-      `Other Fossil` = "Other",
-      `Other Renewables` = "Other"
-    )) %>%
+    filter(
+      Variable %in% c(
+        "Coal", "Gas", "Hydro", "Nuclear", "Other Fossil", "Other Renewables",
+        "Solar", "Wind", "Bioenergy"
+      )
+    ) %>%
+    mutate(
+      source = recode(
+        Variable,
+        Gas = "Fossil Gas",
+        Bioenergy = "Other",
+        `Other Fossil` = "Other",
+        `Other Renewables` = "Other"
+      )
+    ) %>%
     group_by(
       year = Year,
       source
@@ -95,9 +105,11 @@ validate_power <- function(pwr_generation = entsoe.get_power_generation(), folde
       year = Year
     ) %>%
     select(iso2, source, year, value_ember = Value) %>%
-    left_join(pwr_generation %>%
-      group_by(iso2, year = year(date), source) %>%
-      summarise(value_crea = sum(value_mwh, na.rm = TRUE) / 1e6)) %>%
+    left_join(
+      pwr_generation %>%
+        group_by(iso2, year = year(date), source) %>%
+        summarise(value_crea = sum(value_mwh, na.rm = TRUE) / 1e6)
+    ) %>%
     pivot_longer(c(value_ember, value_crea), names_to = "data_source", values_to = "value_twh") %>%
     ggplot() +
     geom_col(aes(iso2, value_twh, fill = data_source),
@@ -107,12 +119,15 @@ validate_power <- function(pwr_generation = entsoe.get_power_generation(), folde
 
   # Compare countries
   ember_1_per_country <- ember_explorer %>%
-    mutate(source = recode(source,
-      Gas = "Fossil Gas",
-      Bioenergy = "Other",
-      `Other Fossil` = "Other",
-      `Other Renewables` = "Other"
-    )) %>%
+    mutate(
+      source = recode(
+        source,
+        Gas = "Fossil Gas",
+        Bioenergy = "Other",
+        `Other Fossil` = "Other",
+        `Other Renewables` = "Other"
+      )
+    ) %>%
     group_by(iso2, year = year(date)) %>%
     summarise(
       value_twh = sum(value_mwh) / 1e6,

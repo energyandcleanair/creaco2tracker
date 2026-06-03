@@ -7,10 +7,12 @@
 #' @export
 #'
 #' @examples
-get_industrial_indexes <- function(index_date = "last",
-                                   frequency = "month",
-                                   project = TRUE,
-                                   diagnostics_folder = "diagnostics/industrial_index") {
+get_industrial_indexes <- function(
+  index_date = "last",
+  frequency = "month",
+  project = TRUE,
+  diagnostics_folder = "diagnostics/industrial_index"
+) {
   product_codes <- list(
     "gas" = "P13",
     "oil" = c("P12", "P14", "P15", "P16", "P17", "P18", "P19", "P20", "P21"),
@@ -86,27 +88,24 @@ get_industrial_indexes <- function(index_date = "last",
 
   # Fill incomplete data
   consumption_filled <- consumption_per_sector %>%
-    left_join(indprod_filtered %>%
-      group_by(iso2, time = floor_date(time, "year"), nace_r2_code) %>%
-      summarise(value_prod = sum(values, na.rm = TRUE))) %>%
-    mutate(ff_intensity = case_when(
-      # Prevent 0 values
-      energy_tj > 0 ~ energy_tj / value_prod,
-      T ~ NA
-    )) %>%
+    left_join(
+      indprod_filtered %>%
+        group_by(iso2, time = floor_date(time, "year"), nace_r2_code) %>%
+        summarise(value_prod = sum(values, na.rm = TRUE))
+    ) %>%
+    mutate(
+      ff_intensity = case_when(
+        # Prevent 0 values
+        energy_tj > 0 ~ energy_tj / value_prod,
+        T ~ NA
+      )
+    ) %>%
     # Fill first by interpolation
     group_by(iso2, geo, nace_r2_code, product) %>%
     arrange(time) %>%
     fill(ff_intensity, .direction = "updown") %>%
     # Remove inf
     mutate(ff_intensity = ifelse(ff_intensity == Inf, NA, ff_intensity))
-
-
-  # consumption_filled %>% filter(iso2=="EU") %>% arrange(ff_intensity)
-  #
-  # ggplot(consumption_filled %>% filter(iso2=="EU")) +
-  #   geom_line(aes(time, ff_intensity, col=nace_r2), show.legend = F) +
-  #   facet_wrap(~product, scales='free_y')
 
   # Fill last dates using forecasting
   fill_last_dates <- function(x, frequency, last_years = 10, conf_level = 0.90) {
@@ -126,12 +125,14 @@ get_industrial_indexes <- function(index_date = "last",
         latest_data <- max(df$time[!is.na(df$value)])
 
         if (max(df$time) == latest_data | all(is.na(df$value))) {
-          return(df %>%
-            mutate(
-              value_lower = value,
-              value_upper = value
-            ) %>%
-            rename(value_central = value))
+          return(
+            df %>%
+              mutate(
+                value_lower = value,
+                value_upper = value
+              ) %>%
+              rename(value_central = value)
+          )
         }
 
         # Create time series object from historical data
@@ -142,7 +143,8 @@ get_industrial_indexes <- function(index_date = "last",
           ) %>%
           arrange(time)
 
-        ts_data <- ts(historical_data$value,
+        ts_data <- ts(
+          historical_data$value,
           frequency = 12,
           start = c(
             year(min(historical_data$time)),
@@ -167,12 +169,14 @@ get_industrial_indexes <- function(index_date = "last",
         )
 
         if (is.null(forecasted)) {
-          return(df %>%
-            mutate(
-              value_lower = value,
-              value_upper = value
-            ) %>%
-            rename(value_central = value))
+          return(
+            df %>%
+              mutate(
+                value_lower = value,
+                value_upper = value
+              ) %>%
+              rename(value_central = value)
+          )
         }
 
         # Update values in the original dataframe
@@ -216,8 +220,11 @@ get_industrial_indexes <- function(index_date = "last",
     filter(!is.na(ff_intensity)) %>%
     mutate(energy_tj = ff_intensity * value) %>%
     # Group by period
-    group_by(iso2, geo, nace_r2_code, nace_r2, product, date = floor_date(time, frequency),
-      ff_intensity, estimate) %>%
+    group_by(
+      iso2, geo, nace_r2_code, nace_r2, product,
+      date = floor_date(time, frequency),
+      ff_intensity, estimate
+    ) %>%
     summarise(
       value = sum(value),
       energy_tj = sum(energy_tj)
@@ -239,8 +246,10 @@ get_industrial_indexes <- function(index_date = "last",
     frequency == "year" ~ expected_value_yearly,
     frequency == "month" ~ expected_value_monthly
   )
-  filter_tbl <- tibble(iso2 = "DE", date = index_date, nace_r2_code = "B", product = "gas",
-    estimate = "central", time = index_date)
+  filter_tbl <- tibble(
+    iso2 = "DE", date = index_date, nace_r2_code = "B", product = "gas",
+    estimate = "central", time = index_date
+  )
   stopifnot(
     round(sum(inner_join(industrial_indexes, filter_tbl) %>%
       pull(energy_tj), na.rm = TRUE), 1) == round(expected_value, 1)

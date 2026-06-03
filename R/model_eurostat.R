@@ -135,7 +135,8 @@ get_eurostat_cons <- function(
 
   # Other diagnostics
   if (!is_null_or_empty(diagnostics_folder)) {
-    diagnostic_eurostat_cons(cons,
+    diagnostic_eurostat_cons(
+      cons,
       iso2s = iso2s,
       diagnostics_folder = diagnostics_folder
     )
@@ -193,7 +194,8 @@ apply_seasonal_adjustment <- function(cons_yearly, cons_monthly) {
   # Apply monthly adjustment
   cons_yearly_monthly <- cons_yearly %>%
     mutate(year = lubridate::year(time)) %>%
-    inner_join(month_shares,
+    inner_join(
+      month_shares,
       relationship = "many-to-many"
     ) %>%
     arrange(sector, siec_code, unit, iso2, fuel, time) %>%
@@ -239,10 +241,12 @@ remove_last_incomplete <- function(cons) {
 #' @export
 #'
 #' @examples
-get_eurostat_indprod <- function(diagnostics_folder = NULL,
-                                 use_cache = FALSE,
-                                 iso2s = NULL,
-                                 data_masking = NULL) {
+get_eurostat_indprod <- function(
+  diagnostics_folder = NULL,
+  use_cache = FALSE,
+  iso2s = NULL,
+  data_masking = NULL
+) {
   indprod_raw <- eurostat_data_access_get_indprod(
     use_cache = use_cache,
     iso2s = iso2s,
@@ -251,7 +255,8 @@ get_eurostat_indprod <- function(diagnostics_folder = NULL,
 
 
   if (!is_null_or_empty(diagnostics_folder)) {
-    diagnostic_eurostat_indprod(indprod_raw,
+    diagnostic_eurostat_indprod(
+      indprod_raw,
       diagnostics_folder = diagnostics_folder
     )
   }

@@ -31,13 +31,15 @@
 #'
 #'
 #' @export
-get_weather_corrected_co2 <- function(co2,
-                                      apply_demand_correction = TRUE,
-                                      apply_powermix_correction = TRUE,
-                                      sources = c("hydro", "solar", "wind"),
-                                      demand_fuels = c("electricity", "fossil_gas"),
-                                      use_cache = TRUE,
-                                      diagnostics_folder = "diagnostics/weather_correction") {
+get_weather_corrected_co2 <- function(
+  co2,
+  apply_demand_correction = TRUE,
+  apply_powermix_correction = TRUE,
+  sources = c("hydro", "solar", "wind"),
+  demand_fuels = c("electricity", "fossil_gas"),
+  use_cache = TRUE,
+  diagnostics_folder = "diagnostics/weather_correction"
+) {
   # Derive parameters from co2 data
   iso2s <- unique(co2$iso2)
   date_from <- min(co2$date, na.rm = TRUE)
@@ -70,7 +72,8 @@ get_weather_corrected_co2 <- function(co2,
       result_co2 <- result_co2 %>%
         left_join(
           wc_powermix %>%
-            select(iso2, year, sector,
+            select(
+              iso2, year, sector,
               correction_factor_powermix = emission_correction_factor
             ),
           by = c("iso2", "year", "sector")
@@ -101,8 +104,10 @@ get_weather_corrected_co2 <- function(co2,
     # Expand fuel total to all fuels
     fuels_total <- c(FUEL_COAL, FUEL_OIL, FUEL_GAS, FUEL_OIL)
     wc_demand_w_fuels <- wc_demand %>%
-      full_join(tibble(fuel = FUEL_TOTAL, fuels = fuels_total), by = "fuel", relationship =
-        "many-to-many") %>%
+      full_join(tibble(fuel = FUEL_TOTAL, fuels = fuels_total),
+        by = "fuel", relationship =
+          "many-to-many"
+      ) %>%
       mutate(fuel = coalesce(fuels, fuel)) %>%
       select(-fuels)
 

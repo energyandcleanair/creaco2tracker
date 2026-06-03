@@ -1,8 +1,10 @@
-get_co2_from_eurostat_cons <- function(eurostat_cons,
-                                       diagnostics_folder = "diagnostics",
-                                       keep_siec = FALSE,
-                                       ncv_source = "iea",
-                                       use_cache = TRUE) {
+get_co2_from_eurostat_cons <- function(
+  eurostat_cons,
+  diagnostics_folder = "diagnostics",
+  keep_siec = FALSE,
+  ncv_source = "iea",
+  use_cache = TRUE
+) {
   group_by_cols <- c("iso2", "date" = "time", "fuel", "sector", "unit")
   if (keep_siec) {
     group_by_cols <- c(group_by_cols, "siec_code")
@@ -72,7 +74,8 @@ add_emission_factor <- function(x) {
 
   # Join emission factors to the dataset (many-to-one join)
   x %>%
-    left_join(emission_factors,
+    left_join(
+      emission_factors,
       by = "siec_code",
       relationship = "many-to-one"
     ) %>%

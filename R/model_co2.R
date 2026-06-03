@@ -17,17 +17,19 @@
 #' @export
 #'
 #' @examples
-get_co2 <- function(diagnostics_folder = "diagnostics",
-                    downscale_daily = TRUE,
-                    use_cache = FALSE,
-                    iso2s = get_eu_iso2s(include_eu = TRUE),
-                    min_year = NULL,
-                    date_to = today(),
-                    ncv_source = "iea",
-                    fill_mode = c("missing", "overwrite", "ratio"),
-                    downscale_cut_latest_days = 3,
-                    correct_gas_demand_to_eurostat = TRUE,
-                    data_masking = NULL) {
+get_co2 <- function(
+  diagnostics_folder = "diagnostics",
+  downscale_daily = TRUE,
+  use_cache = FALSE,
+  iso2s = get_eu_iso2s(include_eu = TRUE),
+  min_year = NULL,
+  date_to = today(),
+  ncv_source = "iea",
+  fill_mode = c("missing", "overwrite", "ratio"),
+  downscale_cut_latest_days = 3,
+  correct_gas_demand_to_eurostat = TRUE,
+  data_masking = NULL
+) {
   create_dir(diagnostics_folder)
 
 
@@ -71,7 +73,8 @@ get_co2 <- function(diagnostics_folder = "diagnostics",
   )
 
   # Compute CO2 emissions based on Eurostat fossil-fuel consumption/oxydation
-  co2_unprojected <- get_co2_from_eurostat_cons(eurostat_cons,
+  co2_unprojected <- get_co2_from_eurostat_cons(
+    eurostat_cons,
     ncv_source = ncv_source,
     diagnostics_folder = diagnostics_folder,
     use_cache = use_cache
@@ -80,7 +83,8 @@ get_co2 <- function(diagnostics_folder = "diagnostics",
   # Project and impute data until now using various methods
   # We need to have all EU countries there as some EU imputation
   # relies on its member states
-  co2 <- project_until_now(co2_unprojected,
+  co2 <- project_until_now(
+    co2_unprojected,
     pwr_generation = pwr_generation,
     gas_demand = gas_demand,
     eurostat_indprod = eurostat_indprod,
@@ -129,11 +133,14 @@ get_co2 <- function(diagnostics_folder = "diagnostics",
 
   # Final tweaks
   co2 <- co2 %>%
-    mutate(region = countrycode::countrycode(iso2,
-      origin = "iso2c",
-      destination = "country.name",
-      custom_match = c("EU" = "EU")
-    )) %>%
+    mutate(
+      region = countrycode::countrycode(
+        iso2,
+        origin = "iso2c",
+        destination = "country.name",
+        custom_match = c("EU" = "EU")
+      )
+    ) %>%
     mutate(unit = "t") %>%
     filter(!is.na(date)) %>%
     {

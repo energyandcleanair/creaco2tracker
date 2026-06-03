@@ -1,13 +1,15 @@
-plot_vs_targets <- function(co2,
-                            iso2s = "EU",
-                            colors,
-                            filepath,
-                            year_f,
-                            min_year = 2010,
-                            title = "EU CO2 emissions vs. 2030 and 2050 reduction targets",
-                            width = 8,
-                            height = 5,
-                            dpi = 300) {
+plot_vs_targets <- function(
+  co2,
+  iso2s = "EU",
+  colors,
+  filepath,
+  year_f,
+  min_year = 2010,
+  title = "EU CO2 emissions vs. 2030 and 2050 reduction targets",
+  width = 8,
+  height = 5,
+  dpi = 300
+) {
   # https://climateactiontracker.org/countries/eu/targets/
   # As per CAT, we assume the target translates into 44% below 2010 levels in 2030 and 93% in 2050
   # excluding LULUCF and international aviation
@@ -119,7 +121,8 @@ plot_vs_targets <- function(co2,
       alpha = NULL
     )
 
-  quicksave(filepath,
+  quicksave(
+    filepath,
     width = width,
     height = height,
     plot = plt,

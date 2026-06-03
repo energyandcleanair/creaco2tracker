@@ -42,15 +42,17 @@
 #' non-linear time trends and time-varying temperature sensitivity.
 #'
 #' @export
-get_demand_components <- function(iso2s = "EU",
-                                  date_from = "2015-01-01",
-                                  date_to = Sys.Date(),
-                                  use_cache = TRUE,
-                                  correct_gas_to_eurostat = TRUE,
-                                  model_type = c("gam", "lm"),
-                                  include_time_interaction = TRUE,
-                                  diagnostics_folder = "diagnostics/demand_components",
-                                  data_masking = NULL) {
+get_demand_components <- function(
+  iso2s = "EU",
+  date_from = "2015-01-01",
+  date_to = Sys.Date(),
+  use_cache = TRUE,
+  correct_gas_to_eurostat = TRUE,
+  model_type = c("gam", "lm"),
+  include_time_interaction = TRUE,
+  diagnostics_folder = "diagnostics/demand_components",
+  data_masking = NULL
+) {
   model_type <- match.arg(model_type)
   iso2s <- unique(iso2s)
   date_from <- as.Date(date_from)
@@ -161,14 +163,16 @@ get_demand_components <- function(iso2s = "EU",
 #' Split electricity demand into heating, cooling, and other components
 #' Uses HDD and CDD for regression
 #' @keywords internal
-.split_demand_elec <- function(demand,
-                               weather,
-                               iso2s,
-                               date_from,
-                               date_to,
-                               model_type = "gam",
-                               include_time_interaction = FALSE,
-                               diagnostics_folder = NULL) {
+.split_demand_elec <- function(
+  demand,
+  weather,
+  iso2s,
+  date_from,
+  date_to,
+  model_type = "gam",
+  include_time_interaction = FALSE,
+  diagnostics_folder = NULL
+) {
   date_seq <- seq.Date(date_from, date_to, by = "day")
 
   results <- pblapply(iso2s, function(iso2) {
@@ -328,15 +332,17 @@ get_demand_components <- function(iso2s = "EU",
 #' Split gas demand into heating and other components, with electricity sector separation
 #' Uses HDD only (no CDD) for regression, and gas_elec to attribute electricity sector consumption
 #' @keywords internal
-.split_demand_gas <- function(demand,
-                              weather,
-                              gas_elec,
-                              iso2s,
-                              date_from,
-                              date_to,
-                              model_type = "gam",
-                              include_time_interaction = FALSE,
-                              diagnostics_folder = NULL) {
+.split_demand_gas <- function(
+  demand,
+  weather,
+  gas_elec,
+  iso2s,
+  date_from,
+  date_to,
+  model_type = "gam",
+  include_time_interaction = FALSE,
+  diagnostics_folder = NULL
+) {
   date_seq <- seq.Date(date_from, date_to, by = "day")
 
   results <- pblapply(iso2s, function(iso2) {
@@ -442,8 +448,13 @@ get_demand_components <- function(iso2s = "EU",
       select(date, heating, elec, others, heating_wc, elec_wc, others_wc)
 
     if (any(model_data$heating < 0, na.rm = TRUE) || any(model_data$others < 0, na.rm = TRUE)) {
-      warning(glue("Negative values for {iso2}: heating={sum(model_data$heating < 0, na.rm =
-        TRUE)}, others={sum(model_data$others < 0, na.rm = TRUE)}"))
+      warning(
+        glue(
+          "Negative values for {iso2}: heating={sum(
+            model_data$heating < 0, na.rm =
+        TRUE)}, others={sum(model_data$others < 0, na.rm = TRUE)}"
+        )
+      )
     }
 
     components <- base %>%

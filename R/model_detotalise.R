@@ -44,22 +44,5 @@ detotalise_co2 <- function(x) {
     filter(!(sector == SECTOR_ALL & any(sector == SECTOR_OTHERS & !is.na(value)))) %>%
     ungroup()
 
-  # For debugging purposes
-  #
-  # x %>%
-  #   filter(iso2=="EU") %>%
-  #   ggplot() + geom_line(aes(date, value, color=sector)) +
-  #   facet_wrap(~fuel)
-  #
-  # y  %>%
-  #   filter(iso2=="EU") %>%
-  #   ggplot() + geom_line(aes(date, value, color=sector)) +
-  #   facet_wrap(~fuel)
-  #
-  # add_total_co2(y %>% mutate(estimate="central")) %>%
-  #   filter(iso2=="EU") %>%
-  #   ggplot() + geom_line(aes(date, value, color=sector)) +
-  #   facet_wrap(~fuel)
-
   return(y)
 }

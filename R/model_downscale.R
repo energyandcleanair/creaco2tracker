@@ -4,8 +4,10 @@ downscale_daily <- function(co2, pwr_generation, gas_demand, cut_latest_days = 3
     split_gas_to_elec_all()
 
 
-  daily_proxy <- get_daily_proxy(pwr_generation = pwr_generation, gas_demand = gas_demand,
-    cut_latest_days = cut_latest_days)
+  daily_proxy <- get_daily_proxy(
+    pwr_generation = pwr_generation, gas_demand = gas_demand,
+    cut_latest_days = cut_latest_days
+  )
 
   # identify variable combos with data
   grps <- co2 %>%
@@ -19,7 +21,8 @@ downscale_daily <- function(co2, pwr_generation, gas_demand, cut_latest_days = 3
 
   # Fill potential missing dates in daily_proxy
   daily_proxy <- daily_proxy %>%
-    tidyr::complete(iso2,
+    tidyr::complete(
+      iso2,
       date = dts_daily,
       fuel,
       sector
@@ -57,7 +60,6 @@ downscale_daily <- function(co2, pwr_generation, gas_demand, cut_latest_days = 3
       proxy_CO2 = proxy_value / proxy_eurostat_ratio,
       value = case_when(
         !is.na(proxy_CO2) & date >= "2021-03-01" ~ proxy_CO2,
-        # value * coverage + proxy_CO2 * 1-coverage,
         T ~ value
       )
     ) %>%
@@ -77,8 +79,15 @@ downscale_daily <- function(co2, pwr_generation, gas_demand, cut_latest_days = 3
   ) %>%
     filter(!is.na(value_before) | !is.na(value_after))
 
-  stopifnot("Error: changed monthly total" = all(near(comparison$value_before,
-    comparison$value_after, tol = 0.1)))
+  stopifnot(
+    "Error: changed monthly total" = all(
+      near(
+        comparison$value_before,
+        comparison$value_after,
+        tol = 0.1
+      )
+    )
+  )
 
   return(co2_daily)
 }

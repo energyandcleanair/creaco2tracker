@@ -58,7 +58,8 @@ entsoe.get_power_generation <- function(
 
   pwr <- pwr %>%
     ungroup() %>%
-    complete(date,
+    complete(
+      date,
       source,
       data_source = "entsoe",
       nesting(iso2, region, country),

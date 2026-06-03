@@ -31,8 +31,10 @@ investigate_oil <- function(monthly_oil, monthly_filled_oil, yearly_oil, yearly_
   # Discrepancy monthly - yearly
   bind_rows(
     # monthly_oil,
-    fill_oil_non_energy_use_monthly(yearly_filled_oil, monthly_oil) %>% mutate(freq =
-      "Monthly filled"),
+    fill_oil_non_energy_use_monthly(yearly_filled_oil, monthly_oil) %>% mutate(
+      freq =
+        "Monthly filled"
+    ),
     yearly_filled_oil
   ) %>%
     add_iso2() %>%
@@ -70,9 +72,12 @@ investigate_oil <- function(monthly_oil, monthly_filled_oil, yearly_oil, yearly_
         & siec_code %in% c(SIEC_ROAD_DIESEL, SIEC_MOTOR_GASOLINE_XBIO)) |
 
         # SECTOR_TRANSPORT: Kerosene
-        (nrg_bal_code %in% c("FC_TRA_DAVI_E", "INTAVI_E",
-          "INTAVI_E+FC_TRA_DAVI_E") # Added in add_oil_transport function
-        & siec_code %in% c(SIEC_KEROSENE_XBIO, SIEC_AVIATION_GASOLINE))
+        (
+          nrg_bal_code %in% c(
+            "FC_TRA_DAVI_E", "INTAVI_E",
+            "INTAVI_E+FC_TRA_DAVI_E"
+          ) # Added in add_oil_transport function
+          & siec_code %in% c(SIEC_KEROSENE_XBIO, SIEC_AVIATION_GASOLINE))
 
       # SECTOR_TRANSPORT: International maritime bunkers
       # (nrg_bal_code %in% c("INTMARB")
@@ -82,7 +87,6 @@ investigate_oil <- function(monthly_oil, monthly_filled_oil, yearly_oil, yearly_
     geom_line(aes(year, values, col = freq, linetype = nrg_bal_code)) +
     facet_wrap(
       ~siec,
-      # scales='free_y'
     ) +
     rcrea::scale_y_zero()
 
@@ -221,7 +225,6 @@ investigate_solid <- function(monthly_solid, yearly_solid) {
     mutate(values = values / values[time == "2020-01-01"]) %>%
     ggplot() +
     geom_line(aes(time, values, color = type))
-  # facet_wrap(~type, scales='free_y')
 }
 
 investigate_coking_emissions <- function(yearly_solid) {
@@ -249,10 +252,18 @@ investigate_coking_emissions <- function(yearly_solid) {
 
   # Compute the ratio of hard coal emissions that should be accounted for
   # to account for coke oven gas (which is not available in monthly data)
-  hardcoal_coking_emissions <- get_co2_from_eurostat_cons(hardcoal_coking %>% mutate(fuel =
-    FUEL_COAL, sector = SECTOR_ALL))
-  coke_gas_emissions <- get_co2_from_eurostat_cons(coke_gas %>% mutate(fuel = FUEL_GAS, sector =
-    SECTOR_ALL))
+  hardcoal_coking_emissions <- get_co2_from_eurostat_cons(
+    hardcoal_coking %>% mutate(
+      fuel =
+        FUEL_COAL, sector = SECTOR_ALL
+    )
+  )
+  coke_gas_emissions <- get_co2_from_eurostat_cons(
+    coke_gas %>% mutate(
+      fuel = FUEL_GAS, sector =
+        SECTOR_ALL
+    )
+  )
 
   bind_rows(
     hardcoal_coking_emissions,

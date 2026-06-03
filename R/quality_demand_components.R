@@ -2,13 +2,15 @@
 #'
 #' Saves model summaries and generates diagnostic plots for demand components.
 #' @keywords internal
-diagnose_demand_components <- function(components,
-                                       iso2,
-                                       model,
-                                       model_data,
-                                       model_type,
-                                       include_time_interaction,
-                                       diagnostics_folder) {
+diagnose_demand_components <- function(
+  components,
+  iso2,
+  model,
+  model_data,
+  model_type,
+  include_time_interaction,
+  diagnostics_folder
+) {
   if (!is.null(diagnostics_folder)) {
     fuel_label <- first(na.omit(components$fuel))
     diag_folder <- file.path(diagnostics_folder, fuel_label)
@@ -92,8 +94,15 @@ diagnose_demand_components <- function(components,
       )
 
       plt_monthly <- monthly_data %>%
-        ggplot(aes(month, value, color = series, linetype = ifelse(is_wc, "weather corrected",
-          "actual"))) +
+        ggplot(
+          aes(
+            month, value,
+            color = series, linetype = ifelse(
+              is_wc, "weather corrected",
+              "actual"
+            )
+          )
+        ) +
         geom_line(linewidth = 0.7) +
         scale_color_manual(values = color_map) +
         scale_linetype_manual(values = c("actual" = "solid", "weather corrected" = "dashed")) +
@@ -131,8 +140,15 @@ diagnose_demand_components <- function(components,
         ungroup()
 
       plt_yearly <- yearly_data %>%
-        ggplot(aes(year, value, color = series, linetype = ifelse(is_wc, "weather corrected",
-          "actual"))) +
+        ggplot(
+          aes(
+            year, value,
+            color = series, linetype = ifelse(
+              is_wc, "weather corrected",
+              "actual"
+            )
+          )
+        ) +
         geom_line(linewidth = 0.7) +
         geom_point(size = 1.5) +
         ggrepel::geom_text_repel(
@@ -177,13 +193,15 @@ diagnose_demand_components <- function(components,
 #' @inheritParams get_demand_components
 #' @return Tibble with all components from both models, tagged with a model_type column.
 #' @export
-compare_demand_models <- function(iso2s = "EU",
-                                  date_from = "2015-01-01",
-                                  date_to = Sys.Date(),
-                                  use_cache = TRUE,
-                                  correct_gas_to_eurostat = TRUE,
-                                  include_time_interaction = TRUE,
-                                  diagnostics_folder = "diagnostics/demand_components/comparison") {
+compare_demand_models <- function(
+  iso2s = "EU",
+  date_from = "2015-01-01",
+  date_to = Sys.Date(),
+  use_cache = TRUE,
+  correct_gas_to_eurostat = TRUE,
+  include_time_interaction = TRUE,
+  diagnostics_folder = "diagnostics/demand_components/comparison"
+) {
   lm_result <- get_demand_components(
     iso2s = iso2s,
     date_from = date_from,
