@@ -280,7 +280,7 @@ get_weather_correction_demand_gas <- function(
   correction_factors <- pblapply(iso2s, function(iso2) {
     # Get country-specific gas demand
     country_gas <- gas_demand %>%
-      filter(iso2 == !!iso2) # date >= as.Date("2021-01-01")
+      filter(iso2 == !!iso2)
 
     country_pwr_gas <- pwr_gas %>%
       filter(iso2 == !!iso2)
@@ -331,11 +331,18 @@ get_weather_correction_demand_gas <- function(
     # Fit regression model: gas demand ~ HDD:country
     # We don't introduce a year interaction because we only have nyears * 12 data points
     # and already n_countries predictors
-    formula <- as.formula(paste("value ~ as.factor(wday) + value_mw + ", paste(formula_terms,
-      collapse = " + "
-    )))
-    model <- lm(formula, data = model_data %>% group_by(floor_date(date, "month")) %>%
-      filter(date == min(date)))
+    formula <- as.formula(
+      paste(
+        "value ~ as.factor(wday) + value_mw + ",
+        paste(formula_terms, collapse = " + ")
+      )
+    )
+    model <- lm(
+      formula,
+      data = model_data %>%
+        group_by(floor_date(date, "month")) %>%
+        filter(date == min(date))
+    )
 
     # Show model summary
     summary_file <- file.path(

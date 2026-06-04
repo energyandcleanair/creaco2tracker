@@ -78,7 +78,7 @@ project_until_now_lm <- function(
         )
 
       model_adj_r2 <- function(model) {
-        r2 <- summary(model)$adj.r.squared
+        r2 <- suppressWarnings(summary(model)$adj.r.squared)
         if (is.na(r2)) {
           0
         } else {
@@ -328,7 +328,7 @@ project_until_now_yoy <- function(co2, dts_month, last_years = 3, last_months = 
     expand_dates("date", dts_month) %>%
     arrange(date) %>%
     group_modify(function(df, ...) {
-      df %<>%
+      df <- df %>%
         group_by(month = month(date)) %>%
         mutate(
           mean3y = value_co2_tonne %>%
@@ -530,8 +530,10 @@ project_until_now_forecast <- function(co2, dts_month, last_years = 10, conf_lev
           forecast::hw(ts_data, level = conf_level) %>%
             as.data.frame() %>%
             `names<-`(c("mean", "lower", "upper")) %>%
-            mutate(date = strptime(paste("01", row.names(.)), format = "%d %b %Y") %>%
-              as.Date()) %>%
+            mutate(
+              date = strptime(paste("01", row.names(.)), format = "%d %b %Y") %>%
+                as.Date()
+            ) %>%
             `rownames<-`(NULL) %>%
             filter(date %in% dts_month)
         },

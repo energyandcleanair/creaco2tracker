@@ -9,9 +9,14 @@ agsi.get_storage_change <- function(date_from, date_to, iso2, verbose = FALSE) {
       return(NULL)
     }
 
-    url <- sprintf(
-      "https://agsi.gie.eu/api?country=%s&from=%s&to=%s&page=1&size=100000",
-      iso2, date_from, date_to
+    MAX_PAGE_SIZE <- 100000
+
+    url <- glue(
+      "https://agsi.gie.eu/api?country={iso2}",
+      "&from={date_from}",
+      "&to={date_to}",
+      "&page=1",
+      "&size={MAX_PAGE_SIZE}"
     )
 
     http_response <- httr::GET(url, httr::add_headers("x-key" = api_key), httr::accept_json())
@@ -22,6 +27,15 @@ agsi.get_storage_change <- function(date_from, date_to, iso2, verbose = FALSE) {
       message(glue("No data for {iso2} from {date_from} to {date_to}"))
       return(NULL)
     }
+    # Add a check for the size is near the limit of 100,000 records (let's do one extra)
+    if (nrow(data) >= MAX_PAGE_SIZE - 1) {
+      warning(
+        glue(
+          "Data for {iso2} from {date_from} to {date_to}",
+          " may be truncated ({MAX_PAGE_SIZE} record limit)"
+        )
+      )
+    }
 
     data %>%
       select(
@@ -31,7 +45,7 @@ agsi.get_storage_change <- function(date_from, date_to, iso2, verbose = FALSE) {
       ) %>%
       mutate(
         date = lubridate::date(date),
-        value_gwh = as.numeric(value_gwh),
+        value_gwh = suppressWarnings(as.numeric(value_gwh)),
         value_m3 = value_gwh * 1e6 / gcv_kwh_m3,
         type = "storage_drawdown"
       ) %>%

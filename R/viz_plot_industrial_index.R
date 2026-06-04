@@ -51,13 +51,18 @@ plot_industrial_index_bar_yoy <- function(
 
   plt <- ggplot(plt_data, aes(label, central, fill = product)) +
     geom_col(show.legend = FALSE, width = 0.6) +
-    geom_errorbar(aes(ymin = lower, ymax = upper), linewidth = 0.2, width = 0.2, col = "#999999") +
+    geom_errorbar(
+      aes(ymin = lower, ymax = upper),
+      linewidth = 0.2,
+      width = 0.2,
+      col = "#999999"
+    ) +
     # Only use faceting if by_fuel is TRUE and there's more than one product
-    {
-      if (by_fuel && n_distinct(plt_data$product) > 1) {
-        facet_wrap(~product, scales = "free_x")
-      }
-    } +
+    (if (by_fuel && n_distinct(plt_data$product) > 1) {
+      facet_wrap(~product, scales = "free_x")
+    } else {
+      NULL
+    }) +
     tidytext::scale_x_reordered() +
     rcrea::theme_crea_new() +
     scale_fill_manual(values = get_colors()) +
@@ -222,13 +227,14 @@ plot_industrial_scatter <- function(
       size = "Annual energy\nconsumption (PJ)",
       caption = paste0(
         c(
-          "Note:  Changes in net imports are expressed as percentage of production to be comparable.",
+          "Note: Changes in net imports are expressed as percentage",
+          "of production to be comparable.",
           "Only the top 10 sectors by energy consumption are shown.",
           "Source: CREA analysis based on EUROSTAT data."
         ),
         collapse = "\n"
       )
-    ) -> plt
+    )
 
   plt
   if (!is.null(filepath)) {

@@ -65,10 +65,12 @@ validate_power <- function(pwr_generation = entsoe.get_power_generation(), folde
 
   data <- bind_rows(
     ember_1,
-    ember_1 %>% group_by(year, data_source) %>%
+    ember_1 %>%
+      group_by(year, data_source) %>%
       summarise(value_twh = sum(value_twh), source = "Total"),
     ember_2,
-    ember_2 %>% group_by(year, data_source) %>%
+    ember_2 %>%
+      group_by(year, data_source) %>%
       summarise(value_twh = sum(value_twh), source = "Total"),
     pwr_generation %>%
       filter(country == "EU total", date < "2026-01-01") %>%

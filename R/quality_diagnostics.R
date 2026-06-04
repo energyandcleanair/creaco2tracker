@@ -102,7 +102,6 @@ diagnostic_eurostat_cons_yearly_monthly <- function(
     for (iso2 in detailed_iso2s) {
       plt <- plt_data %>%
         filter(iso2 == !!iso2) %>%
-        ggplot(aes(year, values, col = sector, linetype = source)) +
         complete(
           year = seq(min(year), max(year), by = 1),
           iso2,
@@ -112,6 +111,7 @@ diagnostic_eurostat_cons_yearly_monthly <- function(
           source,
           fill = list(values = NA)
         ) %>%
+        ggplot(aes(year, values, col = sector, linetype = source)) +
         geom_line() +
         facet_wrap(
           ~siec,
@@ -131,24 +131,23 @@ diagnostic_eurostat_cons_yearly_monthly <- function(
         bg = "white"
       )
 
-      (
-        plt <- cons_combined %>%
-          filter(iso2 == !!iso2) %>%
-          # Complete dates so that there's no weird line in the plot
-          complete(
-            time = seq.Date(min(time), max(time), by = "month"),
-            iso2,
-            siec,
-            fuel,
-            sector,
-            source,
-            fill = list(values = NA)
-          ) %>%
-          ggplot(aes(time, values, col = siec, linetype = source)) +
-          geom_line() +
-          facet_grid(fuel ~ sector, scales = "free_y") +
-          theme(legend.position = "bottom") +
-          rcrea::scale_y_crea_zero())
+      plt <- cons_combined %>%
+        filter(iso2 == !!iso2) %>%
+        # Complete dates so that there's no weird line in the plot
+        complete(
+          time = seq.Date(min(time), max(time), by = "month"),
+          iso2,
+          siec,
+          fuel,
+          sector,
+          source,
+          fill = list(values = NA)
+        ) %>%
+        ggplot(aes(time, values, col = siec, linetype = source)) +
+        geom_line() +
+        facet_grid(fuel ~ sector, scales = "free_y") +
+        theme(legend.position = "bottom") +
+        rcrea::scale_y_crea_zero()
 
       ggsave(
         filename = file.path(diagnostics_folder, glue("eurostat_combined_{tolower(iso2)}.png")),
@@ -190,7 +189,7 @@ diagnostic_eurostat_cons <- function(
         fill = list(values = NA)
       )
 
-    (ggplot(plt_data, aes(time, values, col = sector)) +
+    plt <- ggplot(plt_data, aes(time, values, col = sector)) +
       geom_line() +
       rcrea::scale_y_crea_zero() +
       ggh4x::facet_grid2(geo ~ glue("{fuel}\n({unit})"), scales = "free_y", independent = "y") +
@@ -199,8 +198,8 @@ diagnostic_eurostat_cons <- function(
       rcrea::theme_crea() +
       theme(
         panel.grid.minor.x = element_line(color = "grey95"),
-        panel.grid.major.x = element_line(color = "grey90"),
-      ) -> plt)
+        panel.grid.major.x = element_line(color = "grey90")
+      )
 
     ggsave(
       filename = file.path(diagnostics_folder, "eurostat_cons.png"),
@@ -211,34 +210,32 @@ diagnostic_eurostat_cons <- function(
       scale = 1.5
     )
 
-
     # Check data availability
-    (
-      eurostat_cons %>%
-        filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
-        group_by(iso2, sector, fuel) %>%
-        summarise(max_date = max(time)) %>%
-        ggplot(aes(max_date, iso2)) +
-        geom_bar(stat = "identity", aes(fill = iso2 == "EU"), show.legend = FALSE) +
-        geom_text(
-          data = function(x) filter(x, iso2 == "EU"),
-          aes(label = max_date),
-          size = 3,
-        ) +
-        geom_text(
-          data = function(x) filter(x, iso2 != "EU"),
-          aes(label = lubridate::month(max_date)),
-          size = 3,
-        ) +
-        rcrea::scale_fill_crea_d() +
-        rcrea::theme_crea_new() +
-        labs(
-          title = "[DIAGNOSTIC] Eurostat fossil-fuel consumption data availability",
-          x = NULL,
-          y = NULL
-        ) +
-        scale_x_date(limits = c(as.Date("2020-01-01"), NA), oob = scales::squish) +
-        facet_wrap(fuel ~ sector)) -> plt
+    plt <- eurostat_cons %>%
+      filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
+      group_by(iso2, sector, fuel) %>%
+      summarise(max_date = max(time)) %>%
+      ggplot(aes(max_date, iso2)) +
+      geom_bar(stat = "identity", aes(fill = iso2 == "EU"), show.legend = FALSE) +
+      geom_text(
+        data = function(x) filter(x, iso2 == "EU"),
+        aes(label = max_date),
+        size = 3
+      ) +
+      geom_text(
+        data = function(x) filter(x, iso2 != "EU"),
+        aes(label = lubridate::month(max_date)),
+        size = 3
+      ) +
+      rcrea::scale_fill_crea_d() +
+      rcrea::theme_crea_new() +
+      labs(
+        title = "[DIAGNOSTIC] Eurostat fossil-fuel consumption data availability",
+        x = NULL,
+        y = NULL
+      ) +
+      scale_x_date(limits = c(as.Date("2020-01-01"), NA), oob = scales::squish) +
+      facet_wrap(fuel ~ sector)
 
     plt
     quicksave(
@@ -261,35 +258,34 @@ diagnostic_eurostat_indprod <- function(
     create_dir(diagnostics_folder)
 
     # Check data availability
-    (
-      eurostat_indprod %>%
-        filter(
-          nace_r2_code == "B" |
-            (stringr::str_length(nace_r2_code) == 3 & substr(nace_r2_code, 1, 1) == "C")
-        ) %>%
-        filter(
-          unit == "Index, 2021=100",
-          grepl("Calendar adjusted data", s_adj)
-        ) %>%
-        filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
-        group_by(iso2, nace_r2_code) %>%
-        summarise(max_date = max(time)) %>%
-        ggplot(aes(max_date, iso2)) +
-        geom_bar(stat = "identity", aes(fill = iso2 == "EU"), show.legend = FALSE) +
-        geom_text(
-          data = function(x) filter(x, iso2 == "EU"),
-          aes(label = max_date),
-          size = 3,
-        ) +
-        rcrea::scale_fill_crea_d() +
-        rcrea::theme_crea_new() +
-        labs(
-          title = "[DIAGNOSTIC] Eurostat industrial production data availability",
-          x = NULL,
-          y = NULL
-        ) +
-        scale_x_date(limits = c(as.Date("2020-01-01"), NA), oob = scales::squish) +
-        facet_wrap(~nace_r2_code)) -> plt
+    plt <- eurostat_indprod %>%
+      filter(
+        nace_r2_code == "B" |
+          (stringr::str_length(nace_r2_code) == 3 & substr(nace_r2_code, 1, 1) == "C")
+      ) %>%
+      filter(
+        unit == "Index, 2021=100",
+        grepl("Calendar adjusted data", s_adj)
+      ) %>%
+      filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
+      group_by(iso2, nace_r2_code) %>%
+      summarise(max_date = max(time)) %>%
+      ggplot(aes(max_date, iso2)) +
+      geom_bar(stat = "identity", aes(fill = iso2 == "EU"), show.legend = FALSE) +
+      geom_text(
+        data = function(x) filter(x, iso2 == "EU"),
+        aes(label = max_date),
+        size = 3
+      ) +
+      rcrea::scale_fill_crea_d() +
+      rcrea::theme_crea_new() +
+      labs(
+        title = "[DIAGNOSTIC] Eurostat industrial production data availability",
+        x = NULL,
+        y = NULL
+      ) +
+      scale_x_date(limits = c(as.Date("2020-01-01"), NA), oob = scales::squish) +
+      facet_wrap(~nace_r2_code)
 
     plt
     quicksave(file.path(diagnostics_folder, "eurostat_indprod_availability.png"),

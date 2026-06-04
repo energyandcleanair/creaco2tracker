@@ -261,13 +261,12 @@ fill_gaps_in_time_series <- function(
     group_by(across(all_of(group_cols))) %>%
     group_modify(function(group_data, group_keys) {
       # Skip gap filling for excluded ISO2 codes
-      if ("iso2" %in% names(group_data) &&
-        any(group_data$iso2 %in% exclude_iso2s)) {
-        return(group_data)
-      }
-
-      if ("iso2" %in% names(group_keys) &&
-        any(group_keys$iso2 %in% exclude_iso2s)) {
+      has_excluded_iso2_data <- "iso2" %in% names(group_data) &&
+        any(group_data$iso2 %in% exclude_iso2s)
+      has_excluded_iso2_in_keys <- "iso2" %in% names(group_keys) &&
+        any(group_keys$iso2 %in% exclude_iso2s)
+      has_excluded_iso2 <- has_excluded_iso2_data || has_excluded_iso2_in_keys
+      if (has_excluded_iso2) {
         return(group_data)
       }
 

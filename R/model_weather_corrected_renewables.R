@@ -583,10 +583,8 @@ get_weather_corrected_hydro <- function(
     # Fill countries with no capacity data with constant value
     group_by(iso2) %>%
     mutate(
-      capacity_mw = case_when(
-        all(is.na(capacity_mw)) ~ 1,
-        TRUE ~ capacity_mw
-      )
+      # We use don't use case_when here because we need explicit group-wise branching
+      capacity_mw = if (all(is.na(capacity_mw))) rep(1, dplyr::n()) else capacity_mw
     ) %>%
     ungroup()
 
@@ -694,17 +692,6 @@ plot_wind_power_curve <- function(model, model_data_country, iso2, diagnostics_f
       aes(ws_1, pred, color = as.factor(year)),
       linewidth = 1.5
     ) +
-    {
-      # We can only add dots if single country
-      if (length(ws_1_vars) == 1) {
-        geom_point(
-          data = model_data_country,
-          aes_string(x = ws_1_vars, y = "value_mwh", color = "as.factor(year)"),
-          alpha = 0.3,
-          size = 0.8
-        )
-      }
-    } +
     labs(
       title = paste("Wind Power Curve -", iso2),
       x = "Wind Speed at 50m (m/s)",
@@ -712,6 +699,17 @@ plot_wind_power_curve <- function(model, model_data_country, iso2, diagnostics_f
       color = "Year"
     ) +
     theme_crea_new()
+
+  # We can only add dots if single country
+  if (length(ws_1_vars) == 1) {
+    plt_curve <- plt_curve +
+      geom_point(
+        data = model_data_country,
+        aes_string(x = ws_1_vars, y = "value_mwh", color = "as.factor(year)"),
+        alpha = 0.3,
+        size = 0.8
+      )
+  }
 
   # Save plot
   dir.create(diagnostics_folder, showWarnings = FALSE, recursive = TRUE)

@@ -61,25 +61,26 @@ test_that(
     expect_true(
       all(
         c(
-        "all",
-        "entsog_flow_raw",
-        "agsi_storage_daily",
-        "eurostat_gas_monthly_for_correction",
-        "entsoe_power_daily",
-        "ember_power_monthly",
-        "ember_power_yearly",
-        "eurostat_oil_monthly",
-        "eurostat_oil_yearly",
-        "eurostat_solid_monthly",
-        "eurostat_solid_yearly",
-        "eurostat_gas_monthly",
-        "eurostat_gas_yearly",
-        "gas_demand",
-        "power_generation",
-        "eurostat_cons",
-        "eurostat_indprod",
-        "weather"
-      ) %in% names(cfg))
+          "all",
+          "entsog_flow_raw",
+          "agsi_storage_daily",
+          "eurostat_gas_monthly_for_correction",
+          "entsoe_power_daily",
+          "ember_power_monthly",
+          "ember_power_yearly",
+          "eurostat_oil_monthly",
+          "eurostat_oil_yearly",
+          "eurostat_solid_monthly",
+          "eurostat_solid_yearly",
+          "eurostat_gas_monthly",
+          "eurostat_gas_yearly",
+          "gas_demand",
+          "power_generation",
+          "eurostat_cons",
+          "eurostat_indprod",
+          "weather"
+        ) %in% names(cfg)
+      )
     )
   }
 )

@@ -588,9 +588,12 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
     summarise(values = sum(values, na.rm = TRUE)) %>%
     spread(siec_code, values) %>%
     group_by(geo, time) %>%
-    summarise(share_road = (!!sym(SIEC_ROAD_DIESEL) + !!sym(SIEC_MOTOR_GASOLINE_XBIO) +
-      !!sym(SIEC_BIOGASOLINE)
-    ) / !!sym(SIEC_OIL_PRODUCTS))
+    summarise(
+      share_road = (
+        !!sym(SIEC_ROAD_DIESEL) + !!sym(SIEC_MOTOR_GASOLINE_XBIO) +
+          !!sym(SIEC_BIOGASOLINE)
+      ) / !!sym(SIEC_OIL_PRODUCTS)
+    )
 
   # TODO INVESTIGATE AND FIX BULGARIA
   ggplot(share_gasoline_diesel_road %>% filter_plot()) +
@@ -716,9 +719,12 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
     summarise(values = sum(values, na.rm = TRUE)) %>%
     spread(siec_code, values) %>%
     group_by(geo, time) %>%
-    summarise(share_transport = (!!sym(SIEC_MOTOR_GASOLINE_XBIO) + !!sym(SIEC_ROAD_DIESEL) +
-      !!sym(SIEC_KEROSENE_XBIO) + !!sym(SIEC_BIOGASOLINE))
-    / !!sym(SIEC_OIL_PRODUCTS))
+    summarise(
+      share_transport = (
+        !!sym(SIEC_MOTOR_GASOLINE_XBIO) + !!sym(SIEC_ROAD_DIESEL) +
+          !!sym(SIEC_KEROSENE_XBIO) + !!sym(SIEC_BIOGASOLINE)
+      ) / !!sym(SIEC_OIL_PRODUCTS)
+    )
 
   if (plot_validation) {
     ggplot(share_transport %>% filter_plot()) +

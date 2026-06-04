@@ -3,7 +3,8 @@ validate_industry <- function(industrial_indexes, industrial_prodtrade, industri
   plt_data <- bind_rows(
     industrial_prodtrade %>%
       filter(indicator == "production") %>%
-      filter(unit == "kg") %>% ungroup() %>%
+      filter(unit == "kg") %>%
+      ungroup() %>%
       select(iso2, year, nace_r2_code, value) %>%
       mutate(type = "production"),
     industrial_indexes %>%
@@ -34,7 +35,8 @@ validate_industry <- function(industrial_indexes, industrial_prodtrade, industri
   plt_data <- bind_rows(
     industrial_prodtrade %>%
       filter(indicator %in% c("export", "import")) %>%
-      filter(unit == "kg") %>% ungroup() %>%
+      filter(unit == "kg") %>%
+      ungroup() %>%
       spread(indicator, value) %>%
       mutate(value = import - export) %>%
       select(iso2, year, nace_r2_code, value) %>%

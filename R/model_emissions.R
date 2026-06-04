@@ -48,21 +48,21 @@ get_ipcc_emission_factors <- function() {
   # Emission factors in tCO2/TJ from https://www.ipcc-nggip.iges.or.jp/EFDB/find_ef.php
   tibble::tribble(
     ~siec_code,                 ~co2_factor_t_per_TJ,
-    SIEC_HARD_COAL,             92.8, # EFID=110620
-    SIEC_BROWN_COAL,            113.1, # EFID=123085
-    SIEC_BROWN_COAL_BRIQUETTES, 99, # EFID=123073
-    SIEC_PEAT,                  117.766, # EFID=122005 (Peat)
+    SIEC_HARD_COAL,             92.8, # EFID is 110620
+    SIEC_BROWN_COAL,            113.1, # EFID is 123085
+    SIEC_BROWN_COAL_BRIQUETTES, 99, # EFID is 123073
+    SIEC_PEAT,                  117.766, # EFID is 122005 (Peat)
     SIEC_OIL_SHALE,             108, # Oil shale
-    SIEC_OIL_PRODUCTS,          20 * 44 / 12, # EFID=110669 Other petroleum products
-    SIEC_FUEL_OIL,              77.7, # EFID=121579
-    SIEC_HEATING_GASOIL,        20 * 44 / 12, # EFID=17174 = 73.33
-    SIEC_MOTOR_GASOLINE_XBIO,   72.1, # EFID=18667 (Motor gasoline)
-    SIEC_ROAD_DIESEL,           72.1, # EFID=18919
-    SIEC_CRUDE_OIL,             73, # EFID=110603
+    SIEC_OIL_PRODUCTS,          20 * 44 / 12, # EFID is 110669 Other petroleum products
+    SIEC_FUEL_OIL,              77.7, # EFID is 121579
+    SIEC_HEATING_GASOIL,        20 * 44 / 12, # EFID is 17174 = 73.33
+    SIEC_MOTOR_GASOLINE_XBIO,   72.1, # EFID is 18667 (Motor gasoline)
+    SIEC_ROAD_DIESEL,           72.1, # EFID is 18919
+    SIEC_CRUDE_OIL,             73, # EFID is 110603
     SIEC_NATURAL_GAS,           55.74, # Average of EFID123092-123095
-    SIEC_COKE_OVEN_GAS,         41.2, # EFID=122159
-    SIEC_COKE_OVEN_COKE,        113, # EFID=110624
-    SIEC_GASOIL_DIESEL,         72.1, # EFID=18919
+    SIEC_COKE_OVEN_GAS,         41.2, # EFID is 122159
+    SIEC_COKE_OVEN_COKE,        113, # EFID is 110624
+    SIEC_GASOIL_DIESEL,         72.1, # EFID is 18919
     SIEC_KEROSENE_XBIO,         72.69, # Taken from EEA
     SIEC_AVIATION_GASOLINE,     70.55, # Taken from EEA
   )

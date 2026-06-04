@@ -2,7 +2,7 @@ linters: linters_with_defaults(
     line_length_linter(100),
     object_usage_linter = NULL,
     object_name_linter = object_name_linter(
-      styles = c("snake_case", "symbols"),
+      styles = c("snake_case", "SNAKE_CASE", "symbols"),
       regexes = c(
         snake_case_with_single_dot = "^[a-z][a-z0-9]*(_[a-z0-9]+)*\\.[a-z][a-z0-9]*(_[a-z0-9]+)*$"
       )

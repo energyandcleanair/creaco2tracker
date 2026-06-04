@@ -119,6 +119,15 @@ split_gas_to_elec_others <- function(co2) {
 
   group_cols <- intersect(names(co2), c("iso2", "geo", "date", "fuel", "estimate", "unit"))
 
+  duplicate_keys <- gas_data %>%
+    group_by(across(all_of(c(group_cols, "sector")))) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    filter(n > 1)
+
+  if (nrow(duplicate_keys) > 0) {
+    stop("Duplicate gas rows found for split_gas_to_elec_others; please deduplicate input data.")
+  }
+
   # Process gas data using pivot operations
   gas_result <- gas_data %>%
     pivot_wider(
@@ -132,8 +141,9 @@ split_gas_to_elec_others <- function(co2) {
       others = suppressWarnings(coalesce(others, all - electricity)), # calculate others value
       electricity = suppressWarnings(
         coalesce(
-          electricity, all -
-          others)
+          electricity,
+          all - others
+        )
       ) # calculate electricity value
     ) %>%
     select(-all) %>%
@@ -157,6 +167,15 @@ split_gas_to_elec_all <- function(co2) {
   gas_sectors <- unique(gas_data$sector)
 
   group_cols <- intersect(names(co2), c("iso2", "geo", "date", "fuel", "estimate", "unit"))
+
+  duplicate_keys <- gas_data %>%
+    group_by(across(all_of(c(group_cols, "sector")))) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    filter(n > 1)
+
+  if (nrow(duplicate_keys) > 0) {
+    stop("Duplicate gas rows found for split_gas_to_elec_all; please deduplicate input data.")
+  }
 
   # Process gas data using pivot operations
   gas_result <- gas_data %>%
@@ -242,7 +261,10 @@ add_total_co2 <- function(co2) {
       sector = SECTOR_ALL
     ) %>%
     select(-central_value, -std_dev) %>%
-    bind_rows(co2 %>% filter(fuel != "total")) %>%
+    bind_rows(
+      co2 %>%
+        filter(fuel != "total")
+    ) %>%
     ungroup()
 }
 
@@ -277,7 +299,8 @@ combine_coke_coal <- function(co2) {
     ) %>%
     select(-central_value, -std_dev) %>%
     bind_rows(
-      co2 %>% filter(!fuel %in% c(FUEL_COAL, FUEL_COKE))
+      co2 %>%
+        filter(!fuel %in% c(FUEL_COAL, FUEL_COKE))
     ) %>%
     ungroup()
 }

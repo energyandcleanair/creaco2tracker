@@ -347,7 +347,10 @@ get_power_generation <- function(
     select(iso2, source_std, last_ratio = ratio, last_scale_factor = scale_factor, tier)
 
   daily_with_factors <- daily_with_factors %>%
-    left_join(last_ratios %>% select(-tier), by = c("iso2", "source_std")) %>%
+    left_join(
+      last_ratios %>% select(-tier),
+      by = c("iso2", "source_std")
+    ) %>%
     mutate(
       # Use last ratio for future months
       ratio = coalesce(ratio, last_ratio),

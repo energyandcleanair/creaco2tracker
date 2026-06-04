@@ -234,7 +234,10 @@ calculate_powermix_correction_factors <- function(
 
   correction_factors <- thermal_agg %>%
     pivot_wider(names_from = source_category, values_from = value_mwh, values_fill = 0) %>%
-    left_join(renewable_agg %>% select(iso2, year, renewable_delta_mwh), by = c("iso2", "year")) %>%
+    left_join(
+      renewable_agg %>% select(iso2, year, renewable_delta_mwh),
+      by = c("iso2", "year")
+    ) %>%
     group_by(iso2) %>%
     mutate(
       emission_correction_factor = calculate_powermix_correction_factor(

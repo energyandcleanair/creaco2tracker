@@ -55,7 +55,9 @@ get_gas_demand <- function(
 ) {
   years <- seq(2015, lubridate::year(lubridate::today()))
 
-  create_dir(diagnostics_folder)
+  if (!is.null(diagnostics_folder)) {
+    create_dir(diagnostics_folder)
+  }
 
   entsog_data <- gas_data_access_get_entsog_flow(
     years = years,
@@ -370,7 +372,17 @@ keep_best <- function(
   data_masking = NULL
 ) {
   eurostat <- get_eurostat_gas(data_masking = data_masking) %>% filter(type == "consumption")
-  rsq <- function(x, y) cor(x, y)^2
+  rsq <- function(x, y) {
+    ok <- is.finite(x) & is.finite(y)
+    x <- x[ok]
+    y <- y[ok]
+
+    if (length(x) < 2 || stats::sd(x) == 0 || stats::sd(y) == 0) {
+      return(NA_real_)
+    }
+
+    stats::cor(x, y)^2
+  }
   min_start <- min(consumption$date)
   max_start <- max(eurostat$date) - months(min_comparison_points - 1)
 
@@ -472,7 +484,8 @@ keep_best <- function(
       eurostat %>% mutate(
         year = lubridate::year(date),
         month = lubridate::month(date)
-      ) %>% select(iso2, year, month, eurostat_m3),
+      ) %>%
+        select(iso2, year, month, eurostat_m3),
       by = c("iso2", "year", "month")
     ) %>%
     mutate(
@@ -612,27 +625,24 @@ keep_best <- function(
 
   plt <- plot_data %>%
     filter(!is.na(value_m3)) %>%
-    ggplot(aes(x = date, y = value_m3 / 1e6, color = method, size = method)) +
+    ggplot(aes(x = date, y = value_m3 / 1e6, color = method, linewidth = method)) +
     geom_line() +
     facet_wrap(~country, scales = "free_y", ncol = 3) +
     rcrea::scale_y_crea_zero() +
     scale_color_manual(values = color_values) +
-    scale_size_manual(values = size_values) +
+    scale_linewidth_manual(values = size_values) +
     labs(
       title = "Fossil gas consumption - CREA estimate vs Eurostat",
       subtitle = subtitle,
       x = NULL,
       y = NULL,
       color = NULL,
-      size = NULL,
+      linewidth = NULL,
       caption = "Note: Only the best estimate is shown for each country."
     ) +
     rcrea::theme_crea() +
     theme(legend.position = "bottom") +
-    guides(
-      size = guide_legend(nrow = 1),
-      color = guide_legend(nrow = 1)
-    )
+    guides(linewidth = guide_legend(nrow = 1), color = guide_legend(nrow = 1))
 
   ggsave(
     file.path(diagnostics_folder, "gas_consumption_estimates.png"),

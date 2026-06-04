@@ -183,11 +183,14 @@ apply_seasonal_adjustment <- function(cons_yearly, cons_monthly) {
     select(-c(values))
 
   # Validate that monthly shares sum to approximately 1
-  if (!all(month_shares %>%
-    group_by(sector, siec_code, unit, iso2, fuel) %>%
-    summarise(one = round(sum(month_share), 5), .groups = "drop") %>%
-    pull(one) %>%
-    unique() == 1)) {
+  has_valid_month_shares <- all(
+    month_shares %>%
+      group_by(sector, siec_code, unit, iso2, fuel) %>%
+      summarise(one = round(sum(month_share), 5), .groups = "drop") %>%
+      pull(one) %>%
+      unique() == 1
+  )
+  if (!has_valid_month_shares) {
     stop("Wrong monthly shares")
   }
 
@@ -322,7 +325,7 @@ combine_monthly_yearly_with_cutoff <- function(cons_yearly_monthly, cons_monthly
     ) %>%
     select(-c(cutoff_date)) %>%
     group_by(iso2, sector, time, unit, siec_code, fuel) %>%
-    arrange(source) %>% # monthly < yearly
+    arrange(source) %>% # "monthly" is sorted before "yearly"
     slice(1) %>%
     ungroup()
 

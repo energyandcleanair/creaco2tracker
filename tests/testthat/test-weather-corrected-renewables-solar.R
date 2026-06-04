@@ -170,7 +170,7 @@ test_that(
     expect_true(correction_2020 > -50)
 
     # 2022 (high year) should be corrected downward (negative correction)
-    expect_true(correction_2022 < 50) # Allow some tolerance, but should be negative or small positive
+    expect_true(correction_2022 < 50) # Allow tolerance; should be near zero or negative
 
     # FR: With constant weather, correction should be minimal
     # (all years should have similar corrected values, close to actual)

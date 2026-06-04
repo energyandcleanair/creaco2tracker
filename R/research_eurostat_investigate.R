@@ -92,7 +92,7 @@ investigate_oil <- function(monthly_oil, monthly_filled_oil, yearly_oil, yearly_
 
 
   # Investigate Netherlands oil products
-  bind_rows(
+  plt <- bind_rows(
     yearly_filled_oil %>% mutate(freq = "Annual filled"),
     yearly_oil,
     monthly_oil
@@ -112,8 +112,8 @@ investigate_oil <- function(monthly_oil, monthly_filled_oil, yearly_oil, yearly_
     facet_wrap(~nrg_bal_code) +
     theme(
       # Hide yaxis labels
-      axis.text.y = element_blank(),
-    ) -> plt
+      axis.text.y = element_blank()
+    )
 
 
   ggsave(

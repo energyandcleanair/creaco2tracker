@@ -84,7 +84,10 @@ entsoe.get_power_generation <- function(
         country = "EU total",
         iso2 = "EU"
       ) %>%
-      bind_rows(pwr %>% filter(iso2 != "EU")) %>%
+      bind_rows(
+        pwr %>%
+          filter(iso2 != "EU")
+      ) %>%
       ungroup()
   }
 

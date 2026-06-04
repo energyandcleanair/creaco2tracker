@@ -9,17 +9,18 @@ test_that(
       date_to = "2023-03-31",
       use_cache = TRUE,
       model_type = "lm",
-      diagnostics_folder = tempdir()
+      diagnostics_folder = NULL
     )
 
     # Check expected columns
     expect_true(
       all(
         c(
-        "iso2", "date", "fuel", "component", "value",
-        "value_weather_corrected", "unit", "frequency",
-        "data_source"
-      ) %in% names(result))
+          "iso2", "date", "fuel", "component", "value",
+          "value_weather_corrected", "unit", "frequency",
+          "data_source"
+        ) %in% names(result)
+      )
     )
 
     # Check fuels present
@@ -44,6 +45,10 @@ test_that(
   "get_demand_components with GAM returns expected structure",
   {
     skip_if_offline()
+    # Allow warning that says "Warning: Negative values for EU..."
+    expect_warning(
+      regexp = "Negative values for EU"
+    )
 
     result <- get_demand_components(
       iso2s = "EU",
@@ -51,16 +56,17 @@ test_that(
       date_to = "2023-03-31",
       use_cache = TRUE,
       model_type = "gam",
-      diagnostics_folder = tempdir()
+      diagnostics_folder = NULL
     )
 
     # Same structure as LM
     expect_true(
       all(
         c(
-        "iso2", "date", "fuel", "component", "value",
-        "value_weather_corrected"
-      ) %in% names(result))
+          "iso2", "date", "fuel", "component", "value",
+          "value_weather_corrected"
+        ) %in% names(result)
+      )
     )
 
     # Should have data

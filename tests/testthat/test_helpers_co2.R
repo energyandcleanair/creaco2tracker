@@ -143,8 +143,8 @@ test_that(
     )
     # Add a duplicate row
     test_data <- bind_rows(test_data, test_data[1, ])
-    # Should fail due to duplicate data causing list columns
-    expect_error(split_gas_to_elec_others(test_data), "non-numeric argument to binary operator")
+    # Should fail with an explicit duplicate data error before pivoting
+    expect_error(split_gas_to_elec_others(test_data), "Duplicate gas rows found")
   }
 )
 

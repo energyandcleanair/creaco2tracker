@@ -57,11 +57,22 @@ get_demand_components <- function(
   iso2s <- unique(iso2s)
   date_from <- as.Date(date_from)
   date_to <- as.Date(date_to)
+  gas_diagnostics_folder <- if (is.null(diagnostics_folder)) {
+    NULL
+  } else {
+    file.path(diagnostics_folder, "gas_demand")
+  }
+  power_diagnostics_folder <- if (is.null(diagnostics_folder)) {
+    NULL
+  } else {
+    file.path(diagnostics_folder, "power_generation")
+  }
 
   gas_demand <- get_gas_demand(
     iso2 = iso2s,
     use_cache = use_cache,
     correct_to_eurostat = correct_gas_to_eurostat,
+    diagnostics_folder = gas_diagnostics_folder,
     data_masking = data_masking
   ) %>%
     filter(date >= date_from, date <= date_to) %>%
@@ -77,6 +88,7 @@ get_demand_components <- function(
     date_from = date_from,
     iso2s = iso2s,
     use_cache = use_cache,
+    diagnostics_folder = power_diagnostics_folder,
     data_masking = data_masking
   )
 

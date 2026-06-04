@@ -94,16 +94,18 @@ test_that(
       value = c(10, 20, 30, 40, 50)
     )
 
-    expect_equal(res_ratio %>% arrange(date) %>% mutate(value = unname(value)) %>% select(
-      date,
-      value
-    ), expected)
+    expect_equal(
+      res_ratio %>%
+        arrange(date) %>%
+        mutate(value = unname(value)) %>%
+        select(date, value),
+      expected
+    )
   }
 )
 
 test_that(
-  "project_until_now_lm fill modes diverge when observed values differ from model
-  predictions",
+  "project_until_now_lm fill modes diverge when observed values differ from model predictions",
   {
     x <- make_co2(
       dates = c("2020-01-01", "2020-02-01", "2020-04-01"),

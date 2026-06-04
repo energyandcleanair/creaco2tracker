@@ -158,8 +158,10 @@ get_industrial_indexes <- function(
             forecast::hw(ts_data, level = conf_level) %>%
               as.data.frame() %>%
               `names<-`(c("mean", "lower", "upper")) %>%
-              mutate(time = strptime(paste("01", row.names(.)), format = "%d %b %Y") %>%
-                as.Date()) %>%
+              mutate(
+                time = strptime(paste("01", row.names(.)), format = "%d %b %Y") %>%
+                  as.Date()
+              ) %>%
               `rownames<-`(NULL)
           },
           error = function(e) {
@@ -250,17 +252,30 @@ get_industrial_indexes <- function(
     iso2 = "DE", date = index_date, nace_r2_code = "B", product = "gas",
     estimate = "central", time = index_date
   )
-  stopifnot(
-    round(sum(inner_join(industrial_indexes, filter_tbl) %>%
-      pull(energy_tj), na.rm = TRUE), 1) == round(expected_value, 1)
+  industrial_value <- round(
+    sum(
+      inner_join(industrial_indexes, filter_tbl) %>%
+        pull(energy_tj),
+      na.rm = TRUE
+    ),
+    1
+  )
+  consumption_value <- round(
+    sum(
+      inner_join(consumption_filled, filter_tbl) %>%
+        pull(energy_tj),
+      na.rm = TRUE
+    ),
+    1
   )
   stopifnot(
-    round(sum(inner_join(consumption_filled, filter_tbl) %>%
-      pull(energy_tj), na.rm = TRUE), 1) == round(expected_value_yearly, 1)
+    industrial_value == round(expected_value, 1)
   )
   stopifnot(
-    round(sum(inner_join(industrial_indexes, filter_tbl) %>%
-      pull(energy_tj), na.rm = TRUE), 1) == round(expected_value, 1)
+    consumption_value == round(expected_value_yearly, 1)
+  )
+  stopifnot(
+    industrial_value == round(expected_value, 1)
   )
 
 

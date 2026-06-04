@@ -75,9 +75,12 @@ test_that(
 
     cons_monthly <- tribble(
       ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
-      "DE", "A", "2018-01-01", "TJ", SIEC_NATURAL_GAS, "GAS", 95, # Before cutoff, should be filtered
-      "DE", "A", "2019-01-01", "TJ", SIEC_HARD_COAL, "COAL", 205, # Before cutoff, should be filtered
-      "DE", "A", "2018-01-01", "TJ", SIEC_HARD_COAL, "COAL", 305 # Before cutoff, should be filtered
+      "DE", "A", "2018-01-01", "TJ", SIEC_NATURAL_GAS, "GAS", 95,
+      # Before cutoff, should be filtered
+      "DE", "A", "2019-01-01", "TJ", SIEC_HARD_COAL, "COAL", 205,
+      # Before cutoff, should be filtered
+      "DE", "A", "2018-01-01", "TJ", SIEC_HARD_COAL, "COAL", 305
+      # Before cutoff, should be filtered
     ) %>%
       mutate(time = as.Date(time))
 

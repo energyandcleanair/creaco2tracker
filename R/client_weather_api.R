@@ -145,7 +145,7 @@ fill_weather <- function(weather_raw) {
   }
 
   # Fill na values using forward fill method
-  weather_raw %>%
+  weather_filled <- weather_raw %>%
     mutate(date = lubridate::date(date)) %>%
     group_by(
       variable, unit, region_id, region_type, region_iso2, averaging_period, source,
@@ -163,8 +163,7 @@ fill_weather <- function(weather_raw) {
         ungroup() %>%
         select(-.fill_break)
     }) %>%
-    ungroup() ->
-  weather_filled
+    ungroup()
 
   return(weather_filled)
 }

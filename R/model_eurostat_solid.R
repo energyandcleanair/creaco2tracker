@@ -76,13 +76,14 @@ process_solid_monthly <- function(x, pwr_generation) {
   #############################
   # Apply manual fixes
   #############################
-  # Greece has started declaring 0 brown coal values for elec starting from 2015-09-01,
-  # but apparently 100% of brown coal was used for elec before that
+  # Greece has started declaring 0 brown coal values for elec starting from
+  # 2015-09-01, but apparently 100% of brown coal was used for elec before that.
   to_add_greece <- by_sector %>%
     filter(
       (
         iso2 == "GR" & siec_code == SIEC_BROWN_COAL & time >= "2015-09-01" &
-        nrg_bal_code == NRG_GID_CALCULATED)
+          nrg_bal_code == NRG_GID_CALCULATED
+      )
     ) %>%
     mutate(
       sector = SECTOR_ELEC,
@@ -94,7 +95,8 @@ process_solid_monthly <- function(x, pwr_generation) {
       filter(
         !(
           iso2 == "GR" & siec_code == SIEC_BROWN_COAL & time >= "2015-09-01" &
-          sector == SECTOR_ELEC)
+            sector == SECTOR_ELEC
+        )
       ),
     to_add_greece
   )
@@ -125,7 +127,7 @@ process_solid_monthly <- function(x, pwr_generation) {
     mutate(
       values = case_when(
         # France has some gaps in Hard coal electricity that are annoying to get EU27 total
-        # We fill them with 0 after checking some dates in ENTSOE and confirming there was no coal gen
+        # We fill them with 0 after checking ENTSOE dates and confirming no coal generation.
         sector == SECTOR_ELEC & iso2 == "FR" & siec_code == SIEC_HARD_COAL & is.na(values) ~ 0,
         # For coking input, it stopped publishing data in around 2020-09
         # we ignore for now, but would be good to implement a better way to guess values
