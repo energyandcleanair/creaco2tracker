@@ -1,0 +1,4 @@
+"date","iso2","value_gwh","value_m3","type"
+2023-01-01,"DE",-988.4,-87079864.3231576,"storage_drawdown"
+2023-01-02,"DE",-420,-37002775.2081406,"storage_drawdown"
+2023-01-03,"DE",-153.3,-13506012.9509713,"storage_drawdown"
