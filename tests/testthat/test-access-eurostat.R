@@ -1,6 +1,17 @@
 library(testthat)
 
 test_that("get_eurostat_from_code passes filters remotely with keepFlags disabled", {
+  temp_cache <- tempfile("eurostat-client-test-")
+  dir.create(temp_cache, recursive = TRUE)
+  old_dir <- setwd(temp_cache)
+  on.exit(
+    {
+      setwd(old_dir)
+      unlink(temp_cache, recursive = TRUE)
+    },
+    add = TRUE
+  )
+
   calls <- list()
 
   withr::with_tempdir({
@@ -31,12 +42,24 @@ test_that("get_eurostat_from_code passes filters remotely with keepFlags disable
     expect_equal(nrow(out), 3)
   })
 
+  expect_length(list.files("cache", pattern = "^eurostat_nrg_cb_oil_.*\\.parquet$"), 0)
   expect_equal(length(calls), 1)
   expect_equal(calls[[1]]$filters$siec, c("TOTAL", "CF"))
   expect_false(calls[[1]]$keepFlags)
 })
 
 test_that("get_eurostat_from_code keeps keepFlags disabled with no filters", {
+  temp_cache <- tempfile("eurostat-client-test-")
+  dir.create(temp_cache, recursive = TRUE)
+  old_dir <- setwd(temp_cache)
+  on.exit(
+    {
+      setwd(old_dir)
+      unlink(temp_cache, recursive = TRUE)
+    },
+    add = TRUE
+  )
+
   calls <- list()
 
   withr::with_tempdir({
@@ -63,12 +86,24 @@ test_that("get_eurostat_from_code keeps keepFlags disabled with no filters", {
     )
   })
 
+  expect_length(list.files("cache", pattern = "^eurostat_nrg_cb_oilm_.*\\.parquet$"), 0)
   expect_equal(length(calls), 1)
   expect_false(calls[[1]]$keepFlags)
   expect_null(calls[[1]]$filters)
 })
 
 test_that("get_eurostat_from_code keeps server-side filtering for non-oil endpoints", {
+  temp_cache <- tempfile("eurostat-client-test-")
+  dir.create(temp_cache, recursive = TRUE)
+  old_dir <- setwd(temp_cache)
+  on.exit(
+    {
+      setwd(old_dir)
+      unlink(temp_cache, recursive = TRUE)
+    },
+    add = TRUE
+  )
+
   calls <- list()
 
   withr::with_tempdir({
@@ -99,12 +134,24 @@ test_that("get_eurostat_from_code keeps server-side filtering for non-oil endpoi
     expect_equal(nrow(out), 3)
   })
 
+  expect_length(list.files("cache", pattern = "^eurostat_nrg_cb_gas_.*\\.parquet$"), 0)
   expect_equal(length(calls), 1)
   expect_equal(calls[[1]]$filters$nrg_bal, c("IC_OBS", "FC_NE"))
   expect_false(calls[[1]]$keepFlags)
 })
 
 test_that("get_eurostat_from_code adds geo filter from iso2s", {
+  temp_cache <- tempfile("eurostat-client-test-")
+  dir.create(temp_cache, recursive = TRUE)
+  old_dir <- setwd(temp_cache)
+  on.exit(
+    {
+      setwd(old_dir)
+      unlink(temp_cache, recursive = TRUE)
+    },
+    add = TRUE
+  )
+
   calls <- list()
 
   withr::with_tempdir({
@@ -134,6 +181,7 @@ test_that("get_eurostat_from_code adds geo filter from iso2s", {
     )
   })
 
+  expect_length(list.files("cache", pattern = "^eurostat_nrg_cb_oil_.*\\.parquet$"), 0)
   expect_equal(length(calls), 1)
   expect_equal(calls[[1]]$filters$siec, c("TOTAL"))
   expect_equal(calls[[1]]$filters$geo, c("DE", "FR"))
@@ -141,6 +189,17 @@ test_that("get_eurostat_from_code adds geo filter from iso2s", {
 })
 
 test_that("get_eurostat_from_code preserves *_code columns from raw dimensions", {
+  temp_cache <- tempfile("eurostat-client-test-")
+  dir.create(temp_cache, recursive = TRUE)
+  old_dir <- setwd(temp_cache)
+  on.exit(
+    {
+      setwd(old_dir)
+      unlink(temp_cache, recursive = TRUE)
+    },
+    add = TRUE
+  )
+
   withr::with_tempdir({
     local_mocked_bindings(
       get_eurostat = function(code, filters = NULL, keepFlags = FALSE, ...) {
@@ -164,6 +223,8 @@ test_that("get_eurostat_from_code preserves *_code columns from raw dimensions",
     expect_equal(out$siec[[1]], "TOTAL")
     expect_equal(out$nrg_bal[[1]], "FC_E")
   })
+
+  expect_length(list.files("cache", pattern = "^eurostat_nrg_cb_oilm_.*\\.parquet$"), 0)
 })
 
 

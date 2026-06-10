@@ -56,13 +56,20 @@ test_that("ember.get_power_generation parses generation data and uses cache", {
     iso2s = "DE",
     use_cache = FALSE
   )
+  expect_length(list.files("cache", pattern = "^ember_power_yearly_.*\\.parquet$"), 0)
+
   cached_result <- ember.get_power_generation(
     frequency = "yearly",
     iso2s = "DE",
     use_cache = TRUE
   )
+  cached_again <- ember.get_power_generation(
+    frequency = "yearly",
+    iso2s = "DE",
+    use_cache = TRUE
+  )
 
-  expect_length(urls, 1)
+  expect_length(urls, 2)
   expect_match(urls[1], "/v1/electricity-generation/yearly/")
   expect_match(urls[1], "entity_code=DEU")
   expect_match(urls[1], "api_key=test-key")
@@ -71,7 +78,8 @@ test_that("ember.get_power_generation parses generation data and uses cache", {
   expect_equal(result$value_mwh, 1.25e6)
   expect_equal(result$date, as.Date("2023-01-01"))
   expect_equal(cached_result, result)
-  expect_length(list.files("cache", pattern = "^ember_power_yearly_.*\\.RDS$"), 1)
+  expect_equal(cached_again, result)
+  expect_length(list.files("cache", pattern = "^ember_power_yearly_.*\\.parquet$"), 1)
 })
 
 test_that("ember.get_installed_capacity parses capacity data", {
@@ -104,8 +112,20 @@ test_that("ember.get_installed_capacity parses capacity data", {
     iso2s = "EU",
     use_cache = FALSE
   )
+  expect_length(list.files("cache", pattern = "^ember_capacity_monthly_.*\\.parquet$"), 0)
 
-  expect_length(urls, 1)
+  cached_result <- ember.get_installed_capacity(
+    frequency = "monthly",
+    iso2s = "EU",
+    use_cache = TRUE
+  )
+  cached_again <- ember.get_installed_capacity(
+    frequency = "monthly",
+    iso2s = "EU",
+    use_cache = TRUE
+  )
+
+  expect_length(urls, 2)
   expect_match(urls[1], "/v1/installed-capacity/monthly/")
   expect_match(urls[1], "entity=EU")
   expect_match(urls[1], "api_key=test-key")
@@ -113,5 +133,7 @@ test_that("ember.get_installed_capacity parses capacity data", {
   expect_equal(result$source, "Solar")
   expect_equal(result$value_mw, 2500)
   expect_equal(result$date, as.Date("2023-01-01"))
-  expect_length(list.files("cache", pattern = "^ember_capacity_monthly_.*\\.RDS$"), 1)
+  expect_equal(cached_result, result)
+  expect_equal(cached_again, result)
+  expect_length(list.files("cache", pattern = "^ember_capacity_monthly_.*\\.parquet$"), 1)
 })

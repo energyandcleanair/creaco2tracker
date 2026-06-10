@@ -16,6 +16,7 @@ Depends:
     creahelpers,
     rcrea
 Imports:
+    arrow,
     tidyverse,
     lubridate,
     scales,
