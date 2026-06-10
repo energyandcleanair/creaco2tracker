@@ -53,7 +53,16 @@ get_gas_demand <- function(
   correct_to_eurostat = FALSE,
   data_masking = NULL
 ) {
-  years <- seq(2015, lubridate::year(lubridate::today()))
+  date_to_for_years <- if (is.null(date_to)) {
+    lubridate::today()
+  } else {
+    as.Date(date_to)
+  }
+  if (length(date_to_for_years) != 1 || is.na(date_to_for_years)) {
+    stop("date_to must be NULL or coercible to a single Date")
+  }
+
+  years <- seq(2015, max(2015, lubridate::year(date_to_for_years)))
 
   if (!is.null(diagnostics_folder)) {
     create_dir(diagnostics_folder)

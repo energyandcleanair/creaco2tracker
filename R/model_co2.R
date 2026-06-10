@@ -32,6 +32,13 @@ get_co2 <- function(
 ) {
   create_dir(diagnostics_folder)
 
+  source_diagnostics_folder <- function(name) {
+    if (is_null_or_empty(diagnostics_folder)) {
+      NULL
+    } else {
+      file.path(diagnostics_folder, name)
+    }
+  }
 
   # Add buffer to date_to if downscaling daily
   if (downscale_daily && !is.null(date_to)) {
@@ -46,6 +53,7 @@ get_co2 <- function(
     date_to = date_to_cut,
     correct_to_eurostat = correct_gas_demand_to_eurostat,
     use_cache = use_cache,
+    diagnostics_folder = source_diagnostics_folder("gas_demand"),
     data_masking = data_masking
   )
 
@@ -53,6 +61,7 @@ get_co2 <- function(
     iso2s = iso2s,
     date_to = date_to_cut,
     use_cache = use_cache,
+    diagnostics_folder = source_diagnostics_folder("power_generation"),
     data_masking = data_masking
   )
 

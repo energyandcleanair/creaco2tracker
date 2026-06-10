@@ -19,7 +19,6 @@
 #' Each rule is a named list. Reserved rule fields:
 #' - `date_from` / `available_from`
 #' - `date_to` / `available_to`
-#' - `value_cols`
 #' - `name`
 #' - `comment`
 #'
@@ -89,8 +88,10 @@ default_source_lags <- function() {
 #' Build a masking config as of a reference date
 #'
 #' This helper constructs a [`get_data_masking_config()`]-compatible list that
-#' masks each source independently up to the last day that would have been
+#' masks each source independently after the last period that would have been
 #' available on `date` after accounting for its publication lag.
+#' The generated rules use `date_from` to hide the first unavailable period and
+#' everything after it.
 #'
 #' @param date Reference date for the historical snapshot.
 #' @param lags Named integer vector of publication lags in days. Defaults to
@@ -129,7 +130,11 @@ data_masking_as_of <- function(date, lags = default_source_lags()) {
       lag_days = defaults[[source_key]],
       cadence = source_cadence
     )
-    config[[source_key]] <- list(date_to = as.character(cutoff_date))
+    unavailable_from <- .first_unavailable_date(
+      cutoff_date = cutoff_date,
+      cadence = source_cadence
+    )
+    config[[source_key]] <- list(date_from = as.character(unavailable_from))
   }
 
   config
@@ -217,6 +222,23 @@ data_masking_as_of_batch <- function(dates, lags = default_source_lags()) {
 }
 
 
+.first_unavailable_date <- function(cutoff_date, cadence) {
+  cutoff_date <- as.Date(cutoff_date)
+
+  if (cadence == "month") {
+    return(.shift_months(cutoff_date, 1))
+  }
+
+  if (cadence == "year") {
+    return(
+      as.Date(sprintf("%d-01-01", as.integer(format(cutoff_date, "%Y")) + 1L))
+    )
+  }
+
+  cutoff_date + 1
+}
+
+
 .shift_months <- function(date, months) {
   date <- as.Date(date)
   if (is.na(date) || length(date) != 1) {
@@ -233,88 +255,71 @@ data_masking_as_of_batch <- function(dates, lags = default_source_lags()) {
   list(
     entsog_flow_raw = list(
       aliases = c("entsog_flow_raw", "entsog_raw", "entsog"),
-      date_col = "date",
-      value_cols = c("value_m3")
+      date_col = "date"
     ),
     agsi_storage_daily = list(
       aliases = c("agsi_storage_daily", "agsi_storage", "agsi"),
-      date_col = "date",
-      value_cols = c("value_m3")
+      date_col = "date"
     ),
     eurostat_gas_monthly_for_correction = list(
       aliases = c("eurostat_gas_monthly_for_correction", "eurostat_gas_for_correction"),
-      date_col = "date",
-      value_cols = c("value_m3")
+      date_col = "date"
     ),
     entsoe_power_daily = list(
       aliases = c("entsoe_power_daily", "entsoe_power", "entsoe_daily"),
-      date_col = "date",
-      value_cols = c("value_mw", "value_mwh")
+      date_col = "date"
     ),
     ember_power_monthly = list(
       aliases = c("ember_power_monthly", "ember_monthly"),
-      date_col = "date",
-      value_cols = c("value_mw", "value_mwh")
+      date_col = "date"
     ),
     ember_power_yearly = list(
       aliases = c("ember_power_yearly", "ember_yearly"),
-      date_col = "date",
-      value_cols = c("value_mw", "value_mwh")
+      date_col = "date"
     ),
     eurostat_oil_monthly = list(
       aliases = c("eurostat_oil_monthly"),
-      date_col = "time",
-      value_cols = c("values")
+      date_col = "time"
     ),
     eurostat_oil_yearly = list(
       aliases = c("eurostat_oil_yearly"),
-      date_col = "time",
-      value_cols = c("values")
+      date_col = "time"
     ),
     eurostat_solid_monthly = list(
       aliases = c("eurostat_solid_monthly", "eurostat_coal_monthly"),
-      date_col = "time",
-      value_cols = c("values")
+      date_col = "time"
     ),
     eurostat_solid_yearly = list(
       aliases = c("eurostat_solid_yearly", "eurostat_coal_yearly"),
-      date_col = "time",
-      value_cols = c("values")
+      date_col = "time"
     ),
     eurostat_gas_monthly = list(
       aliases = c("eurostat_gas_monthly"),
-      date_col = "time",
-      value_cols = c("values")
+      date_col = "time"
     ),
     eurostat_gas_yearly = list(
       aliases = c("eurostat_gas_yearly"),
-      date_col = "time",
-      value_cols = c("values")
+      date_col = "time"
     ),
     gas_demand = list(
       aliases = c("gas_demand", "gas", "entsog_gas_demand"),
-      date_col = "date",
-      value_cols = c("value")
+      date_col = "date"
     ),
     power_generation = list(
       aliases = c("power_generation", "power", "entsoe_ember_power"),
-      date_col = "date",
-      value_cols = c("value_mw", "value_mwh")
+      date_col = "date"
     ),
     eurostat_cons = list(
       aliases = c("eurostat_cons", "eurostat_consumption", "consumption"),
-      date_col = "time",
-      value_cols = c("values")
+      date_col = "time"
     ),
     eurostat_indprod = list(
       aliases = c("eurostat_indprod", "industrial_production", "indprod"),
-      date_col = "time",
-      value_cols = c("values")
+      date_col = "time"
     ),
     weather = list(
       aliases = c("weather", "weather_hdd_cdd"),
-      date_col = "date",
-      value_cols = c("value")
+      date_col = "date"
     )
   )
 }
@@ -342,7 +347,7 @@ data_masking_as_of_batch <- function(dates, lags = default_source_lags()) {
   c(
     "date_from", "date_to",
     "available_from", "available_to",
-    "value_cols", "name", "comment"
+    "name", "comment"
   )
 }
 
@@ -370,16 +375,6 @@ data_masking_as_of_batch <- function(dates, lags = default_source_lags()) {
   }
 
   config
-}
-
-
-.resolve_value_cols <- function(x, rule, default_value_cols) {
-  rule_value_cols <- rule$value_cols
-  if (is.null(rule_value_cols)) {
-    return(intersect(default_value_cols, names(x)))
-  }
-
-  intersect(as.character(unlist(rule_value_cols)), names(x))
 }
 
 
@@ -417,13 +412,14 @@ data_masking_as_of_batch <- function(dates, lags = default_source_lags()) {
 
 #' Mask source data to simulate historical data availability
 #'
-#' Applies source-specific masking rules by replacing selected value columns with
-#' `NA`. This allows scenario analysis with constrained historical availability.
+#' Applies source-specific masking rules by removing matching source rows. This
+#' simulates historical unavailability as absent data, avoiding downstream
+#' processing that can interpret unavailable `NA` values as observed zeros.
 #'
 #' @param x Data frame to mask.
 #' @param source_name Source key (for example `"gas_demand"`). Aliases are supported.
 #' @param data_masking Named list of masking rules.
-#' @return Data frame with masked values.
+#' @return Data frame with unavailable rows removed.
 #' @export
 apply_source_data_mask <- function(x, source_name, data_masking = NULL) {
   if (is.null(data_masking) || is.null(x) || nrow(x) == 0) {
@@ -462,15 +458,12 @@ apply_source_data_mask <- function(x, source_name, data_masking = NULL) {
 
   for (rule in rules) {
     mask_idx <- .build_mask_index(x, date_col = date_col, rule = rule)
-    value_cols <- .resolve_value_cols(x, rule = rule, default_value_cols = specs$value_cols)
 
-    if (!any(mask_idx) || length(value_cols) == 0) {
+    if (!any(mask_idx)) {
       next
     }
 
-    for (value_col in value_cols) {
-      x[[value_col]][mask_idx] <- NA_real_
-    }
+    x <- x[!mask_idx, , drop = FALSE]
   }
 
   x

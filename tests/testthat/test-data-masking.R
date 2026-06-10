@@ -20,15 +20,16 @@ test_that(
 
     masked <- apply_source_data_mask(gas, "gas_demand", masks)
 
-    expect_true(is.na(masked$value[1]))
-    expect_false(is.na(masked$value[2]))
-    expect_true(is.na(masked$value[3]))
+    expect_equal(nrow(masked), 1)
+    expect_equal(masked$iso2, "EU")
+    expect_equal(masked$date, as.Date("2024-02-01"))
+    expect_equal(masked$value, 20)
   }
 )
 
 
 test_that(
-  "apply_source_data_mask supports source aliases and custom value_cols",
+  "apply_source_data_mask supports source aliases",
   {
     pwr <- tibble(
       iso2 = c("EU", "EU"),
@@ -40,15 +41,37 @@ test_that(
 
     masks <- list(
       power_generation = list(
-        list(date_from = "2024-01-01", source = "Wind", value_cols = "value_mwh")
+        list(date_from = "2024-01-01", source = "Wind")
       )
     )
 
     masked <- apply_source_data_mask(pwr, "power", masks)
 
-    expect_true(is.na(masked$value_mwh[masked$source == "Wind"]))
-    expect_false(is.na(masked$value_mw[masked$source == "Wind"]))
-    expect_false(is.na(masked$value_mwh[masked$source == "Solar"]))
+    expect_equal(nrow(masked), 1)
+    expect_equal(masked$source, "Solar")
+    expect_equal(masked$value_mw, 120)
+    expect_equal(masked$value_mwh, 2500)
+  }
+)
+
+
+test_that(
+  "apply_source_data_mask rejects removed value_cols option",
+  {
+    gas <- tibble(
+      iso2 = "EU",
+      date = as.Date("2024-01-01"),
+      value = 10
+    )
+
+    masks <- list(
+      gas_demand = list(date_from = "2024-01-01", value_cols = "value")
+    )
+
+    expect_error(
+      apply_source_data_mask(gas, "gas_demand", masks),
+      "value_cols is no longer supported"
+    )
   }
 )
 
@@ -120,11 +143,11 @@ test_that(
   {
     cfg <- data_masking_as_of("2022-06-01")
 
-    expect_equal(cfg$entsoe_power_daily$date_to, "2022-05-30")
-    expect_equal(cfg$ember_power_monthly$date_to, "2022-03-01")
-    expect_equal(cfg$ember_power_yearly$date_to, "2020-01-01")
-    expect_equal(cfg$eurostat_gas_monthly$date_to, "2022-01-01")
-    expect_equal(cfg$weather$date_to, "2022-05-30")
+    expect_equal(cfg$entsoe_power_daily$date_from, "2022-05-31")
+    expect_equal(cfg$ember_power_monthly$date_from, "2022-04-01")
+    expect_equal(cfg$ember_power_yearly$date_from, "2021-01-01")
+    expect_equal(cfg$eurostat_gas_monthly$date_from, "2022-02-01")
+    expect_equal(cfg$weather$date_from, "2022-05-31")
     expect_equal(cfg$all, list())
     expect_equal(cfg$gas_demand, list())
   }
@@ -139,9 +162,9 @@ test_that(
       lags = c(eurostat_gas_monthly = 0L, weather = 5L)
     )
 
-    expect_equal(cfg$eurostat_gas_monthly$date_to, "2022-06-01")
-    expect_equal(cfg$weather$date_to, "2022-05-27")
-    expect_equal(cfg$entsoe_power_daily$date_to, "2022-05-30")
+    expect_equal(cfg$eurostat_gas_monthly$date_from, "2022-07-01")
+    expect_equal(cfg$weather$date_from, "2022-05-28")
+    expect_equal(cfg$entsoe_power_daily$date_from, "2022-05-31")
   }
 )
 
@@ -154,8 +177,8 @@ test_that(
     expect_named(cfgs, c("2022-01-01", "2023-01-01"))
     expect_equal(length(cfgs), 2)
     expect_true(is.list(cfgs[[1]]))
-    expect_equal(cfgs[[1]]$weather$date_to, "2021-12-30")
-    expect_equal(cfgs[[2]]$eurostat_gas_monthly$date_to, "2022-08-01")
+    expect_equal(cfgs[[1]]$weather$date_from, "2021-12-31")
+    expect_equal(cfgs[[2]]$eurostat_gas_monthly$date_from, "2022-09-01")
   }
 )
 
@@ -165,13 +188,31 @@ test_that(
   {
     cfg <- data_masking_as_of("2022-06-01", lags = c(weather = 0L))
 
-    expect_equal(cfg$weather$date_to, "2022-06-01")
+    expect_equal(cfg$weather$date_from, "2022-06-02")
   }
 )
 
 
 test_that(
-  "granular entsoe masking masks both value columns",
+  "data_masking_as_of removes data after the availability cutoff",
+  {
+    cfg <- data_masking_as_of("2022-06-01")
+    weather <- tibble(
+      date = as.Date(c("2022-05-30", "2022-05-31", "2022-06-01")),
+      value = c(1, 2, 3)
+    )
+
+    masked <- apply_source_data_mask(weather, "weather", cfg)
+
+    expect_equal(masked$value[masked$date == as.Date("2022-05-30")], 1)
+    expect_false(as.Date("2022-05-31") %in% masked$date)
+    expect_false(as.Date("2022-06-01") %in% masked$date)
+  }
+)
+
+
+test_that(
+  "granular entsoe masking removes matching rows",
   {
     pwr <- tibble(
       iso2 = c("EU", "EU"),
@@ -190,9 +231,10 @@ test_that(
 
     masked <- apply_source_data_mask(pwr, "entsoe_daily", masks)
 
-    expect_true(is.na(masked$value_mw[masked$source == "Wind"]))
-    expect_true(is.na(masked$value_mwh[masked$source == "Wind"]))
-    expect_false(is.na(masked$value_mw[masked$source == "Solar"]))
+    expect_equal(nrow(masked), 1)
+    expect_equal(masked$source, "Solar")
+    expect_equal(masked$value_mw, 120)
+    expect_equal(masked$value_mwh, 2500)
   }
 )
 
@@ -215,14 +257,14 @@ test_that(
     masked <- apply_source_data_mask(entsog_raw, "entsog_raw", masks)
 
     expect_equal(masked$value_m3[1], 1)
-    expect_true(is.na(masked$value_m3[2]))
-    expect_true(is.na(masked$value_m3[3]))
+    expect_equal(nrow(masked), 1)
+    expect_equal(masked$type, "consumption")
   }
 )
 
 
 test_that(
-  "granular eurostat monthly masking uses time column",
+  "granular eurostat monthly masking removes rows using time column",
   {
     eurostat_gas <- tibble(
       iso2 = c("EU", "EU"),
@@ -237,7 +279,8 @@ test_that(
     masked <- apply_source_data_mask(eurostat_gas, "eurostat_gas_monthly", masks)
 
     expect_equal(masked$values[1], 100)
-    expect_true(is.na(masked$values[2]))
+    expect_equal(nrow(masked), 1)
+    expect_false(as.Date("2020-02-01") %in% masked$time)
   }
 )
 

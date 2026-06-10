@@ -138,7 +138,15 @@ Compatibility coarse keys (still supported):
 Rule fields:
 - `date_from`/`available_from` and `date_to`/`available_to` define time windows.
 - Any other field is treated as a column filter for the source table (for example `iso2`, `source`, `fuel`, `sector`, `variable`, `nace_r2_code`, `siec_code`).
-- Matching rows are masked by setting source value columns to `NA` (not available).
+- Matching rows are masked by removing them from the source table, simulating unavailable data as absent rows.
+
+For the default publication-lag walk-forward setup, use `data_masking_as_of()` or the 2025 CO2 validation workflow:
+
+```r
+results <- validate_get_co2_walk_forward_2025()
+```
+
+This runs `get_co2()` at each 2025 month-end using the default as-of masks and compares those results with the data generated as of `2026-03-31`. Outputs are written by default to `diagnostics/get_co2_walk_forward_2025`.
 
 
 ## TO DO
