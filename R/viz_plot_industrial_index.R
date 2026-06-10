@@ -32,7 +32,7 @@ plot_industrial_index_bar_yoy <- function(
     group_by(
       iso2, geo, estimate, nace_r2,
       product, # Now we can always include product
-      nace_r2_code,
+      nace_r2,
       year = year(date)
     ) %>%
     summarise(energy_tj = sum(energy_tj)) %>%
@@ -139,13 +139,13 @@ plot_industrial_scatter <- function(
       iso2 == "EU",
       year(date) %in% c(year_f - 1, year_f)
     ) %>%
-    group_by(iso2, nace_r2, nace_r2_code, estimate, year = year(date)) %>%
+    group_by(iso2, nace_r2, estimate, year = year(date)) %>%
     summarise(energy_pj = sum(energy_tj) / 1e3) %>%
     left_join(
       industrial_trade %>%
         ungroup() %>%
         filter(unit == "kg") %>%
-        select(iso2, nace_r2_code, year, net_import) %>%
+        select(iso2, nace_r2, year, net_import) %>%
         left_join(
           industrial_production %>%
             ungroup() %>%
@@ -153,11 +153,11 @@ plot_industrial_scatter <- function(
               year == max(industrial_trade$year) - 1,
               unit == "kg"
             ) %>%
-            select(iso2, nace_r2_code, production = value)
+            select(iso2, nace_r2, production = value)
         )
     ) %>%
     arrange(year) %>%
-    group_by(iso2, estimate, nace_r2, nace_r2_code) %>%
+    group_by(iso2, estimate, nace_r2) %>%
     mutate(
       production_change = (energy_pj / lag(energy_pj) - 1),
       # Handle sign changes in net imports
@@ -243,7 +243,7 @@ plot_industrial_scatter <- function(
     rcrea::quicksave(filepath, width = width, height = height, plot = plt)
 
     plt_data %>%
-      select(label, nace_r2_code, production_change, import_change) %>%
+      select(label, nace_r2, production_change, import_change) %>%
       mutate(
         production_change = rcrea::scale_percent(production_change, with_sign = TRUE),
         import_change = rcrea::scale_percent(import_change, with_sign = TRUE)

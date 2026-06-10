@@ -127,11 +127,11 @@ create_eurostat_cons_mock <- function(
   monthly_data %>%
     mutate(
       iso2 = "EU",
-      siec_code = fuel_to_siec[fuel],
+      siec = fuel_to_siec[fuel],
       fuel = fuel_to_fuel_constant[fuel],
-      unit = "Thousand tonnes"
+      unit = EUROSTAT_UNIT_THOUSAND_TONNES
     ) %>%
-    select(iso2, time, siec_code, fuel, sector, unit, values)
+    select(iso2, time, siec, fuel, sector, unit, values)
 }
 
 
@@ -184,7 +184,7 @@ test_that(
     eurostat_indprod <- tibble(
       iso2 = character(),
       time = as.Date(character()),
-      nace_r2_code = character(),
+      nace_r2 = character(),
       unit = character(),
       s_adj = character(),
       values = numeric()

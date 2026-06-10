@@ -33,6 +33,13 @@ add_iso2 <- function(x, country_col = "geo") {
     mutate(
       iso2 = coalesce(
         iso2,
+        countrycode::countrycode(!!sym(country_col), "eurostat", "iso2c",
+          custom_match = c(
+            "EU27_2020" = "EU",
+            "EU28" = "EU28",
+            "XK" = "XK"
+          )
+        ),
         countrycode::countrycode(!!sym(country_col), "country.name", "iso2c",
           custom_match = c(
             "European Union - 27 countries (from 2020)" = "EU",

@@ -1,7 +1,7 @@
 # Helper function to create SIEC fuel mapping
 create_siec_fuel_mapping <- function() {
   tribble(
-    ~siec_code, ~product_raw,
+    ~siec, ~product_raw,
     SIEC_HARD_COAL, "ANTHRACITE",
     SIEC_BROWN_COAL, "LIGNITE",
     SIEC_BROWN_COAL_BRIQUETTES, "BKB",
@@ -41,22 +41,22 @@ process_conversion_factors <- function(conversion_raw) {
     add_siec_code_to_iea() %>%
     filter(!is.na(value)) %>%
     mutate(source = "IEA") %>%
-    group_by(iso2, siec_code, year) %>%
+    group_by(iso2, siec, year) %>%
     summarise(
       ncv_kjkg = mean(value),
       source = "IEA",
       .groups = "drop"
     ) %>%
-    filter(!is.na(siec_code))
+    filter(!is.na(siec))
 
   # Remove outliers using z-score method
   conversion <- conversion %>%
-    group_by(siec_code, iso2) %>%
+    group_by(siec, iso2) %>%
     summarise(
       ncv_kjkg = mean(ncv_kjkg),
       .groups = "drop"
     ) %>%
-    group_by(siec_code) %>%
+    group_by(siec) %>%
     mutate(
       zscore =
         case_when(
@@ -78,14 +78,14 @@ calculate_weighted_means <- function(conversion, x) {
   conversion %>%
     left_join(
       x %>%
-        group_by(iso2, year = year(time), siec_code) %>%
+        group_by(iso2, year = year(time), siec) %>%
         summarise(
           qty = sum(values),
           .groups = "drop"
         )
     ) %>%
     mutate(qty = tidyr::replace_na(qty, 0)) %>%
-    group_by(siec_code, year) %>%
+    group_by(siec, year) %>%
     summarise(
       ncv_kjkg_wmean = weighted.mean(ncv_kjkg, qty),
       .groups = "drop"
@@ -99,11 +99,11 @@ fill_missing_conversion_factors <- function(conversion, conversion_wmean, x) {
     ungroup() %>%
     tidyr::complete(
       iso2 = unique(add_iso2(x)$iso2),
-      siec_code,
+      siec,
       year = seq(min(year(x$time)), max(year(x$time)), by = 1)
     ) %>%
     # Fill time wise
-    group_by(iso2, siec_code) %>%
+    group_by(iso2, siec) %>%
     fill(ncv_kjkg, .direction = "downup") %>%
     left_join(conversion_wmean) %>%
     mutate(ncv_kjkg = coalesce(ncv_kjkg, ncv_kjkg_wmean)) %>%
@@ -112,18 +112,18 @@ fill_missing_conversion_factors <- function(conversion, conversion_wmean, x) {
     ungroup() %>%
     mutate(source = coalesce(source, "IEA (weighted averaged)")) %>%
     # Fill missing years
-    group_by(iso2, siec_code) %>%
+    group_by(iso2, siec) %>%
     arrange(year) %>%
     tidyr::fill(ncv_kjkg, .direction = "downup") %>%
     ungroup()
 
-  # Fill any remaining NA ncv_kjkg with the global average for that siec_code
+  # Fill any remaining NA ncv_kjkg with the global average for that siec
   global_avg <- conversion %>%
-    group_by(siec_code) %>%
+    group_by(siec) %>%
     summarise(global_ncv_kjkg = mean(ncv_kjkg, na.rm = TRUE), .groups = "drop")
 
   result <- result %>%
-    left_join(global_avg, by = "siec_code") %>%
+    left_join(global_avg, by = "siec") %>%
     mutate(ncv_kjkg = coalesce(ncv_kjkg, global_ncv_kjkg)) %>%
     select(-global_ncv_kjkg)
 
@@ -135,23 +135,28 @@ add_ncv_to_data <- function(x, conversion_filled) {
   x %>%
     mutate(year = year(time)) %>%
     add_iso2() %>%
-    left_join(conversion_filled, by = c("iso2", "siec_code", "year")) %>%
-    group_by(iso2, siec_code) %>%
+    left_join(conversion_filled, by = c("iso2", "siec", "year")) %>%
+    group_by(iso2, siec) %>%
     arrange(time) %>%
     tidyr::fill(ncv_kjkg, .direction = "downup")
 }
 
 # Function to validate NCV completeness
 validate_ncv_completeness <- function(x_with_ncv) {
+  eurostat_tj_units <- c(
+    EUROSTAT_UNIT_TERAJOULE,
+    EUROSTAT_UNIT_TJ_GCV
+  )
+
   # Check which records are missing NCV values
   missing_ncv <- x_with_ncv %>%
-    filter(iso2 != "ME", !grepl("Terajoule", unit)) %>%
+    filter(iso2 != "ME", !unit %in% eurostat_tj_units) %>%
     filter(is.na(ncv_kjkg))
 
   if (nrow(missing_ncv) > 0) {
     # Create detailed diagnostic information
     diagnostic_info <- missing_ncv %>%
-      group_by(iso2, siec_code, unit) %>%
+      group_by(iso2, siec, unit) %>%
       summarise(
         n_missing = n(),
         time_range = paste(min(time), "to", max(time)),
@@ -165,8 +170,8 @@ validate_ncv_completeness <- function(x_with_ncv) {
 
     # Check if there are any SIEC codes that don't have mappings
     unmapped_siec <- missing_ncv %>%
-      distinct(siec_code) %>%
-      anti_join(create_siec_fuel_mapping(), by = "siec_code")
+      distinct(siec) %>%
+      anti_join(create_siec_fuel_mapping(), by = "siec")
 
     if (nrow(unmapped_siec) > 0) {
       log_warn("Unmapped SIEC codes:")
@@ -192,7 +197,7 @@ validate_ncv_completeness <- function(x_with_ncv) {
 # Function to make NCV time-insensitive
 make_ncv_time_insensitive <- function(x_with_ncv) {
   x_with_ncv %>%
-    group_by(iso2, siec_code) %>%
+    group_by(iso2, siec) %>%
     mutate(ncv_kjkg = mean(ncv_kjkg, na.rm = TRUE))
 }
 
@@ -269,7 +274,7 @@ add_ncv_iea_shared <- function(x, diagnostics_folder = NULL, use_cache = TRUE, .
   # It still has a year argument. Let's take latest value
   conversion_wmean <- conversion_wmean %>%
     arrange(year) %>%
-    group_by(siec_code) %>%
+    group_by(siec) %>%
     summarise(
       ncv_kjkg = last(ncv_kjkg_wmean),
       .groups = "drop"
@@ -277,7 +282,7 @@ add_ncv_iea_shared <- function(x, diagnostics_folder = NULL, use_cache = TRUE, .
 
   # Create all combinations
   conversion_filled <- x %>%
-    distinct(iso2, siec_code, year = year(time)) %>%
+    distinct(iso2, siec, year = year(time)) %>%
     left_join(conversion_wmean) %>%
     mutate(source = "IEA (shared EU average)")
 
@@ -299,7 +304,7 @@ add_ncv_iea_shared <- function(x, diagnostics_folder = NULL, use_cache = TRUE, .
 # New function to get SIEC fuel mapping
 get_siec_ipcc_fuel_mapping <- function() {
   tribble(
-    ~siec_code, ~fuel,
+    ~siec, ~fuel,
     SIEC_HARD_COAL, "Anthracite",
     SIEC_BROWN_COAL, "Lignite",
     SIEC_BROWN_COAL_BRIQUETTES, "Brown Coal Briquettes",
@@ -354,17 +359,17 @@ add_ncv_ipcc <- function(x, diagnostics_folder = NULL, ...) {
 
   # Add NCVs to the input data
   x_with_ncv <- x %>%
-    left_join(ncvs, by = "siec_code")
+    left_join(ncvs, by = "siec")
 
   # Check for missing NCVs
   missing_ncvs <- x_with_ncv %>%
     filter(is.na(ncv_kjkg)) %>%
-    distinct(siec_code)
+    distinct(siec)
 
   if (nrow(missing_ncvs) > 0) {
     warning(
       "Missing NCVs for the following SIEC codes: ",
-      paste(missing_ncvs$siec_code, collapse = ", ")
+      paste(missing_ncvs$siec, collapse = ", ")
     )
   }
 
@@ -383,7 +388,7 @@ diagnose_ncv_data <- function(conversion_filled, x = NULL, diagnostics_folder = 
   # 1. Summary statistics
   log_info("1. SUMMARY STATISTICS:")
   summary_stats <- conversion_filled %>%
-    group_by(siec_code) %>%
+    group_by(siec) %>%
     summarise(
       n_total = n(),
       n_missing = sum(is.na(ncv_kjkg)),
@@ -401,7 +406,7 @@ diagnose_ncv_data <- function(conversion_filled, x = NULL, diagnostics_folder = 
   # Get the latest year for each country/SIEC combination for labeling
   latest_data <- conversion_filled %>%
     filter(!is.na(ncv_kjkg)) %>%
-    group_by(iso2, siec_code) %>%
+    group_by(iso2, siec) %>%
     filter(year == max(year)) %>%
     ungroup()
 
@@ -421,7 +426,7 @@ diagnose_ncv_data <- function(conversion_filled, x = NULL, diagnostics_folder = 
       max.overlaps = 20,
       show.legend = FALSE
     ) +
-    facet_wrap(~siec_code, scales = "free_y", ncol = 4) +
+    facet_wrap(~siec, scales = "free_y", ncol = 4) +
     rcrea::scale_y_zero() +
     labs(
       title = "NCV Time Series by Commodity and Country",

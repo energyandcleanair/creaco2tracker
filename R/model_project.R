@@ -26,6 +26,8 @@ project_until_now_lm <- function(
 ) {
   fill_mode <- match.arg(fill_mode)
 
+  value_proxy_cols <- grep("value_proxy", colnames(proxy), value = TRUE)
+
   co2_untouched <- x %>% anti_join(proxy %>% distinct(iso2, fuel, sector),
     by = c("iso2", "fuel", "sector")
   )
@@ -49,7 +51,6 @@ project_until_now_lm <- function(
         log_debug(glue::glue("project_until_now_lm: iso2={iso2}, fuel={fuel}, sector={sector}"))
       }
 
-      value_proxy_cols <- grep("value_proxy", colnames(proxy), value = TRUE)
       data <- df %>%
         left_join(
           keys %>%
@@ -120,14 +121,16 @@ project_until_now_lm <- function(
 
       # We automatically determine the number of years to consider based on adjusted R2
       n_years <- seq(2, 10)
-      r2s <- lapply(n_years, function(n_year) {
-        model <- get_trained_model(data, n_year)
+      trained_models <- lapply(n_years, function(n_year) {
+        get_trained_model(data, n_year)
+      })
+      r2s <- vapply(trained_models, function(model) {
         if (!is.null(model)) {
           model_adj_r2(model)
         } else {
           0
         }
-      })
+      }, numeric(1))
 
       # Best R2
       if (all(r2s == 0)) {
@@ -135,8 +138,9 @@ project_until_now_lm <- function(
         return(df)
       }
 
-      n_year <- n_years[which.max(r2s)]
-      model <- get_trained_model(data, n_year)
+      best_idx <- which.max(r2s)
+      n_year <- n_years[[best_idx]]
+      model <- trained_models[[best_idx]]
 
       r2 <- model_adj_r2(model)
       if (r2 < min_r2) {
@@ -212,6 +216,19 @@ project_until_now_lm <- function(
 #'
 #' @examples
 project_until_now_zeros <- function(x, proxy, dts_month, verbose = FALSE) {
+  if (is.null(x) || nrow(x) == 0 || is.null(proxy) || nrow(proxy) == 0) {
+    return(x)
+  }
+
+  overlap_keys <- inner_join(
+    x %>% distinct(iso2, fuel, sector),
+    proxy %>% distinct(iso2, fuel, sector),
+    by = c("iso2", "fuel", "sector")
+  )
+  if (nrow(overlap_keys) == 0) {
+    return(x)
+  }
+
   co2_untouched <- x %>% anti_join(proxy %>% distinct(iso2, fuel, sector),
     by = c("iso2", "fuel", "sector")
   )
@@ -362,7 +379,13 @@ project_until_now_elec <- function(
     filter(iso2 %in% x$iso2) %>%
     ungroup() %>%
     left_join(source_fuel, by = "source", relationship = "many-to-many") %>%
-    filter(!is.na(fuel)) %>%
+    filter(!is.na(fuel))
+
+  if (nrow(proxy) == 0) {
+    return(x)
+  }
+
+  proxy <- proxy %>%
     # Important: We take average generation per day in any given month
     # => The last month data doesn't reflect emissions so far (e.g. if we're on the 15th of the
     # month)
@@ -395,7 +418,13 @@ project_until_now_gas <- function(
 
   proxy <- gas_demand %>%
     ungroup() %>%
-    filter(unit == "m3") %>%
+    filter(unit == "m3")
+
+  if (nrow(proxy) == 0) {
+    return(co2)
+  }
+
+  proxy <- proxy %>%
     # Important: We take average generation per day in any given month
     # => The last month data doesn't reflect emissions so far (e.g. if we're on the 15th of the
     # month)
@@ -448,15 +477,15 @@ project_until_now_coal_others <- function(
 
 
   indprod <- eurostat_indprod %>%
-    filter(nace_r2_code %in% products_ind) %>%
+    filter(nace_r2 %in% products_ind) %>%
     filter(
-      unit == "Index, 2021=100",
-      grepl("Calendar adjusted ", s_adj)
+      unit == EUROSTAT_UNIT_INDEX_2021,
+      s_adj == EUROSTAT_SADJ_CALENDAR_ADJUSTED
     ) %>%
     filter(!is.na(values)) %>%
     group_by(iso2) %>%
-    mutate(nace_2digits = substring(nace_r2_code, 1, 3)) %>%
-    mutate(n_digits = nchar(nace_r2_code)) %>%
+    mutate(nace_2digits = substring(nace_r2, 1, 3)) %>%
+    mutate(n_digits = nchar(nace_r2)) %>%
     group_by(iso2, nace_2digits) %>%
     filter(n_digits == max(n_digits))
 
@@ -464,8 +493,15 @@ project_until_now_coal_others <- function(
   proxy <- indprod %>%
     filter(iso2 %in% co2$iso2) %>%
     ungroup() %>%
-    select(iso2, date = time, nace_r2_code, value = values) %>%
-    pivot_wider(names_from = nace_r2_code, values_from = value, names_prefix = "value_proxy_") %>%
+    select(iso2, date = time, nace_r2, value = values) %>%
+    group_by(iso2, date, nace_r2) %>%
+    summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
+    pivot_wider(
+      names_from = nace_r2,
+      values_from = value,
+      names_prefix = "value_proxy_",
+      values_fill = NA_real_
+    ) %>%
     mutate(
       fuel = "coal",
       sector = SECTOR_OTHERS

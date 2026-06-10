@@ -7,30 +7,27 @@ collect_oil <- function(use_cache = FALSE) {
   # Monthly data
   cons_monthly_raw <- get_eurostat_from_code("nrg_cb_oilm", use_cache = use_cache)
 
+  oil_siec_codes <- c(
+    SIEC_OIL_PRODUCTS,
+    SIEC_CRUDE_OIL,
+    SIEC_ROAD_DIESEL,
+    SIEC_MOTOR_GASOLINE_XBIO,
+    SIEC_HEATING_GASOIL,
+    SIEC_FUEL_OIL,
+    SIEC_GASOIL_DIESEL,
+    SIEC_KEROSENE_XBIO,
+    SIEC_AVIATION_GASOLINE,
+    SIEC_BIOGASOLINE,
+    SIEC_BIODIESEL
+  )
+
   # Yearly data
-  cons_yearly_raw <- lapply(
-    c(
-      SIEC_OIL_PRODUCTS,
-      SIEC_CRUDE_OIL,
-      SIEC_ROAD_DIESEL,
-      SIEC_MOTOR_GASOLINE_XBIO,
-      SIEC_HEATING_GASOIL,
-      SIEC_FUEL_OIL,
-      SIEC_GASOIL_DIESEL,
-      SIEC_KEROSENE_XBIO,
-      SIEC_AVIATION_GASOLINE,
-      SIEC_BIOGASOLINE,
-      SIEC_BIODIESEL
-    ),
-    function(x) {
-      get_eurostat_from_code(
-        code = "nrg_cb_oil",
-        use_cache = use_cache,
-        filters = list(siec = x)
-      )
-    }
+  cons_yearly_raw <- get_eurostat_from_code(
+    code = "nrg_cb_oil",
+    use_cache = use_cache,
+    filters = list(siec = oil_siec_codes)
   ) %>%
-    bind_rows()
+    filter(siec %in% oil_siec_codes)
 
   # Add missing GID_NE when it happens
   cons_yearly <- fill_oil_non_energy_use_yearly(cons_yearly_raw)
@@ -70,7 +67,7 @@ process_oil <- function(x) {
 
   # 1. Initial filtering matrix - which combinations to keep
   filter_matrix <- tribble(
-    ~siec_code, ~nrg_bal_code, ~keep,
+    ~siec, ~nrg_bal, ~keep,
     # Oil products: SECTOR_TOTAL
     SIEC_OIL_PRODUCTS, "GID_OBS", TRUE,
     SIEC_OIL_PRODUCTS, "GID_NE", TRUE,
@@ -111,7 +108,7 @@ process_oil <- function(x) {
 
   # 2. Deduction rules - which fuels to subtract from which base fuels
   deduction_rules <- tribble(
-    ~base_siec_code, ~nrg_bal_code, ~deduct_siec_codes,
+    ~base_siec_code, ~nrg_bal, ~deduct_siec_codes,
     SIEC_OIL_PRODUCTS, "GID_OBS", list(
       c(
         SIEC_FUEL_OIL, SIEC_HEATING_GASOIL, SIEC_BIOGASOLINE,
@@ -133,9 +130,9 @@ process_oil <- function(x) {
   # Fuels to exclude after deduction
   SIEC_CODES_TO_EXCLUDE <- c(SIEC_BIOGASOLINE, SIEC_BIODIESEL)
 
-  # 3. Factor matrix - which factors to apply based on nrg_bal_code
+  # 3. Factor matrix - which factors to apply based on nrg_bal
   factor_matrix <- tribble(
-    ~nrg_bal_code, ~factor, ~sector,
+    ~nrg_bal, ~factor, ~sector,
     "GID_NE", -1, SECTOR_ALL,
     "GID_OBS", 1, SECTOR_ALL,
     "FC_TRA_E", 1, SECTOR_TRANSPORT_DOMESTIC,
@@ -150,20 +147,20 @@ process_oil <- function(x) {
   # Only keep meaningful columns to avoid confusion
   siecs <- x %>%
     ungroup() %>%
-    distinct(siec_code, siec)
+    distinct(siec)
 
   x <- x %>%
     add_iso2() %>%
-    select(siec_code, nrg_bal_code, iso2, time, values, unit)
+    select(siec, nrg_bal, iso2, time, values, unit)
 
   # Step 1: Filter the data based on the filter matrix
   x_filtered <- x %>%
-    inner_join(filter_matrix %>% filter(keep), by = c("siec_code", "nrg_bal_code"))
+    inner_join(filter_matrix %>% filter(keep), by = c("siec", "nrg_bal"))
 
   # Step 2: Apply deductions to avoid double counting using a cleaner approach
   x_deducted <- x_filtered %>%
     # Create a temporary ID for each group
-    group_by(nrg_bal_code, unit, iso2, time) %>%
+    group_by(nrg_bal, unit, iso2, time) %>%
     mutate(group_id = dplyr::cur_group_id()) %>%
     ungroup()
 
@@ -174,16 +171,16 @@ process_oil <- function(x) {
     # Get the data for this base fuel
     base_data <- x_deducted %>%
       filter(
-        siec_code == rule$base_siec_code,
-        nrg_bal_code == rule$nrg_bal_code
+        siec == rule$base_siec_code,
+        nrg_bal == rule$nrg_bal
       )
 
     # Calculate deductions for each group
     if (nrow(base_data) > 0) {
       deduct_amounts <- x_deducted %>%
         filter(
-          siec_code %in% unlist(rule$deduct_siec_codes),
-          nrg_bal_code == rule$nrg_bal_code,
+          siec %in% unlist(rule$deduct_siec_codes),
+          nrg_bal == rule$nrg_bal,
           group_id %in% base_data$group_id
         ) %>%
         group_by(group_id) %>%
@@ -196,23 +193,23 @@ process_oil <- function(x) {
           deduction = replace_na(deduction, 0),
           new_value = values - deduction
         ) %>%
-        select(group_id, siec_code, new_value)
+        select(group_id, siec, new_value)
     } else {
-      tibble(group_id = integer(0), siec_code = character(0), new_value = numeric(0))
+      tibble(group_id = integer(0), siec = character(0), new_value = numeric(0))
     }
   })
 
   # Apply the deductions
   x_deducted <- x_deducted %>%
-    left_join(deductions, by = c("group_id", "siec_code")) %>%
+    left_join(deductions, by = c("group_id", "siec")) %>%
     mutate(values = coalesce(new_value, values)) %>%
     select(-c(group_id, new_value)) %>%
     # Remove biofuels after deduction using the constant defined at the top
-    filter(!siec_code %in% SIEC_CODES_TO_EXCLUDE)
+    filter(!siec %in% SIEC_CODES_TO_EXCLUDE)
 
   # Step 3: Apply factors and assign sectors
   x_processed <- x_deducted %>%
-    left_join(factor_matrix, by = "nrg_bal_code") %>%
+    left_join(factor_matrix, by = "nrg_bal") %>%
     mutate(
       values = values * factor
     ) %>%
@@ -222,7 +219,7 @@ process_oil <- function(x) {
   # Apply gap filling
   x_processed <- fill_gaps_in_time_series(
     data = x_processed,
-    group_cols = c("iso2", "siec_code", "nrg_bal_code", "sector", "unit"),
+    group_cols = c("iso2", "siec", "nrg_bal", "sector", "unit"),
     zero_consecutive_required = 3,
     zero_consecutive_required_beyond_last = 12,
     exclude_iso2s = "EU"
@@ -232,7 +229,7 @@ process_oil <- function(x) {
   # It is missing one month data in 2024-10-01
   x_processed <- x_processed %>%
     fill_gaps_in_time_series(
-      group_cols = c("iso2", "siec_code", "nrg_bal_code", "sector", "unit"),
+      group_cols = c("iso2", "siec", "nrg_bal", "sector", "unit"),
       zero_consecutive_required = 2,
       zero_consecutive_required_beyond_last = 6,
       interp_cv_threshold = 3,
@@ -243,7 +240,7 @@ process_oil <- function(x) {
   # Fill EU values from country sums
   x_processed <- fill_eu_from_countries_sum(
     data = x_processed,
-    group_cols = c("sector", "siec_code", "time", "nrg_bal_code", "unit"),
+    group_cols = c("sector", "siec", "time", "nrg_bal", "unit"),
     min_countries = 25,
     max_rel_diff = 0.05
   ) %>%
@@ -263,13 +260,9 @@ process_oil <- function(x) {
   # Aggregate
   result <- x_processed %>%
     mutate(fuel = FUEL_OIL) %>%
-    group_by(iso2, time, fuel, unit, siec_code, sector) %>%
+    group_by(iso2, time, fuel, unit, siec, sector) %>%
     summarise(values = sum(values, na.rm = TRUE)) %>%
-    ungroup() %>%
-    # Re-add siec
-    left_join(
-      siecs %>% distinct(siec_code, siec)
-    )
+    ungroup()
 
   return(result)
 }
@@ -277,7 +270,7 @@ process_oil <- function(x) {
 
 check_eurostat_oil_completeness <- function(x_processed) {
   sector_counts <- x_processed %>%
-    distinct(siec_code, nrg_bal_code, sector) %>%
+    distinct(siec, nrg_bal, sector) %>%
     count(sector) %>%
     spread(sector, n, fill = 0)
 
@@ -328,14 +321,14 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
       filter(iso2 %in% eu_iso2s) %>%
       filter(time >= "2010-01-01")
   }
-  stopifnot(all(yearly$unit == "Thousand tonnes"))
-  stopifnot(all(monthly$unit == "Thousand tonnes"))
+  stopifnot(all(yearly$unit == EUROSTAT_UNIT_THOUSAND_TONNES))
+  stopifnot(all(monthly$unit == EUROSTAT_UNIT_THOUSAND_TONNES))
 
   project_shares <- function(x) {
     x %>%
       ungroup() %>%
-      tidyr::complete(time = unique(monthly$time), geo, siec_code) %>%
-      group_by(geo, siec_code) %>%
+      tidyr::complete(time = unique(monthly$time), geo, siec) %>%
+      group_by(geo, siec) %>%
       arrange(time) %>%
       tidyr::fill(share, .direction = c("updown")) %>%
       ungroup()
@@ -344,17 +337,17 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
   # Visually validate computation
   validate_computation <- function(computed_monthly) {
     computed_monthly %>%
-      group_by(time = floor_date(time, "year"), geo, nrg_bal_code, siec_code) %>%
+      group_by(time = floor_date(time, "year"), geo, nrg_bal, siec) %>%
       summarise(
         values_monthly = sum(values, na.rm = TRUE),
         n = n()
       ) %>%
       filter(n == 12) %>%
-      # split and unnest nrg_bal_code
-      mutate(nrg_bal_code = strsplit(nrg_bal_code, "\\+")) %>%
-      unnest(nrg_bal_code) %>%
+      # split and unnest nrg_bal
+      mutate(nrg_bal = strsplit(nrg_bal, "\\+")) %>%
+      unnest(nrg_bal) %>%
       # Prevent double counting
-      group_by(time, geo, siec_code) %>%
+      group_by(time, geo, siec) %>%
       mutate(values_monthly = values_monthly / n()) %>%
       left_join(
         yearly %>%
@@ -381,13 +374,13 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
   # Compute share
   share_motor_gasoline_road <- yearly %>%
     filter(
-      siec_code == SIEC_MOTOR_GASOLINE_XBIO,
-      nrg_bal_code %in% c("GID_OBS", "FC_TRA_ROAD_E", "GID_NE")
+      siec == SIEC_MOTOR_GASOLINE_XBIO,
+      nrg_bal %in% c("GID_OBS", "FC_TRA_ROAD_E", "GID_NE")
     ) %>%
-    group_by(geo, time, siec_code, nrg_bal_code) %>%
+    group_by(geo, time, siec, nrg_bal) %>%
     summarise(values = sum(values, na.rm = TRUE)) %>%
-    spread(nrg_bal_code, values) %>%
-    group_by(geo, time, siec_code) %>%
+    spread(nrg_bal, values) %>%
+    group_by(geo, time, siec) %>%
     filter(
       FC_TRA_ROAD_E > 0
     ) %>%
@@ -405,22 +398,22 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
     right_join(
       monthly %>%
         filter(
-          siec_code == SIEC_MOTOR_GASOLINE_XBIO,
-          nrg_bal_code %in% c("GID_OBS", "GID_NE")
+          siec == SIEC_MOTOR_GASOLINE_XBIO,
+          nrg_bal %in% c("GID_OBS", "GID_NE")
         ) %>%
         mutate(
           factor = case_when(
-            nrg_bal_code == "GID_NE" ~ -1,
+            nrg_bal == "GID_NE" ~ -1,
             T ~ 1
           )
         ) %>%
-        group_by(geo, time, siec_code) %>%
+        group_by(geo, time, siec) %>%
         summarise(values = sum(values * factor, na.rm = TRUE)),
-      by = c("geo", "time", "siec_code")
+      by = c("geo", "time", "siec")
     ) %>%
     mutate(
       values = values * share,
-      nrg_bal_code = "FC_TRA_ROAD_E"
+      nrg_bal = "FC_TRA_ROAD_E"
     ) %>%
     select(-c(share)) %>%
     ungroup()
@@ -433,17 +426,17 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
   # Assumption 2: Constant share of road diesel goes to road energy use
   share_road_diesel_road <- yearly %>%
     filter(
-      siec_code == SIEC_ROAD_DIESEL,
-      nrg_bal_code %in% c("GID_OBS", "FC_TRA_ROAD_E")
+      siec == SIEC_ROAD_DIESEL,
+      nrg_bal %in% c("GID_OBS", "FC_TRA_ROAD_E")
     ) %>%
-    group_by(geo, time, nrg_bal_code, siec_code) %>%
+    group_by(geo, time, nrg_bal, siec) %>%
     summarise(values = sum(values, na.rm = TRUE)) %>%
-    spread(nrg_bal_code, values) %>%
+    spread(nrg_bal, values) %>%
     filter(
       GID_OBS > 0,
       FC_TRA_ROAD_E > 0
     ) %>%
-    group_by(geo, time, siec_code) %>%
+    group_by(geo, time, siec) %>%
     summarise(share = FC_TRA_ROAD_E / (GID_OBS))
 
   ggplot(share_road_diesel_road %>% filter_plot()) +
@@ -457,16 +450,16 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
     right_join(
       monthly %>%
         filter(
-          siec_code == SIEC_ROAD_DIESEL,
-          nrg_bal_code %in% c("GID_OBS")
+          siec == SIEC_ROAD_DIESEL,
+          nrg_bal %in% c("GID_OBS")
         ) %>%
-        group_by(geo, time, siec_code) %>%
+        group_by(geo, time, siec) %>%
         summarise(values = sum(values, na.rm = TRUE)),
-      by = c("geo", "time", "siec_code")
+      by = c("geo", "time", "siec")
     ) %>%
     mutate(
       values = values * share,
-      nrg_bal_code = "FC_TRA_ROAD_E"
+      nrg_bal = "FC_TRA_ROAD_E"
     ) %>%
     select(-c(share)) %>%
     ungroup()
@@ -479,17 +472,17 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
   # Assumption 2bis: Constant share of road diesel goes to transportation energy use
   share_road_diesel_transport <- yearly %>%
     filter(
-      siec_code == SIEC_ROAD_DIESEL,
-      nrg_bal_code %in% c("GID_OBS", "FC_TRA_E")
+      siec == SIEC_ROAD_DIESEL,
+      nrg_bal %in% c("GID_OBS", "FC_TRA_E")
     ) %>%
-    group_by(geo, time, nrg_bal_code, siec_code) %>%
+    group_by(geo, time, nrg_bal, siec) %>%
     summarise(values = sum(values, na.rm = TRUE)) %>%
-    spread(nrg_bal_code, values) %>%
+    spread(nrg_bal, values) %>%
     filter(
       GID_OBS > 0,
       FC_TRA_E > 0
     ) %>%
-    group_by(geo, time, siec_code) %>%
+    group_by(geo, time, siec) %>%
     summarise(share = FC_TRA_E / (GID_OBS))
 
   ggplot(share_road_diesel_transport %>% filter_plot()) +
@@ -503,15 +496,15 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
     right_join(
       monthly %>%
         filter(
-          siec_code == SIEC_ROAD_DIESEL,
-          nrg_bal_code %in% c("GID_OBS")
+          siec == SIEC_ROAD_DIESEL,
+          nrg_bal %in% c("GID_OBS")
         ) %>%
-        select(geo, time, siec_code, values),
-      by = c("geo", "time", "siec_code")
+        select(geo, time, siec, values),
+      by = c("geo", "time", "siec")
     ) %>%
     mutate(
       values = values * share,
-      nrg_bal_code = "FC_TRA_E"
+      nrg_bal = "FC_TRA_E"
     ) %>%
     select(-c(share)) %>%
     ungroup()
@@ -524,17 +517,17 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
   # Assumption 2ter: Constant share of motor gasoline goes to transport energy use
   share_motor_gasoline_tra <- yearly %>%
     filter(
-      siec_code == SIEC_MOTOR_GASOLINE_XBIO,
-      nrg_bal_code %in% c("GID_OBS", "FC_TRA_E", "GID_NE")
+      siec == SIEC_MOTOR_GASOLINE_XBIO,
+      nrg_bal %in% c("GID_OBS", "FC_TRA_E", "GID_NE")
     ) %>%
-    group_by(geo, time, siec_code, nrg_bal_code) %>%
+    group_by(geo, time, siec, nrg_bal) %>%
     summarise(values = sum(values, na.rm = TRUE)) %>%
-    spread(nrg_bal_code, values) %>%
+    spread(nrg_bal, values) %>%
     filter(
       GID_OBS > 0,
       FC_TRA_E > 0
     ) %>%
-    group_by(geo, time, siec_code) %>%
+    group_by(geo, time, siec) %>%
     summarise(share = FC_TRA_E / (GID_OBS - GID_NE))
 
   # Visually validate assumption
@@ -549,22 +542,22 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
     right_join(
       monthly %>%
         filter(
-          siec_code == SIEC_MOTOR_GASOLINE_XBIO,
-          nrg_bal_code %in% c("GID_OBS", "GID_NE")
+          siec == SIEC_MOTOR_GASOLINE_XBIO,
+          nrg_bal %in% c("GID_OBS", "GID_NE")
         ) %>%
         mutate(
           factor = case_when(
-            nrg_bal_code == "GID_NE" ~ -1,
+            nrg_bal == "GID_NE" ~ -1,
             T ~ 1
           )
         ) %>%
-        group_by(geo, time, siec_code) %>%
+        group_by(geo, time, siec) %>%
         summarise(values = sum(values * factor, na.rm = TRUE)),
-      by = c("geo", "time", "siec_code")
+      by = c("geo", "time", "siec")
     ) %>%
     mutate(
       values = values * share,
-      nrg_bal_code = "FC_TRA_E"
+      nrg_bal = "FC_TRA_E"
     ) %>%
     select(-c(share)) %>%
     ungroup()
@@ -578,15 +571,15 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
   # Assumption 3: Road diesel and motor gasoline are the only fuels used in road transportation
   share_gasoline_diesel_road <- yearly %>%
     filter(
-      siec_code %in% c(
+      siec %in% c(
         SIEC_OIL_PRODUCTS, SIEC_ROAD_DIESEL, SIEC_MOTOR_GASOLINE_XBIO,
         SIEC_BIOGASOLINE
       ),
-      nrg_bal_code == "FC_TRA_ROAD_E"
+      nrg_bal == "FC_TRA_ROAD_E"
     ) %>%
-    group_by(geo, time, siec_code) %>%
+    group_by(geo, time, siec) %>%
     summarise(values = sum(values, na.rm = TRUE)) %>%
-    spread(siec_code, values) %>%
+    spread(siec, values) %>%
     group_by(geo, time) %>%
     summarise(
       share_road = (
@@ -610,17 +603,17 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
   # Note: Monthly data has international aviation but not domestic
   share_kerosene_aviation <- yearly %>%
     filter(
-      siec_code == SIEC_KEROSENE_XBIO,
-      nrg_bal_code %in% c("INTAVI_E", "FC_TRA_DAVI_E")
+      siec == SIEC_KEROSENE_XBIO,
+      nrg_bal %in% c("INTAVI_E", "FC_TRA_DAVI_E")
     ) %>%
-    group_by(geo, time, nrg_bal_code, siec_code) %>%
+    group_by(geo, time, nrg_bal, siec) %>%
     summarise(values = sum(values, na.rm = TRUE)) %>%
-    spread(nrg_bal_code, values) %>%
+    spread(nrg_bal, values) %>%
     filter(
       INTAVI_E > 0,
       FC_TRA_DAVI_E > 0
     ) %>%
-    group_by(geo, time, siec_code) %>%
+    group_by(geo, time, siec) %>%
     summarise(share = FC_TRA_DAVI_E / INTAVI_E) %>%
     ungroup()
 
@@ -637,15 +630,15 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
     right_join(
       monthly %>%
         filter(
-          siec_code == SIEC_KEROSENE_XBIO,
-          nrg_bal_code %in% c("INTAVI_E")
+          siec == SIEC_KEROSENE_XBIO,
+          nrg_bal %in% c("INTAVI_E")
         ) %>%
-        select(geo, time, siec_code, values),
-      by = c("geo", "time", "siec_code")
+        select(geo, time, siec, values),
+      by = c("geo", "time", "siec")
     ) %>%
     mutate(
       values = share * values,
-      nrg_bal_code = "FC_TRA_DAVI_E"
+      nrg_bal = "FC_TRA_DAVI_E"
     ) %>%
     select(-c(share)) %>%
     ungroup()
@@ -659,17 +652,17 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
   # Assumption 5: Share of aviation gasoline going to aviation constant (and close to 1)
   share_aviation_aviation_gasoline <- yearly %>%
     filter(
-      siec_code == SIEC_AVIATION_GASOLINE,
-      nrg_bal_code %in% c("GID_OBS", "FC_TRA_DAVI_E")
+      siec == SIEC_AVIATION_GASOLINE,
+      nrg_bal %in% c("GID_OBS", "FC_TRA_DAVI_E")
     ) %>%
-    group_by(geo, time, nrg_bal_code, siec_code) %>%
+    group_by(geo, time, nrg_bal, siec) %>%
     summarise(values = sum(values, na.rm = TRUE)) %>%
-    spread(nrg_bal_code, values) %>%
+    spread(nrg_bal, values) %>%
     filter(
       GID_OBS > 0,
       FC_TRA_DAVI_E > 0
     ) %>%
-    group_by(geo, time, siec_code) %>%
+    group_by(geo, time, siec) %>%
     summarise(
       share = (FC_TRA_DAVI_E) / GID_OBS,
       .groups = "drop"
@@ -688,15 +681,15 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
     right_join(
       monthly %>%
         filter(
-          siec_code == SIEC_AVIATION_GASOLINE,
-          nrg_bal_code %in% c("GID_OBS")
+          siec == SIEC_AVIATION_GASOLINE,
+          nrg_bal %in% c("GID_OBS")
         ) %>%
-        select(geo, time, siec_code, values),
-      by = c("geo", "time", "siec_code")
+        select(geo, time, siec, values),
+      by = c("geo", "time", "siec")
     ) %>%
     mutate(
       values = values * share,
-      nrg_bal_code = "FC_TRA_DAVI_E"
+      nrg_bal = "FC_TRA_DAVI_E"
     ) %>%
     select(-c(share)) %>%
     ungroup()
@@ -709,15 +702,15 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
   # Assumption 6: Motor gasoline, road diesel and kerosene represent most of the transport sector
   share_transport <- yearly %>%
     filter(
-      siec_code %in% c(
+      siec %in% c(
         SIEC_MOTOR_GASOLINE_XBIO, SIEC_ROAD_DIESEL, SIEC_KEROSENE_XBIO,
         SIEC_BIOGASOLINE, SIEC_OIL_PRODUCTS
       ),
-      nrg_bal_code == "FC_TRA_E"
+      nrg_bal == "FC_TRA_E"
     ) %>%
-    group_by(geo, time, siec_code) %>%
+    group_by(geo, time, siec) %>%
     summarise(values = sum(values, na.rm = TRUE)) %>%
-    spread(siec_code, values) %>%
+    spread(siec, values) %>%
     group_by(geo, time) %>%
     summarise(
       share_transport = (
@@ -753,16 +746,14 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
     monthly_tra_e_diesel,
     monthly_tra_e_gasoline
   ) %>%
-    select(time, geo, siec_code, values, nrg_bal_code) %>%
-    mutate(unit = "Thousand tonnes")
+    select(time, geo, siec, values, nrg_bal) %>%
+    mutate(unit = EUROSTAT_UNIT_THOUSAND_TONNES)
 
   # Re-add siec for NCV/emission factor matching
-  # Though ultimately we should switch everything to siec_code
-  added <- added %>%
-    left_join(distinct(monthly, siec, siec_code))
+  # Though ultimately we should switch everything to siec constants only.
 
   monthly_filled <- bind_rows(
-    monthly %>% anti_join(added %>% distinct(geo, time, siec_code, siec, nrg_bal_code)),
+    monthly %>% anti_join(added %>% distinct(geo, time, siec, nrg_bal)),
     added
   )
 
@@ -774,27 +765,22 @@ fill_oil_non_energy_use_yearly <- function(yearly) {
   # Austria, and maybe other countries have GD_PI but not GID_NE in yearly data.
   # We'll assume GID_NE=GD_PI for those
   yearly %>%
-    group_by(siec_code, geo) %>%
+    group_by(siec, geo) %>%
     mutate(
       should_use = case_when(
-        any(values[nrg_bal_code == "GID_NE"] > 0) ~ "GID_NE",
-        any(values[nrg_bal_code == "GD_PI"] > 0) ~ "GD_PI",
+        any(values[nrg_bal == "GID_NE"] > 0) ~ "GID_NE",
+        any(values[nrg_bal == "GD_PI"] > 0) ~ "GD_PI",
         T ~ "GID_NE"
       )
     ) %>%
     filter(
-      (nrg_bal_code %in% c("GID_NE", "GD_PI") & should_use == nrg_bal_code) |
-        (!nrg_bal_code %in% c("GID_NE", "GD_PI"))
+      (nrg_bal %in% c("GID_NE", "GD_PI") & should_use == nrg_bal) |
+        (!nrg_bal %in% c("GID_NE", "GD_PI"))
     ) %>%
     mutate(
-      nrg_bal_code = recode(nrg_bal_code, "GD_PI" = "GID_NE")
+      nrg_bal = recode(nrg_bal, "GD_PI" = "GID_NE")
     ) %>%
-    ungroup() %>%
-    # restore nrg_bal
-    select(-nrg_bal) %>%
-    left_join(
-      yearly %>% ungroup() %>% distinct(nrg_bal_code, nrg_bal)
-    )
+    ungroup()
 }
 
 
@@ -810,17 +796,11 @@ fill_oil_non_energy_use_yearly <- function(yearly) {
 fill_gid_obs_with_gid_cal <- function(x) {
   filler <- x %>%
     ungroup() %>%
-    filter(nrg_bal_code == "GID_CAL") %>%
+    filter(nrg_bal == "GID_CAL") %>%
     mutate(
-      nrg_bal_code = "GID_OBS",
-      nrg_bal = first(x$nrg_bal[x$nrg_bal_code == "GID_OBS"]),
+      nrg_bal = "GID_OBS"
     ) %>%
     rename(values_cal = values)
-
-  # Remove flags column if exists
-  if ("flags" %in% colnames(x)) {
-    filler <- filler %>% select(-flags)
-  }
 
   # Join with all but values
   x %>%
@@ -849,59 +829,52 @@ fill_oil_non_energy_use_monthly <- function(yearly, monthly) {
   ) %>%
     inner_join(
       tibble(
-        freq = c("Annual", "Monthly"),
-        nrg_bal_code = c("GID_NE", "GD_PI")
+        freq = c(EUROSTAT_FREQ_ANNUAL, EUROSTAT_FREQ_MONTHLY),
+        nrg_bal = c("GID_NE", "GD_PI")
       )
     ) %>%
-    group_by(geo, siec_code, year = year(time), nrg_bal_code, freq) %>%
+    group_by(geo, siec, year = year(time), nrg_bal, freq) %>%
     summarise(
       values = sum(values, na.rm = TRUE),
       n = n(),
       .groups = "drop"
     ) %>%
-    filter(n == 12 | freq == "Annual") %>%
+    filter(n == 12 | freq == EUROSTAT_FREQ_ANNUAL) %>%
     filter(!is.na(values)) %>%
     select(-c(freq, n)) %>%
-    spread(nrg_bal_code, values) %>%
+    spread(nrg_bal, values) %>%
     mutate(ratio = GID_NE / GD_PI) %>%
     filter(!is.na(ratio), !is.infinite(ratio), ratio > 0) %>%
     complete(
-      nesting(geo, siec_code),
+      nesting(geo, siec),
       year = seq(min(year(yearly$time)), max(year(monthly$time))),
       fill = list(ratio = NA)
     ) %>%
     # Fill up and down
     arrange(year) %>%
-    group_by(geo, siec_code) %>%
+    group_by(geo, siec) %>%
     fill(ratio, .direction = "updown") %>%
     ungroup() %>%
-    select(geo, siec_code, year, ratio)
+    select(geo, siec, year, ratio)
 
 
   # Add GID_NE where not existing
   monthly_gid_ne <- monthly %>%
-    filter(nrg_bal_code == "GD_PI") %>%
+    filter(nrg_bal == "GD_PI") %>%
     mutate(year = year(time)) %>%
     left_join(
       gd_pi_to_gid_ne,
-      by = c("geo", "siec_code", "year")
+      by = c("geo", "siec", "year")
     ) %>%
     mutate(ratio = replace_na(ratio, 1)) %>%
     mutate(
       values = values * ratio,
-      nrg_bal_code = "GID_NE"
+      nrg_bal = "GID_NE"
     ) %>%
-    select(nrg_bal_code, siec_code, freq, unit, geo, time, values) %>%
-    # Add nrg_bal and siec columns
-    left_join(
-      bind_rows(monthly, yearly) %>% ungroup() %>% distinct(nrg_bal_code, nrg_bal)
-    ) %>%
-    left_join(
-      bind_rows(monthly, yearly) %>% ungroup() %>% distinct(siec_code, siec)
-    )
+    select(nrg_bal, siec, freq, unit, geo, time, values)
 
   # Just ensure there were no GID_NE in monthly
-  stopifnot(0 == nrow(monthly %>% filter(nrg_bal_code == "GID_NE")))
+  stopifnot(0 == nrow(monthly %>% filter(nrg_bal == "GID_NE")))
 
   bind_rows(
     monthly,
@@ -931,12 +904,12 @@ fix_eu_when_important_countries_missing <- function(
   # Identify unique EU time points with non-NA values
   eu_times <- data %>%
     filter(iso2 == "EU", !is.na(values)) %>%
-    distinct(nrg_bal_code, time)
+    distinct(nrg_bal, time)
 
   # Determine if all important countries are present for each time point
   important_countries_times <- data %>%
     filter(iso2 %in% important_iso2s, !is.na(values)) %>%
-    group_by(nrg_bal_code, time) %>%
+    group_by(nrg_bal, time) %>%
     summarise(
       has_important_countries = n_distinct(iso2) == length(important_iso2s),
       .groups = "drop"
@@ -944,13 +917,13 @@ fix_eu_when_important_countries_missing <- function(
 
   # Identify EU time points where not all important countries are present
   to_remove <- eu_times %>%
-    left_join(important_countries_times, by = c("nrg_bal_code", "time")) %>%
+    left_join(important_countries_times, by = c("nrg_bal", "time")) %>%
     filter(has_important_countries == FALSE) %>%
     mutate(iso2 = "EU")
 
   # Remove EU rows where not all important countries are present
   data <- data %>%
-    anti_join(to_remove, by = c("iso2", "time", "nrg_bal_code"))
+    anti_join(to_remove, by = c("iso2", "time", "nrg_bal"))
 
   # Print information if rows were removed
   if (nrow(to_remove) > 0) {

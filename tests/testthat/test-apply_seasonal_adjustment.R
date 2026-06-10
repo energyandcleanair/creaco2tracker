@@ -5,7 +5,7 @@ test_that(
   {
     # Create test data with complete monthly data for seasonal pattern calculation
     cons_monthly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       # Complete year 2020 for DE, sector A
       "DE", "A", "2020-01-01", "TJ", "O4000", "OIL", 100,
       "DE", "A", "2020-02-01", "TJ", "O4000", "OIL", 110,
@@ -37,7 +37,7 @@ test_that(
 
     # Create yearly data to be converted to monthly
     cons_yearly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       "DE", "A", "2020-01-01", "TJ", "O4000", "OIL", 1860, # Sum of 2020 monthly values
       "DE", "A", "2021-01-01", "TJ", "O4000", "OIL", 1920 # Sum of 2021 monthly values
     ) %>%
@@ -51,7 +51,7 @@ test_that(
 
     # Check that the monthly values sum back to the original yearly values
     yearly_sums <- result %>%
-      group_by(iso2, sector, lubridate::year(time), unit, siec_code, fuel) %>%
+      group_by(iso2, sector, lubridate::year(time), unit, siec, fuel) %>%
       summarise(total = sum(values), .groups = "drop") %>%
       arrange(`lubridate::year(time)`)
 
@@ -68,7 +68,7 @@ test_that(
     expect_true(all(jan_values < dec_values))
 
     # Check that all required columns are present
-    expected_cols <- c("iso2", "sector", "time", "unit", "siec_code", "fuel", "values")
+    expected_cols <- c("iso2", "sector", "time", "unit", "siec", "fuel", "values")
     expect_equal(sort(colnames(result)), sort(expected_cols))
   }
 )
@@ -78,7 +78,7 @@ test_that(
   {
     # Create test data with some missing values in monthly data
     cons_monthly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       # Incomplete year 2020 (missing December)
       "DE", "A", "2020-01-01", "TJ", "O4000", "OIL", 100,
       "DE", "A", "2020-02-01", "TJ", "O4000", "OIL", 110,
@@ -109,7 +109,7 @@ test_that(
       mutate(time = as.Date(time))
 
     cons_yearly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       "DE", "A", "2020-01-01", "TJ", "O4000", "OIL", 1860,
       "DE", "A", "2021-01-01", "TJ", "O4000", "OIL", 1920
     ) %>%
@@ -135,7 +135,7 @@ test_that(
   {
     # Create test data with NA values
     cons_monthly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       "DE", "A", "2020-01-01", "TJ", "O4000", "OIL", 100,
       "DE", "A", "2020-02-01", "TJ", "O4000", "OIL", NA, # NA value
       "DE", "A", "2020-03-01", "TJ", "O4000", "OIL", 120
@@ -143,7 +143,7 @@ test_that(
       mutate(time = as.Date(time))
 
     cons_yearly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       "DE", "A", "2020-01-01", "TJ", "O4000", "OIL", 1860
     ) %>%
       mutate(time = as.Date(time))
@@ -161,7 +161,7 @@ test_that(
   {
     # Create test data with multiple countries and sectors
     cons_monthly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       # DE, sector A, 2020 (complete)
       "DE", "A", "2020-01-01", "TJ", "O4000", "OIL", 100,
       "DE", "A", "2020-02-01", "TJ", "O4000", "OIL", 110,
@@ -192,7 +192,7 @@ test_that(
       mutate(time = as.Date(time))
 
     cons_yearly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       "DE", "A", "2020-01-01", "TJ", "O4000", "OIL", 1860,
       "FR", "B", "2020-01-01", "TJ", "G3000", "GAS", 930
     ) %>%
@@ -206,7 +206,7 @@ test_that(
 
     # Check that each country-sector combination sums to original yearly value
     yearly_sums <- result %>%
-      group_by(iso2, sector, unit, siec_code, fuel) %>%
+      group_by(iso2, sector, unit, siec, fuel) %>%
       summarise(total = sum(values), .groups = "drop") %>%
       arrange(iso2, sector)
 
@@ -233,7 +233,7 @@ test_that(
   {
     # Test with zero values
     cons_monthly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       "DE", "A", "2020-01-01", "TJ", "O4000", "OIL", 0,
       "DE", "A", "2020-02-01", "TJ", "O4000", "OIL", 0,
       "DE", "A", "2020-03-01", "TJ", "O4000", "OIL", 0,
@@ -250,7 +250,7 @@ test_that(
       mutate(time = as.Date(time))
 
     cons_yearly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       "DE", "A", "2020-01-01", "TJ", "O4000", "OIL", 0
     ) %>%
       mutate(time = as.Date(time))

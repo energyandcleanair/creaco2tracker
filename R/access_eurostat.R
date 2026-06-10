@@ -80,23 +80,26 @@ eurostat_data_access_get_indprod <- function(
 get_eurostat_from_code <- function(code, iso2s = NULL, use_cache = TRUE, filters = NULL) {
   # Create a digest of iso2s and filters
   create_dir("cache")
-  digest <- digest::digest(list(iso2s, filters))
+  cache_schema_version <- "v3_no_code_aliases"
+  digest <- digest::digest(list(cache_schema_version, iso2s, filters))
   filepath <- file.path("cache", glue("eurostat_{code}_{digest}.rds"))
 
   if (use_cache && file.exists(filepath)) {
     return(readRDS(filepath))
   }
 
+  effective_filters <- filters
   if (!is.null(iso2s)) {
-    filters$geo <- iso2s
+    effective_filters$geo <- iso2s
   }
 
-  raw <- eurostat::get_eurostat(code, filters = filters, keepFlags = TRUE)
-  keep_code <- intersect(names(raw), c("nrg_bal", "siec", "nace_r2", "prod_nrg"))
-  if (length(keep_code) == 0) keep_code <- NULL
+  raw <- eurostat::get_eurostat(
+    code,
+    filters = effective_filters,
+    keepFlags = FALSE
+  )
+
   raw %>%
-    # Keep nrg_bal code as well
-    eurostat::label_eurostat(code = keep_code, fix_duplicated = TRUE) %>%
     # Column changed with new EUROSTAT version
     dplyr::rename(dplyr::any_of(c(time = "TIME_PERIOD"))) %T>%
     saveRDS(filepath)

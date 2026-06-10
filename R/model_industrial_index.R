@@ -13,11 +13,7 @@ get_industrial_indexes <- function(
   project = TRUE,
   diagnostics_folder = "diagnostics/industrial_index"
 ) {
-  product_codes <- list(
-    "gas" = "P13",
-    "oil" = c("P12", "P14", "P15", "P16", "P17", "P18", "P19", "P20", "P21"),
-    "coal" = c("P08", "P09", "P10", "P11")
-  )
+  product_codes <- INDPROD_PRODUCT_CODES
 
 
   pefasu <- get_eurostat_from_code("env_ac_pefasu")
@@ -25,9 +21,9 @@ get_industrial_indexes <- function(
   consumption_per_sector <- lapply(names(product_codes), function(product) {
     pefasu %>%
       filter(
-        prod_nrg_code %in% product_codes[[product]],
-        stk_flow == "Emission-relevant use",
-        unit == "Terajoule",
+        prod_nrg %in% product_codes[[product]],
+        stk_flow == EUROSTAT_STK_FLOW_EMISSION_RELEVANT,
+        unit == EUROSTAT_UNIT_TERAJOULE,
       ) %>%
       add_iso2() %>%
       filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
@@ -35,7 +31,7 @@ get_industrial_indexes <- function(
       mutate(product = product)
   }) %>%
     bind_rows() %>%
-    group_by(iso2, geo, time, nace_r2_code, nace_r2, product) %>%
+    group_by(iso2, geo, time, nace_r2, product) %>%
     summarise(energy_tj = sum(values, na.rm = TRUE))
 
   # Get index year
@@ -52,15 +48,15 @@ get_industrial_indexes <- function(
   # Look for countries that produce only coke C191 and others only C192
   cs <- indprod %>%
     filter(
-      unit == "Index, 2021=100",
-      grepl("Calendar adjusted data", s_adj),
+      unit == EUROSTAT_UNIT_INDEX_2021,
+      s_adj == EUROSTAT_SADJ_CALENDAR_ADJUSTED,
       iso2 %in% get_eu_iso2s(include_eu = TRUE)
     ) %>%
     filter(
-      nace_r2_code %in% c("C191", "C192")
+      nace_r2 %in% c("C191", "C192")
     ) %>%
     group_by(
-      nace_r2_code,
+      nace_r2,
       year = year(time),
       iso2
     ) %>%
@@ -68,7 +64,7 @@ get_industrial_indexes <- function(
 
   cs %>%
     spread(
-      nace_r2_code,
+      nace_r2,
       value
     ) %>%
     filter(
@@ -82,15 +78,15 @@ get_industrial_indexes <- function(
   indprod_filtered <- indprod %>%
     filter_nace() %>%
     filter(
-      unit == "Index, 2021=100",
-      grepl("Calendar adjusted data", s_adj)
+      unit == EUROSTAT_UNIT_INDEX_2021,
+      s_adj == EUROSTAT_SADJ_CALENDAR_ADJUSTED
     )
 
   # Fill incomplete data
   consumption_filled <- consumption_per_sector %>%
     left_join(
       indprod_filtered %>%
-        group_by(iso2, time = floor_date(time, "year"), nace_r2_code) %>%
+        group_by(iso2, time = floor_date(time, "year"), nace_r2) %>%
         summarise(value_prod = sum(values, na.rm = TRUE))
     ) %>%
     mutate(
@@ -101,7 +97,7 @@ get_industrial_indexes <- function(
       )
     ) %>%
     # Fill first by interpolation
-    group_by(iso2, geo, nace_r2_code, product) %>%
+    group_by(iso2, geo, nace_r2, product) %>%
     arrange(time) %>%
     fill(ff_intensity, .direction = "updown") %>%
     # Remove inf
@@ -115,11 +111,11 @@ get_industrial_indexes <- function(
       rename(value = values) %>%
       ungroup() %>%
       tidyr::complete(
-        nesting(nace_r2_code, nace_r2),
+        nesting(nace_r2),
         nesting(iso2, geo),
         time = seq.Date(min(time), max_date, by = "month")
       ) %>%
-      group_by(iso2, nace_r2_code) %>%
+      group_by(iso2, nace_r2) %>%
       group_modify(function(df, group_keys) {
         # Get the latest date with actual data
         latest_data <- max(df$time[!is.na(df$value)])
@@ -165,7 +161,7 @@ get_industrial_indexes <- function(
               `rownames<-`(NULL)
           },
           error = function(e) {
-            log_warn(glue("{group_keys$iso2} - {group_keys$nace_r2_code}: Forecast model failed."))
+            log_warn(glue("{group_keys$iso2} - {group_keys$nace_r2}: Forecast model failed."))
             return(NULL)
           }
         )
@@ -202,7 +198,7 @@ get_industrial_indexes <- function(
 
   # Index production
   indprod_filled <- indprod_filtered %>%
-    select(nace_r2_code, nace_r2, time, geo, values, iso2) %>%
+    select(nace_r2, time, geo, values, iso2) %>%
     {
       if (project) {
         fill_last_dates(., frequency)
@@ -216,14 +212,14 @@ get_industrial_indexes <- function(
     left_join(
       consumption_filled %>%
         filter(time == index_date) %>%
-        select(nace_r2_code, iso2, ff_intensity, product),
+        select(nace_r2, iso2, ff_intensity, product),
       relationship = "many-to-many"
     ) %>%
     filter(!is.na(ff_intensity)) %>%
     mutate(energy_tj = ff_intensity * value) %>%
     # Group by period
     group_by(
-      iso2, geo, nace_r2_code, nace_r2, product,
+      iso2, geo, nace_r2, product,
       date = floor_date(time, frequency),
       ff_intensity, estimate
     ) %>%
@@ -232,7 +228,7 @@ get_industrial_indexes <- function(
       energy_tj = sum(energy_tj)
     ) %>%
     # Index prod per nace (100: base year for each nace)
-    group_by(iso2, geo, nace_r2_code, nace_r2, product, estimate) %>%
+    group_by(iso2, geo, nace_r2, product, estimate) %>%
     mutate(index_per_nace = value / value[date == index_date] * 100) %>%
     # Index prod per product (100: base year for each product)
     group_by(iso2, product, estimate) %>%
@@ -249,7 +245,7 @@ get_industrial_indexes <- function(
     frequency == "month" ~ expected_value_monthly
   )
   filter_tbl <- tibble(
-    iso2 = "DE", date = index_date, nace_r2_code = "B", product = "gas",
+    iso2 = "DE", date = index_date, nace_r2 = "B", product = "gas",
     estimate = "central", time = index_date
   )
   industrial_value <- round(
@@ -287,9 +283,9 @@ get_industrial_indexes <- function(
 filter_nace <- function(x) {
   filter(
     x,
-    nace_r2_code == "B" |
+    nace_r2 == "B" |
       # three letter starting with C
-      (stringr::str_length(nace_r2_code) %in% c(3, 7)) & (substr(nace_r2_code, 1, 1) == "C")
+      (stringr::str_length(nace_r2) %in% c(3, 7)) & (substr(nace_r2, 1, 1) == "C")
   )
 }
 
@@ -304,37 +300,37 @@ investigate_c19 <- function(pefasu, indprod, product_codes) {
   c19_energy <- lapply(names(product_codes), function(fuel) {
     pefasu %>%
       filter(
-        nace_r2_code == "C19",
-        prod_nrg_code %in% product_codes[[fuel]],
-        stk_flow == "Emission-relevant use",
-        unit == "Terajoule"
+        nace_r2 == "C19",
+        prod_nrg %in% product_codes[[fuel]],
+        stk_flow == EUROSTAT_STK_FLOW_EMISSION_RELEVANT,
+        unit == EUROSTAT_UNIT_TERAJOULE
       ) %>%
       mutate(fuel = fuel)
   }) %>%
     bind_rows() %>%
     add_iso2() %>%
-    select(iso2, time, values, prod_nrg_code, prod_nrg, fuel)
+    select(iso2, time, values, prod_nrg, fuel)
 
 
   c19_prod <- indprod %>%
     filter(
-      unit == "Index, 2021=100",
-      grepl("Calendar adjusted data", s_adj)
+      unit == EUROSTAT_UNIT_INDEX_2021,
+      s_adj == EUROSTAT_SADJ_CALENDAR_ADJUSTED
     ) %>%
-    filter(nace_r2_code %in% c("C191", "C192")) %>%
+    filter(nace_r2 %in% c("C191", "C192")) %>%
     add_iso2() %>%
     filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
-    select(nace_r2_code, time, values, iso2) %>%
-    spread(nace_r2_code, values)
+    select(nace_r2, time, values, iso2) %>%
+    spread(nace_r2, values)
 
 
   products <- c19_energy %>%
     distinct()
 
-  prod_nrg_code <- "P09"
+  prod_nrg <- "P09"
 
   training_data <- c19_energy %>%
-    filter(prod_nrg_code == !!prod_nrg_code) %>%
+    filter(prod_nrg == !!prod_nrg) %>%
     left_join(c19_prod, by = c("iso2", "time")) %>%
     filter(iso2 == "FR")
 
@@ -348,10 +344,10 @@ investigate_c19 <- function(pefasu, indprod, product_codes) {
 
   pefasu %>%
     filter(
-      nace_r2_code == "C19",
-      prod_nrg_code %in% product_codes[[product]],
-      stk_flow == "Emission-relevant use",
-      unit == "Terajoule"
+      nace_r2 == "C19",
+      prod_nrg %in% product_codes[[product]],
+      stk_flow == EUROSTAT_STK_FLOW_EMISSION_RELEVANT,
+      unit == EUROSTAT_UNIT_TERAJOULE
     )
 
 
@@ -374,6 +370,6 @@ investigate_c19 <- function(pefasu, indprod, product_codes) {
       mutate(product = product)
   }) %>%
     bind_rows() %>%
-    group_by(iso2, geo, time, nace_r2_code, nace_r2, product) %>%
+    group_by(iso2, geo, time, nace_r2, product) %>%
     summarise(energy_tj = sum(values, na.rm = TRUE))
 }

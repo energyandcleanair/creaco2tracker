@@ -6,46 +6,46 @@ test_that(
 
     # Create comprehensive test data
     test_data <- tribble(
-      ~iso2, ~sector, ~siec_code, ~nrg_bal_code, ~unit, ~time, ~values,
+      ~iso2, ~sector, ~siec, ~nrg_bal, ~unit, ~time, ~values,
       # Historical data (2023) - for correlation
-      "FR", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2023-01-01", 100,
-      "DE", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2023-01-01", 200,
-      "IT", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2023-01-01", 150,
-      "SMALL", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2023-01-01", 10,
-      "EU", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2023-01-01", 450,
-      "FR", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2023-02-01", 50,
-      "DE", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2023-02-01", 180,
-      "IT", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2023-02-01", 120,
-      "SMALL", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2023-02-01", 8,
-      "EU", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2023-02-01", 350,
-      "FR", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2023-03-01", 0,
-      "DE", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2023-03-01", 160,
-      "IT", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2023-03-01", 100,
-      "SMALL", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2023-03-01", 5,
-      "EU", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2023-03-01", 260,
+      "FR", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2023-01-01", 100,
+      "DE", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2023-01-01", 200,
+      "IT", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2023-01-01", 150,
+      "SMALL", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2023-01-01", 10,
+      "EU", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2023-01-01", 450,
+      "FR", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2023-02-01", 50,
+      "DE", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2023-02-01", 180,
+      "IT", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2023-02-01", 120,
+      "SMALL", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2023-02-01", 8,
+      "EU", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2023-02-01", 350,
+      "FR", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2023-03-01", 0,
+      "DE", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2023-03-01", 160,
+      "IT", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2023-03-01", 100,
+      "SMALL", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2023-03-01", 5,
+      "EU", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2023-03-01", 260,
 
       # Recent data (2024) - to be filled
       # 2024-01: All three major countries available
-      "FR", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2024-01-01", 100,
-      "DE", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2024-01-01", 200,
-      "IT", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2024-01-01", 150,
-      "SMALL", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2024-01-01", 10,
-      "EU", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2024-01-01", NA,
+      "FR", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2024-01-01", 100,
+      "DE", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2024-01-01", 200,
+      "IT", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2024-01-01", 150,
+      "SMALL", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2024-01-01", 10,
+      "EU", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2024-01-01", NA,
       # Should be filled with 450
 
       # 2024-02: Only FR and DE available (IT missing)
-      "FR", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2024-02-01", 50,
-      "DE", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2024-02-01", 180,
-      "SMALL", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2024-02-01", 8,
-      "EU", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2024-02-01", NA,
+      "FR", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2024-02-01", 50,
+      "DE", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2024-02-01", 180,
+      "SMALL", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2024-02-01", 8,
+      "EU", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2024-02-01", NA,
       # Should NOT be filled (only 2 countries)
 
       # 2024-03: All three major countries available again
-      "FR", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2024-03-01", 0,
-      "DE", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2024-03-01", 160,
-      "IT", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2024-03-01", 100,
-      "SMALL", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2024-03-01", 5,
-      "EU", "electricity", "C0100", "TI_EHG_MAP", "Thousand tonnes", "2024-03-01", NA,
+      "FR", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2024-03-01", 0,
+      "DE", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2024-03-01", 160,
+      "IT", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2024-03-01", 100,
+      "SMALL", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2024-03-01", 5,
+      "EU", "electricity", "C0100", "TI_EHG_MAP", EUROSTAT_UNIT_THOUSAND_TONNES, "2024-03-01", NA,
       # Should be filled with 260
     ) %>%
       mutate(time = as.Date(time))
@@ -59,7 +59,7 @@ test_that(
     # Test 1: Proper filling with all group_cols including iso2 and time
     result1 <- fill_eu_from_countries_sum(
       data = test_data,
-      group_cols = c("iso2", "sector", "siec_code", "nrg_bal_code", "unit", "time"),
+      group_cols = c("iso2", "sector", "siec", "nrg_bal", "unit", "time"),
       min_countries = 3, # Require 3 countries for filling
       min_points = 2,
       max_rel_diff = 1
@@ -93,7 +93,7 @@ test_that(
     # Test 2: Resilience to missing iso2 in group_cols (should still work but preserve data)
     result2 <- fill_eu_from_countries_sum(
       data = test_data,
-      group_cols = c("sector", "siec_code", "nrg_bal_code", "unit", "time"), # iso2 missing!
+      group_cols = c("sector", "siec", "nrg_bal", "unit", "time"), # iso2 missing!
       min_countries = 3,
       min_points = 2,
       max_rel_diff = 1
@@ -108,7 +108,7 @@ test_that(
     # Test 3: Resilience to missing time in group_cols
     result3 <- fill_eu_from_countries_sum(
       data = test_data,
-      group_cols = c("sector", "siec_code", "nrg_bal_code", "unit"), # time missing!
+      group_cols = c("sector", "siec", "nrg_bal", "unit"), # time missing!
       min_countries = 3,
       min_points = 2,
       max_rel_diff = 1
@@ -123,7 +123,7 @@ test_that(
     # Test 4: Extreme parameters should not remove country data
     result4 <- fill_eu_from_countries_sum(
       data = test_data,
-      group_cols = c("sector", "siec_code", "nrg_bal_code", "unit", "time"), # iso2 missing!
+      group_cols = c("sector", "siec", "nrg_bal", "unit", "time"), # iso2 missing!
       min_countries = 100, # Extremely high threshold
       max_rel_diff = 0.01 # Very strict correlation requirement
     )
@@ -141,8 +141,8 @@ test_that(
         filter(
           iso2 == original_row$iso2,
           sector == original_row$sector,
-          siec_code == original_row$siec_code,
-          nrg_bal_code == original_row$nrg_bal_code,
+          siec == original_row$siec,
+          nrg_bal == original_row$nrg_bal,
           unit == original_row$unit,
           time == original_row$time,
           values == original_row$values
@@ -165,8 +165,8 @@ test_that(
     test_data <- tibble(
       iso2 = "DE",
       time = as.Date("2024-01-01"),
-      unit = "Thousand tonnes",
-      siec_code = "C0311", # Coke oven coke
+      unit = EUROSTAT_UNIT_THOUSAND_TONNES,
+      siec = "C0311", # Coke oven coke
       fuel = "coke",
       sector = "all",
       values = 500

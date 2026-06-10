@@ -50,3 +50,28 @@ SIEC_COKE_OVEN_GAS <- "C0350"
 gcv_kwh_m3 <- 11.3505
 ncv_kwh_m3 <- gcv_kwh_m3 / 1.108
 ncv_gcv_gas <- 0.9
+
+# Eurostat value constants
+EUROSTAT_UNIT_TERAJOULE <- "TJ"
+EUROSTAT_UNIT_TJ_GCV <- "TJ_GCV"
+EUROSTAT_UNIT_THOUSAND_TONNES <- "THS_T"
+EUROSTAT_UNIT_INDEX_2021 <- "I21"
+EUROSTAT_SADJ_CALENDAR_ADJUSTED <- "CA"
+EUROSTAT_STK_FLOW_EMISSION_RELEVANT <- "ER_USE"
+EUROSTAT_FREQ_MONTHLY <- "M"
+EUROSTAT_FREQ_ANNUAL <- "A"
+
+# Eurostat energy balance codes (nrg_bal)
+NRG_BAL_IC_OBS <- "IC_OBS"
+NRG_BAL_FC_NE <- "FC_NE"
+NRG_BAL_TI_EHG_MAP <- "TI_EHG_MAP"
+NRG_BAL_TI_EHG_MAPE_E <- "TI_EHG_MAPE_E"
+NRG_BAL_TI_EHG_MAPH_E <- "TI_EHG_MAPH_E"
+NRG_BAL_TI_EHG_MAPCHP_E <- "TI_EHG_MAPCHP_E"
+
+# Industrial index product mapping by fuel
+INDPROD_PRODUCT_CODES <- list(
+    gas = "P13",
+    oil = c("P12", "P14", "P15", "P16", "P17", "P18", "P19", "P20", "P21"),
+    coal = c("P08", "P09", "P10", "P11")
+)

@@ -14,7 +14,7 @@ test_that(
   {
     # Create test data
     cons_yearly_monthly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       "DE", "A", "2019-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 100,
       "DE", "A", "2019-02-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 110,
       "DE", "A", "2020-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 120,
@@ -25,7 +25,7 @@ test_that(
       mutate(time = as.Date(time))
 
     cons_monthly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       # Before cutoff, should be filtered out
       "DE", "A", "2019-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 95,
       # Before cutoff, should be filtered out
@@ -66,7 +66,7 @@ test_that(
   {
     # Create test data with different fuel types
     cons_yearly_monthly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       "DE", "A", "2018-01-01", "TJ", SIEC_NATURAL_GAS, "GAS", 100, # Natural gas, cutoff 2020-01-01
       "DE", "A", "2019-01-01", "TJ", SIEC_HARD_COAL, "COAL", 200, # Hard coal, cutoff 2020-01-01
       "DE", "A", "2018-01-01", "TJ", SIEC_HARD_COAL, "COAL", 300 # Hard coal, cutoff 2020-01-01
@@ -74,7 +74,7 @@ test_that(
       mutate(time = as.Date(time))
 
     cons_monthly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       "DE", "A", "2018-01-01", "TJ", SIEC_NATURAL_GAS, "GAS", 95,
       # Before cutoff, should be filtered
       "DE", "A", "2019-01-01", "TJ", SIEC_HARD_COAL, "COAL", 205,
@@ -98,7 +98,7 @@ test_that(
   {
     # Create test data for Portugal fuel oil (special case)
     cons_yearly_monthly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       # Before Portugal cutoff (2023-01-01)
       "PT", "A", "2022-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 100,
       "PT", "A", "2023-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 110, # After Portugal cutoff
@@ -109,7 +109,7 @@ test_that(
       mutate(time = as.Date(time))
 
     cons_monthly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       # Before Portugal cutoff, should be filtered
       "PT", "A", "2022-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 95,
       # After Portugal cutoff, should be kept
@@ -152,13 +152,13 @@ test_that(
   {
     # Create test data with some missing combinations
     cons_yearly_monthly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       "DE", "A", "2020-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 100
     ) %>%
       mutate(time = as.Date(time))
 
     cons_monthly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       "DE", "A", "2020-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 110
     ) %>%
       mutate(time = as.Date(time))
@@ -178,13 +178,13 @@ test_that(
   {
     # Create test data where both monthly and yearly are available after cutoff
     cons_yearly_monthly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       "DE", "A", "2020-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 100
     ) %>%
       mutate(time = as.Date(time))
 
     cons_monthly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       "DE", "A", "2020-01-01", "TJ", SIEC_FUEL_OIL, FUEL_OIL, 110
     ) %>%
       mutate(time = as.Date(time))
@@ -203,14 +203,14 @@ test_that(
   {
     # Create test data with only yearly data
     cons_yearly_monthly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values,
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
       "DE", "A", "2020-01-01", "TJ", "O4000", "OIL", 100,
       "DE", "A", "2021-01-01", "TJ", "O4000", "OIL", 110
     ) %>%
       mutate(time = as.Date(time))
 
     cons_monthly <- tribble(
-      ~iso2, ~sector, ~time, ~unit, ~siec_code, ~fuel, ~values
+      ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values
     ) %>%
       mutate(time = as.Date(character(0)))
 

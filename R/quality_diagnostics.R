@@ -260,15 +260,15 @@ diagnostic_eurostat_indprod <- function(
     # Check data availability
     plt <- eurostat_indprod %>%
       filter(
-        nace_r2_code == "B" |
-          (stringr::str_length(nace_r2_code) == 3 & substr(nace_r2_code, 1, 1) == "C")
+        nace_r2 == "B" |
+          (stringr::str_length(nace_r2) == 3 & substr(nace_r2, 1, 1) == "C")
       ) %>%
       filter(
-        unit == "Index, 2021=100",
-        grepl("Calendar adjusted data", s_adj)
+        unit == EUROSTAT_UNIT_INDEX_2021,
+        s_adj == EUROSTAT_SADJ_CALENDAR_ADJUSTED
       ) %>%
       filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
-      group_by(iso2, nace_r2_code) %>%
+      group_by(iso2, nace_r2) %>%
       summarise(max_date = max(time)) %>%
       ggplot(aes(max_date, iso2)) +
       geom_bar(stat = "identity", aes(fill = iso2 == "EU"), show.legend = FALSE) +
@@ -285,7 +285,7 @@ diagnostic_eurostat_indprod <- function(
         y = NULL
       ) +
       scale_x_date(limits = c(as.Date("2020-01-01"), NA), oob = scales::squish) +
-      facet_wrap(~nace_r2_code)
+      facet_wrap(~nace_r2)
 
     plt
     quicksave(file.path(diagnostics_folder, "eurostat_indprod_availability.png"),

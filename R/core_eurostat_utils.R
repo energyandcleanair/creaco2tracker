@@ -351,7 +351,7 @@ check_proxy_correlation <- function(target, proxy, max_rel_diff = 0.05, min_poin
 #' 'electricity' and 'others' sectors, ensuring that the sum is preserved and
 #' that the sectoral split is consistent. It is used for both solid and gas fuels.
 #'
-#' @param x A data frame with columns iso2, time, unit, siec_code, fuel, sector, values
+#' @param x A data frame with columns iso2, time, unit, siec, fuel, sector, values
 #' @return A data frame with sectors split into 'electricity' and 'others'
 #' @export
 eurostat_split_elec_others <- function(x) {
@@ -367,7 +367,7 @@ eurostat_split_elec_others <- function(x) {
     )
   }
 
-  group_cols <- intersect(names(x), c("iso2", "time", "unit", "siec_code", "fuel"))
+  group_cols <- intersect(names(x), c("iso2", "time", "unit", "siec", "fuel"))
 
   # Process data using pivot operations
   result <- x %>%

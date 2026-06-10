@@ -409,14 +409,16 @@ keep_best <- function(
     ungroup() %>%
     tidyr::complete(date, method, iso2, fill = list(value_m3 = 0))
 
+  eurostat_for_join <- eurostat %>%
+    rename(value_m3_eurostat = value_m3) %>%
+    select(-c(method))
+
+  consumption_monthly_joined <- consumption_monthly %>%
+    left_join(eurostat_for_join)
+
   bests <- pbapply::pblapply(date_froms, function(date_from) {
-    consumption_monthly %>%
+    consumption_monthly_joined %>%
       filter(date >= date_from) %>%
-      left_join(
-        eurostat %>%
-          rename(value_m3_eurostat = value_m3) %>%
-          select(-c(method))
-      ) %>%
       filter(!is.na(value_m3_eurostat)) %>%
       group_by(iso2, method) %>%
       summarise(

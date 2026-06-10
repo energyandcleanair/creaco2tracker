@@ -33,7 +33,7 @@ get_co2 <- function(
   run_started_at <- Sys.time()
   log_info(
     glue::glue(
-      "[{format_log_timestamp(run_started_at)}] START get_co2 (iso2s={length(iso2s)}, downscale_daily={downscale_daily}, use_cache={use_cache})"
+      "START get_co2 (iso2s={length(iso2s)}, downscale_daily={downscale_daily}, use_cache={use_cache})"
     )
   )
 
@@ -187,7 +187,7 @@ get_co2 <- function(
 
   run_ended_at <- Sys.time()
   total_elapsed_s <- as.numeric(difftime(run_ended_at, run_started_at, units = "secs"))
-  log_info(glue::glue("[{format_log_timestamp(run_ended_at)}] DONE get_co2 ({round(total_elapsed_s, 2)}s)"))
+  log_info(glue::glue("DONE get_co2 ({round(total_elapsed_s, 2)}s)"))
 
   return(co2)
 }

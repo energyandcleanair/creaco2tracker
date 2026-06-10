@@ -5,21 +5,21 @@
 investigate_oil <- function(monthly_oil, monthly_filled_oil, yearly_oil, yearly_filled_oil) {
   # International shipping EU vs countries
   monthly_oil %>%
-    filter(nrg_bal_code %in% c("INTMARB") &
-      siec_code %in% c(SIEC_FUEL_OIL, SIEC_GASOIL_DIESEL_XBIO)) %>%
+    filter(nrg_bal %in% c("INTMARB") &
+      siec %in% c(SIEC_FUEL_OIL, SIEC_GASOIL_DIESEL_XBIO)) %>%
     add_iso2() %>%
     filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
     mutate(is_eu = iso2 == "EU") %>%
-    group_by(is_eu, time, siec_code) %>%
+    group_by(is_eu, time, siec) %>%
     summarise(values = sum(values, na.rm = TRUE), n = n()) %>%
     arrange(desc(time)) %>%
     ggplot() +
     geom_line(aes(time, values, col = is_eu)) +
-    facet_wrap(~siec_code)
+    facet_wrap(~siec)
 
   monthly_oil %>%
-    filter(nrg_bal_code %in% c("INTMARB") &
-      siec_code %in% c(SIEC_FUEL_OIL)) %>%
+    filter(nrg_bal %in% c("INTMARB") &
+      siec %in% c(SIEC_FUEL_OIL)) %>%
     add_iso2() %>%
     filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
     select(iso2, time, values) %>%
@@ -40,16 +40,16 @@ investigate_oil <- function(monthly_oil, monthly_filled_oil, yearly_oil, yearly_
     add_iso2() %>%
     filter(
       iso2 == "AT",
-      nrg_bal_code %in% c(
+      nrg_bal %in% c(
         "GID_OBS",
         # "GD_PI",
         "GID_NE"
       )
     ) %>%
     group_by(
-      siec_code,
       siec,
-      nrg_bal_code,
+      siec,
+      nrg_bal,
       freq,
       year = year(time)
     ) %>%
@@ -61,30 +61,30 @@ investigate_oil <- function(monthly_oil, monthly_filled_oil, yearly_oil, yearly_
     # Reproduce same as process
     filter(
       # Oil products: SECTOR_TOTAL
-      (nrg_bal_code %in% c("GID_OBS", "GID_NE") &
-        siec_code %in% c(
+      (nrg_bal %in% c("GID_OBS", "GID_NE") &
+        siec %in% c(
           SIEC_OIL_PRODUCTS, SIEC_FUEL_OIL, SIEC_HEATING_GASOIL,
           SIEC_BIOGASOLINE, SIEC_BIODIESEL
         )) |
 
         # SECTOR_TRANSPORT: Diesel and Gasoline
-        (nrg_bal_code %in% c("FC_TRA_E") # Added in add_oil_transport function
-        & siec_code %in% c(SIEC_ROAD_DIESEL, SIEC_MOTOR_GASOLINE_XBIO)) |
+        (nrg_bal %in% c("FC_TRA_E") # Added in add_oil_transport function
+        & siec %in% c(SIEC_ROAD_DIESEL, SIEC_MOTOR_GASOLINE_XBIO)) |
 
         # SECTOR_TRANSPORT: Kerosene
         (
-          nrg_bal_code %in% c(
+          nrg_bal %in% c(
             "FC_TRA_DAVI_E", "INTAVI_E",
             "INTAVI_E+FC_TRA_DAVI_E"
           ) # Added in add_oil_transport function
-          & siec_code %in% c(SIEC_KEROSENE_XBIO, SIEC_AVIATION_GASOLINE))
+          & siec %in% c(SIEC_KEROSENE_XBIO, SIEC_AVIATION_GASOLINE))
 
       # SECTOR_TRANSPORT: International maritime bunkers
-      # (nrg_bal_code %in% c("INTMARB")
-      #  & siec_code %in% c(SIEC_FUEL_OIL, SIEC_GASOIL_DIESEL_XBIO))
+      # (nrg_bal %in% c("INTMARB")
+      #  & siec %in% c(SIEC_FUEL_OIL, SIEC_GASOIL_DIESEL_XBIO))
     ) %>%
     ggplot() +
-    geom_line(aes(year, values, col = freq, linetype = nrg_bal_code)) +
+    geom_line(aes(year, values, col = freq, linetype = nrg_bal)) +
     facet_wrap(
       ~siec,
     ) +
@@ -100,16 +100,16 @@ investigate_oil <- function(monthly_oil, monthly_filled_oil, yearly_oil, yearly_
     add_iso2() %>%
     filter(
       iso2 == "NL",
-      siec_code == SIEC_OIL_PRODUCTS
+      siec == SIEC_OIL_PRODUCTS
     ) %>%
-    group_by(freq, year = year(time), siec_code, nrg_bal_code) %>%
+    group_by(freq, year = year(time), siec, nrg_bal) %>%
     summarise(
       values = sum(values, na.rm = TRUE),
       .groups = "drop"
     ) %>%
     ggplot() +
     geom_line(aes(year, values, col = freq)) +
-    facet_wrap(~nrg_bal_code) +
+    facet_wrap(~nrg_bal) +
     theme(
       # Hide yaxis labels
       axis.text.y = element_blank()
@@ -126,9 +126,9 @@ investigate_oil <- function(monthly_oil, monthly_filled_oil, yearly_oil, yearly_
 investigate_coking_france <- function(monthly_solid, indprod) {
   monthly_solid %>%
     add_iso2() %>%
-    select(iso2, time, values, siec, nrg_bal_code) %>%
-    filter(iso2 == "FR", nrg_bal_code %in% c("TI_CO", "GID_OBS", "TI_EHG_MAP")) %>%
-    spread(nrg_bal_code, values) %>%
+    select(iso2, time, values, siec, nrg_bal) %>%
+    filter(iso2 == "FR", nrg_bal %in% c("TI_CO", "GID_OBS", "TI_EHG_MAP")) %>%
+    spread(nrg_bal, values) %>%
     mutate(RATIO = TI_CO / (GID_OBS - TI_EHG_MAP)) %>%
     ggplot() +
     geom_line(aes(time, RATIO, col = siec)) +
@@ -136,20 +136,20 @@ investigate_coking_france <- function(monthly_solid, indprod) {
 
   monthly_solid %>%
     add_iso2() %>%
-    select(iso2, time, values, siec, nrg_bal_code) %>%
-    filter(iso2 == "FR", nrg_bal_code %in% c("TI_CO", "GID_OBS", "TI_EHG_MAP")) %>%
+    select(iso2, time, values, siec, nrg_bal) %>%
+    filter(iso2 == "FR", nrg_bal %in% c("TI_CO", "GID_OBS", "TI_EHG_MAP")) %>%
     ggplot() +
-    geom_line(aes(time, values, col = nrg_bal_code)) +
+    geom_line(aes(time, values, col = nrg_bal)) +
     facet_wrap(~siec)
 
 
   coke_fr <- get_eurostat_indprod(iso2s = "FR")
-  coke_fr %>% filter(nace_r2_code == "191")
+  coke_fr %>% filter(nace_r2 == "191")
 
   indprod %>%
     filter(geo == "France") %>%
     filter(grepl("coke", nace_r2, ignore.case = TRUE)) %>%
-    distinct(nace_r2_code)
+    distinct(nace_r2)
 }
 
 investigate_solid <- function(monthly_solid, yearly_solid) {
@@ -230,7 +230,7 @@ investigate_solid <- function(monthly_solid, yearly_solid) {
 investigate_coking_emissions <- function(yearly_solid) {
   # Investigating coking gas
   hardcoal_coking <- yearly_solid %>%
-    filter(nrg_bal_code == "TI_CO_E") %>%
+    filter(nrg_bal == "TI_CO_E") %>%
     add_iso2() %>%
     filter(siec == "Hard coal")
 
@@ -247,7 +247,7 @@ investigate_coking_emissions <- function(yearly_solid) {
   )
 
   coke_gas <- yearly_gas %>%
-    filter(nrg_bal_code == "GID_OBS") %>%
+    filter(nrg_bal == "GID_OBS") %>%
     add_iso2()
 
   # Compute the ratio of hard coal emissions that should be accounted for

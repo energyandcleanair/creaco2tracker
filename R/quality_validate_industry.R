@@ -5,29 +5,29 @@ validate_industry <- function(industrial_indexes, industrial_prodtrade, industri
       filter(indicator == "production") %>%
       filter(unit == "kg") %>%
       ungroup() %>%
-      select(iso2, year, nace_r2_code, value) %>%
+      select(iso2, year, nace_r2, value) %>%
       mutate(type = "production"),
     industrial_indexes %>%
       ungroup() %>%
       filter(estimate == "central") %>%
-      group_by(iso2, nace_r2_code, year = year(date)) %>%
+      group_by(iso2, nace_r2, year = year(date)) %>%
       summarise(
         value = sum(energy_tj),
         type = "index"
       )
   ) %>%
     filter(year >= 2015, year < 2025) %>%
-    group_by(iso2, nace_r2_code, type) %>%
+    group_by(iso2, nace_r2, type) %>%
     mutate(value = value / value[year == 2020]) %>%
     filter(iso2 == "EU") %>%
     left_join(
       industrial_indexes %>%
-        distinct(nace_r2_code, nace_r2)
+        distinct(nace_r2)
     )
 
   ggplot(plt_data, aes(year, value, col = type)) +
     geom_line() +
-    facet_wrap(~ glue("{nace_r2_code}-{nace_r2}"), scales = "free_y") +
+    facet_wrap(~ nace_r2, scales = "free_y") +
     rcrea::scale_y_zero()
 
 
@@ -39,22 +39,22 @@ validate_industry <- function(industrial_indexes, industrial_prodtrade, industri
       ungroup() %>%
       spread(indicator, value) %>%
       mutate(value = import - export) %>%
-      select(iso2, year, nace_r2_code, value) %>%
+      select(iso2, year, nace_r2, value) %>%
       mutate(source = "prodtrade"),
     industrial_trade %>%
       ungroup() %>%
       filter(unit == "kg") %>%
-      select(iso2, year, nace_r2_code, value = net_import) %>%
+      select(iso2, year, nace_r2, value = net_import) %>%
       mutate(source = "trade")
   ) %>%
     filter(year >= 2015, year < 2025) %>%
     filter(iso2 == "EU") %>%
     left_join(
       industrial_indexes %>%
-        distinct(nace_r2_code, nace_r2)
+        distinct(nace_r2)
     )
 
   ggplot(plt_data, aes(year, value, col = source)) +
     geom_line() +
-    facet_wrap(~ glue("{nace_r2_code}-{nace_r2}"), scales = "free_y")
+    facet_wrap(~ nace_r2, scales = "free_y")
 }

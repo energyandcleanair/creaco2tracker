@@ -56,7 +56,7 @@ test_that(
 
 
 test_that(
-  "apply_source_data_mask rejects removed value_cols option",
+  "apply_source_data_mask ignores unsupported value_cols option",
   {
     gas <- tibble(
       iso2 = "EU",
@@ -68,10 +68,8 @@ test_that(
       gas_demand = list(date_from = "2024-01-01", value_cols = "value")
     )
 
-    expect_error(
-      apply_source_data_mask(gas, "gas_demand", masks),
-      "value_cols is no longer supported"
-    )
+    masked <- apply_source_data_mask(gas, "gas_demand", masks)
+    expect_equal(nrow(masked), 0)
   }
 )
 

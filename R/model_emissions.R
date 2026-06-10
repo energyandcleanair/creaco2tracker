@@ -7,7 +7,7 @@ get_co2_from_eurostat_cons <- function(
 ) {
   group_by_cols <- c("iso2", "date" = "time", "fuel", "sector", "unit")
   if (keep_siec) {
-    group_by_cols <- c(group_by_cols, "siec_code")
+    group_by_cols <- c(group_by_cols, "siec")
   }
 
   # Choose NCV method based on source parameter
@@ -24,8 +24,8 @@ get_co2_from_eurostat_cons <- function(
     mutate(
       value_co2_tonne =
         case_when(
-          unit == "Thousand tonnes" ~ values * ncv_kjkg / 1000 * co2_factor_t_per_TJ,
-          unit == "Terajoule (gross calorific value - GCV)" & fuel == FUEL_GAS ~ values *
+          unit == EUROSTAT_UNIT_THOUSAND_TONNES ~ values * ncv_kjkg / 1000 * co2_factor_t_per_TJ,
+          unit == EUROSTAT_UNIT_TJ_GCV & fuel == FUEL_GAS ~ values *
             ncv_gcv_gas * co2_factor_t_per_TJ
         )
     ) %>%
@@ -47,24 +47,24 @@ get_co2_from_eurostat_cons <- function(
 get_ipcc_emission_factors <- function() {
   # Emission factors in tCO2/TJ from https://www.ipcc-nggip.iges.or.jp/EFDB/find_ef.php
   tibble::tribble(
-    ~siec_code,                 ~co2_factor_t_per_TJ,
-    SIEC_HARD_COAL,             92.8, # EFID is 110620
-    SIEC_BROWN_COAL,            113.1, # EFID is 123085
+    ~siec, ~co2_factor_t_per_TJ,
+    SIEC_HARD_COAL, 92.8, # EFID is 110620
+    SIEC_BROWN_COAL, 113.1, # EFID is 123085
     SIEC_BROWN_COAL_BRIQUETTES, 99, # EFID is 123073
-    SIEC_PEAT,                  117.766, # EFID is 122005 (Peat)
-    SIEC_OIL_SHALE,             108, # Oil shale
-    SIEC_OIL_PRODUCTS,          20 * 44 / 12, # EFID is 110669 Other petroleum products
-    SIEC_FUEL_OIL,              77.7, # EFID is 121579
-    SIEC_HEATING_GASOIL,        20 * 44 / 12, # EFID is 17174 = 73.33
-    SIEC_MOTOR_GASOLINE_XBIO,   72.1, # EFID is 18667 (Motor gasoline)
-    SIEC_ROAD_DIESEL,           72.1, # EFID is 18919
-    SIEC_CRUDE_OIL,             73, # EFID is 110603
-    SIEC_NATURAL_GAS,           55.74, # Average of EFID123092-123095
-    SIEC_COKE_OVEN_GAS,         41.2, # EFID is 122159
-    SIEC_COKE_OVEN_COKE,        113, # EFID is 110624
-    SIEC_GASOIL_DIESEL,         72.1, # EFID is 18919
-    SIEC_KEROSENE_XBIO,         72.69, # Taken from EEA
-    SIEC_AVIATION_GASOLINE,     70.55, # Taken from EEA
+    SIEC_PEAT, 117.766, # EFID is 122005 (Peat)
+    SIEC_OIL_SHALE, 108, # Oil shale
+    SIEC_OIL_PRODUCTS, 20 * 44 / 12, # EFID is 110669 Other petroleum products
+    SIEC_FUEL_OIL, 77.7, # EFID is 121579
+    SIEC_HEATING_GASOIL, 20 * 44 / 12, # EFID is 17174 = 73.33
+    SIEC_MOTOR_GASOLINE_XBIO, 72.1, # EFID is 18667 (Motor gasoline)
+    SIEC_ROAD_DIESEL, 72.1, # EFID is 18919
+    SIEC_CRUDE_OIL, 73, # EFID is 110603
+    SIEC_NATURAL_GAS, 55.74, # Average of EFID123092-123095
+    SIEC_COKE_OVEN_GAS, 41.2, # EFID is 122159
+    SIEC_COKE_OVEN_COKE, 113, # EFID is 110624
+    SIEC_GASOIL_DIESEL, 72.1, # EFID is 18919
+    SIEC_KEROSENE_XBIO, 72.69, # Taken from EEA
+    SIEC_AVIATION_GASOLINE, 70.55, # Taken from EEA
   )
 }
 
@@ -76,7 +76,7 @@ add_emission_factor <- function(x) {
   x %>%
     left_join(
       emission_factors,
-      by = "siec_code",
+      by = "siec",
       relationship = "many-to-one"
     ) %>%
     {
