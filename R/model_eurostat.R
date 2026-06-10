@@ -53,17 +53,6 @@ get_eurostat_cons <- function(
       ungroup()
   }
 
-  # Collect siecs correpondence table
-  siecs <- bind_rows(
-    cons_raw_oil$yearly,
-    cons_raw_solid$yearly,
-    cons_raw_gas$yearly
-  ) %>%
-    ungroup() %>%
-    filter(!is.na(siec)) %>%
-    select(siec) %>%
-    distinct()
-
   # Process data
   cons_monthly <- log_timed_stage("process_eurostat_monthly", {
     list(
@@ -112,9 +101,9 @@ get_eurostat_cons <- function(
     log_timed_stage("diagnostic_eurostat_cons_yearly_monthly", {
       diagnostic_eurostat_cons_yearly_monthly(
         diagnostics_folder = diagnostics_folder,
-        cons_yearly = cons_yearly %>% left_join(siecs),
-        cons_monthly = cons_monthly %>% left_join(siecs),
-        cons_combined = cons_combined %>% left_join(siecs),
+        cons_yearly = cons_yearly,
+        cons_monthly = cons_monthly,
+        cons_combined = cons_combined,
         detailed_iso2s = c("BE", "NL", "PT", "SK", "EU", "IE", "DE")
       )
     })
@@ -125,8 +114,7 @@ get_eurostat_cons <- function(
     arrange(source) %>%
     slice(1) %>%
     ungroup() %>%
-    select(-c(source)) %>%
-    left_join(siecs)
+    select(-c(source))
 
   # Add infos
   cons <- cons %>%
@@ -208,16 +196,20 @@ apply_seasonal_adjustment <- function(cons_yearly, cons_monthly) {
     stop("Wrong monthly shares")
   }
 
-  # Apply monthly adjustment
+  share_keys <- month_shares %>%
+    select(iso2, sector, unit, siec, fuel) %>%
+    distinct()
+
+  # Apply monthly adjustment with explicit month expansion per yearly row.
   cons_yearly_monthly <- cons_yearly %>%
     mutate(year = lubridate::year(time)) %>%
-    inner_join(
-      month_shares,
-      relationship = "many-to-many"
-    ) %>%
+    dplyr::semi_join(share_keys, by = c("iso2", "sector", "unit", "siec", "fuel")) %>%
+    tidyr::crossing(month = 1:12) %>%
+    left_join(month_shares, by = c("iso2", "sector", "unit", "siec", "fuel", "month")) %>%
     arrange(sector, siec, unit, iso2, fuel, time) %>%
     mutate(
       time = as.Date(sprintf("%s-%0d-01", year, month)),
+      month_share = replace_na(month_share, 1 / 12),
       values = values * month_share
     ) %>%
     select(-c(year, month, month_share))

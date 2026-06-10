@@ -44,6 +44,7 @@ gas_data_access_get_agsi_storage <- function(
   date_from,
   date_to,
   iso2,
+  use_cache = TRUE,
   verbose = FALSE,
   data_masking = NULL
 ) {
@@ -51,6 +52,7 @@ gas_data_access_get_agsi_storage <- function(
     date_from = date_from,
     date_to = date_to,
     iso2 = iso2,
+    use_cache = use_cache,
     verbose = verbose
   ) %>%
     apply_source_data_mask(
@@ -66,8 +68,19 @@ gas_data_access_get_agsi_storage <- function(
 #'
 #' @return Tibble with Eurostat gas monthly data.
 #' @keywords internal
-gas_data_access_get_eurostat_monthly_for_correction <- function(data_masking = NULL) {
-  gas_consumption <- eurostat::get_eurostat("nrg_cb_gasm")
+gas_data_access_get_eurostat_monthly_for_correction <- function(
+  use_cache = TRUE,
+  data_masking = NULL
+) {
+  gas_consumption <- get_eurostat_from_code(
+    code = "nrg_cb_gasm",
+    use_cache = use_cache,
+    filters = list(
+      unit = "MIO_M3",
+      siec = "G3000",
+      nrg_bal = c("IC_OBS", "IPRD", "IMP", "EXP", "STK_CHG_MG")
+    )
+  )
 
   gas_consumption %>%
     filter(
@@ -87,7 +100,7 @@ gas_data_access_get_eurostat_monthly_for_correction <- function(data_masking = N
     ) %>%
     filter(!is.na(type)) %>%
     mutate(values = ifelse(type %in% c("minus_exports", "storage"), -values, values)) %>%
-    select(iso2 = geo, date = TIME_PERIOD, value_m3 = values, type) %>%
+    select(iso2 = geo, date = time, value_m3 = values, type) %>%
     mutate(
       value_m3 = value_m3 * 1e6,
       unit = "m3",

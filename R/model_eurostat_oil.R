@@ -4,9 +4,6 @@
 #' @return Raw oil consumption data from EUROSTAT
 #' @export
 collect_oil <- function(use_cache = FALSE) {
-  # Monthly data
-  cons_monthly_raw <- get_eurostat_from_code("nrg_cb_oilm", use_cache = use_cache)
-
   oil_siec_codes <- c(
     SIEC_OIL_PRODUCTS,
     SIEC_CRUDE_OIL,
@@ -21,34 +18,56 @@ collect_oil <- function(use_cache = FALSE) {
     SIEC_BIODIESEL
   )
 
+  # Monthly data
+  cons_monthly_raw <- log_timed_stage("collect_oil_fetch_monthly", {
+    get_eurostat_from_code(
+      code = "nrg_cb_oilm",
+      use_cache = use_cache,
+      filters = list(siec = oil_siec_codes)
+    ) %>%
+      filter(siec %in% oil_siec_codes)
+  })
+
   # Yearly data
-  cons_yearly_raw <- get_eurostat_from_code(
-    code = "nrg_cb_oil",
-    use_cache = use_cache,
-    filters = list(siec = oil_siec_codes)
-  ) %>%
-    filter(siec %in% oil_siec_codes)
+  cons_yearly_raw <- log_timed_stage("collect_oil_fetch_yearly", {
+    get_eurostat_from_code(
+      code = "nrg_cb_oil",
+      use_cache = use_cache,
+      filters = list(siec = oil_siec_codes)
+    ) %>%
+      filter(siec %in% oil_siec_codes)
+  })
 
   # Add missing GID_NE when it happens
-  cons_yearly <- fill_oil_non_energy_use_yearly(cons_yearly_raw)
+  cons_yearly <- log_timed_stage("collect_oil_fill_non_energy_yearly", {
+    fill_oil_non_energy_use_yearly(cons_yearly_raw)
+  })
 
   # Missing GID_OBS -> fill with GID_CAL
-  cons_yearly <- fill_gid_obs_with_gid_cal(cons_yearly)
+  cons_yearly <- log_timed_stage("collect_oil_fill_gid_obs_yearly", {
+    fill_gid_obs_with_gid_cal(cons_yearly)
+  })
 
   # And GID_NE
-  cons_monthly_filled <- fill_oil_non_energy_use_monthly(
-    yearly = cons_yearly,
-    monthly = cons_monthly_raw
-  )
+  cons_monthly_filled <- log_timed_stage("collect_oil_fill_non_energy_monthly", {
+    fill_oil_non_energy_use_monthly(
+      yearly = cons_yearly,
+      monthly = cons_monthly_raw
+    )
+  })
 
   # Add Oil transport
-  cons_monthly_filled <- add_oil_transport(
-    monthly = cons_monthly_filled,
-    yearly = cons_yearly
-  )
+  cons_monthly_filled <- log_timed_stage("collect_oil_add_transport", {
+    add_oil_transport(
+      monthly = cons_monthly_filled,
+      yearly = cons_yearly
+    )
+  })
 
   # Missing GID_OBS -> fill with GID_CAL
-  cons_monthly_filled <- fill_gid_obs_with_gid_cal(cons_monthly_filled)
+  cons_monthly_filled <- log_timed_stage("collect_oil_fill_gid_obs_monthly", {
+    fill_gid_obs_with_gid_cal(cons_monthly_filled)
+  })
 
   list(
     monthly = cons_monthly_filled %>% add_iso2() %>% filter(!is.na(iso2)),
@@ -387,10 +406,12 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
     summarise(share = FC_TRA_ROAD_E / (GID_OBS - GID_NE))
 
   # Visually validate assumption
-  ggplot(share_motor_gasoline_road %>% project_shares() %>% filter_plot()) +
-    geom_line(aes(time, share)) +
-    facet_wrap(~geo) +
-    rcrea::scale_y_zero()
+  if (plot_validation) {
+    ggplot(share_motor_gasoline_road %>% project_shares() %>% filter_plot()) +
+      geom_line(aes(time, share)) +
+      facet_wrap(~geo) +
+      rcrea::scale_y_zero()
+  }
 
   # Compute new data
   monthly_tra_road_e_gasoline <- share_motor_gasoline_road %>%
@@ -439,10 +460,12 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
     group_by(geo, time, siec) %>%
     summarise(share = FC_TRA_ROAD_E / (GID_OBS))
 
-  ggplot(share_road_diesel_road %>% filter_plot()) +
-    geom_line(aes(time, share)) +
-    facet_wrap(~geo) +
-    rcrea::scale_y_zero()
+  if (plot_validation) {
+    ggplot(share_road_diesel_road %>% filter_plot()) +
+      geom_line(aes(time, share)) +
+      facet_wrap(~geo) +
+      rcrea::scale_y_zero()
+  }
 
   # Compute new data
   monthly_tra_road_e_diesel <- share_road_diesel_road %>%
@@ -485,10 +508,12 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
     group_by(geo, time, siec) %>%
     summarise(share = FC_TRA_E / (GID_OBS))
 
-  ggplot(share_road_diesel_transport %>% filter_plot()) +
-    geom_line(aes(time, share)) +
-    facet_wrap(~geo) +
-    rcrea::scale_y_zero()
+  if (plot_validation) {
+    ggplot(share_road_diesel_transport %>% filter_plot()) +
+      geom_line(aes(time, share)) +
+      facet_wrap(~geo) +
+      rcrea::scale_y_zero()
+  }
 
   # Compute new data
   monthly_tra_e_diesel <- share_road_diesel_transport %>%
@@ -531,10 +556,12 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
     summarise(share = FC_TRA_E / (GID_OBS - GID_NE))
 
   # Visually validate assumption
-  ggplot(share_motor_gasoline_tra %>% filter_plot()) +
-    geom_line(aes(time, share)) +
-    facet_wrap(~geo) +
-    rcrea::scale_y_zero()
+  if (plot_validation) {
+    ggplot(share_motor_gasoline_tra %>% filter_plot()) +
+      geom_line(aes(time, share)) +
+      facet_wrap(~geo) +
+      rcrea::scale_y_zero()
+  }
 
   # Compute new data
   monthly_tra_e_gasoline <- share_motor_gasoline_tra %>%
@@ -589,10 +616,12 @@ add_oil_transport <- function(monthly, yearly, plot_validation = FALSE) {
     )
 
   # TODO INVESTIGATE AND FIX BULGARIA
-  ggplot(share_gasoline_diesel_road %>% filter_plot()) +
-    geom_line(aes(time, share_road)) +
-    facet_wrap(~geo) +
-    rcrea::scale_y_zero()
+  if (plot_validation) {
+    ggplot(share_gasoline_diesel_road %>% filter_plot()) +
+      geom_line(aes(time, share_road)) +
+      facet_wrap(~geo) +
+      rcrea::scale_y_zero()
+  }
 
 
   # This one doesn't need any computation

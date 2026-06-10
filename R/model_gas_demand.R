@@ -79,6 +79,7 @@ get_gas_demand <- function(
     date_from = min(as.Date(entsog_data$date)),
     date_to = max(as.Date(entsog_data$date)),
     iso2 = get_eu_iso2s(),
+    use_cache = use_cache,
     verbose = verbose,
     data_masking = data_masking
   )
@@ -109,6 +110,7 @@ get_gas_demand <- function(
     diagnostics_folder = diagnostics_folder,
     min_r2 = 0.95,
     max_rrse = 0.3,
+    use_cache = use_cache,
     data_masking = data_masking
   )
 
@@ -120,6 +122,7 @@ get_gas_demand <- function(
     log_info("Applying Eurostat correction to gas demand...")
     gas_demand <- .apply_eurostat_gas_correction(
       gas_demand = gas_demand,
+      use_cache = use_cache,
       data_masking = data_masking
     )
   }
@@ -368,8 +371,11 @@ get_gas_demand_apparent <- function(
 }
 
 
-get_eurostat_gas <- function(years = NULL, data_masking = NULL) {
-  gas_data_access_get_eurostat_monthly_for_correction(data_masking = data_masking)
+get_eurostat_gas <- function(years = NULL, use_cache = TRUE, data_masking = NULL) {
+  gas_data_access_get_eurostat_monthly_for_correction(
+    use_cache = use_cache,
+    data_masking = data_masking
+  )
 }
 
 
@@ -378,9 +384,13 @@ keep_best <- function(
   diagnostics_folder,
   min_comparison_points = 24,
   min_r2 = 0.95, max_rrse = 0.4,
+  use_cache = TRUE,
   data_masking = NULL
 ) {
-  eurostat <- get_eurostat_gas(data_masking = data_masking) %>% filter(type == "consumption")
+  eurostat <- get_eurostat_gas(
+    use_cache = use_cache,
+    data_masking = data_masking
+  ) %>% filter(type == "consumption")
   rsq <- function(x, y) {
     ok <- is.finite(x) & is.finite(y)
     x <- x[ok]
@@ -466,12 +476,13 @@ keep_best <- function(
 #' For months without Eurostat data, carries forward the last available ratio.
 #'
 #' @param gas_demand Daily gas demand data from keep_best
+#' @param use_cache Whether to use source-level cache for Eurostat reads
 #'
 #' @return Corrected gas demand data with same structure
 #' @keywords internal
-.apply_eurostat_gas_correction <- function(gas_demand, data_masking = NULL) {
+.apply_eurostat_gas_correction <- function(gas_demand, use_cache = TRUE, data_masking = NULL) {
   # Get Eurostat monthly consumption data
-  eurostat <- get_eurostat_gas(data_masking = data_masking) %>%
+  eurostat <- get_eurostat_gas(use_cache = use_cache, data_masking = data_masking) %>%
     filter(type == "consumption") %>%
     select(iso2, date, eurostat_m3 = value_m3)
 

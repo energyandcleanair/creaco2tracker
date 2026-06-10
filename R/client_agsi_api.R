@@ -1,13 +1,6 @@
-agsi.get_storage_change <- function(date_from, date_to, iso2, verbose = FALSE) {
+agsi.get_storage_change <- function(date_from, date_to, iso2, use_cache = TRUE, verbose = FALSE) {
   pbapply::pblapply(iso2, function(iso2) {
     log_info(glue::glue("Getting storage change data for {iso2} from {date_from} to {date_to}"))
-
-    # Add api key in header
-    api_key <- Sys.getenv("AGSI_API_KEY")
-    if (api_key == "") {
-      warning("AGSI_API_KEY not set. Returning NULL")
-      return(NULL)
-    }
 
     MAX_PAGE_SIZE <- 100000
 
@@ -19,8 +12,29 @@ agsi.get_storage_change <- function(date_from, date_to, iso2, verbose = FALSE) {
       "&size={MAX_PAGE_SIZE}"
     )
 
-    http_response <- httr::GET(url, httr::add_headers("x-key" = api_key), httr::accept_json())
-    data <- jsonlite::fromJSON(httr::content(http_response, "text", encoding = "UTF-8"))
+    # Naive URL-based cache for AGSI requests.
+    create_dir("cache")
+    cache_schema_version <- "v1_url"
+    cache_hash <- digest::digest(list(cache_schema_version, url))
+    cache_file <- file.path("cache", paste0("agsi_", cache_hash, ".json"))
+
+    response_text <- NULL
+    if (use_cache && file.exists(cache_file)) {
+      response_text <- readChar(cache_file, file.info(cache_file)$size)
+    } else {
+      # Add api key in header only for network calls.
+      api_key <- Sys.getenv("AGSI_API_KEY")
+      if (api_key == "") {
+        warning("AGSI_API_KEY not set. Returning NULL")
+        return(NULL)
+      }
+
+      http_response <- httr::GET(url, httr::add_headers("x-key" = api_key), httr::accept_json())
+      response_text <- httr::content(http_response, "text", encoding = "UTF-8")
+      writeChar(response_text, cache_file, eos = NULL)
+    }
+
+    data <- jsonlite::fromJSON(response_text)
     data <- data$data
 
     if (nrow(data) == 0 || !"netWithdrawal" %in% names(data)) {

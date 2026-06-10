@@ -88,11 +88,11 @@ project_until_now_lm <- function(
 
         data_training <- data_training %>%
           # Only columns with at least a non-na value
-          select_if(~ any(!is.na(.))) %>%
+          select(where(~ any(!is.na(.)))) %>%
           # Only rows with non nas
-          filter_all(all_vars(!is.na(.))) %>%
+          filter(if_all(everything(), ~ !is.na(.))) %>%
           # Only positive values
-          filter_all(all_vars(. >= 0))
+          filter(if_all(everything(), ~ . >= 0))
 
         # If all value_proxy_cols are NA, stop
         if (length(intersect(value_proxy_cols, colnames(data_training))) == 0) {
@@ -109,8 +109,8 @@ project_until_now_lm <- function(
 
         if (
           data_training %>%
-            select_at(formula_cols) %>%
-            filter_all(any_vars(!is.na(.))) %>%
+            select(any_of(formula_cols)) %>%
+            filter(if_any(everything(), ~ !is.na(.))) %>%
             nrow() > 0
         ) {
           lm(data = data_training, formula = formula)
