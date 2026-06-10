@@ -4,7 +4,7 @@ validate_co2 <- function(
   date_from = "1990-01-01"
 ) {
   if (is_null_or_empty(diagnostics_folder)) {
-    message("No diagnostics folder provided. Skipping validation.")
+    log_info("No diagnostics folder provided. Skipping validation.")
     return()
   }
 
@@ -466,7 +466,7 @@ validate_co2_historical <- function(
       }
     },
     error = function(e) {
-      print("Failed to generate interpolated plot. Maybe because estimated values are too low.")
+      log_warn("Failed to generate interpolated plot. Maybe because estimated values are too low.")
     }
   )
 }

@@ -68,7 +68,7 @@ validate_get_co2_walk_forward_2025 <- function(
     )
   )
 
-  message(glue("Running final get_co2 comparison as of {final_as_of}..."))
+  log_info(glue::glue("Running final get_co2 comparison as of {final_as_of}..."))
   final_masking <- data_masking_as_of(final_as_of, lags = data_masking_lags)
   final_co2 <- .run_get_co2_walk_forward_as_of(
     as_of_date = final_as_of,
@@ -90,7 +90,7 @@ validate_get_co2_walk_forward_2025 <- function(
     as_of_date <- as_of_dates[[i]]
     target_month <- target_months[[i]]
 
-    message(glue("Running get_co2 walk-forward as of {as_of_date}..."))
+    log_info(glue::glue("Running get_co2 walk-forward as of {as_of_date}..."))
     masking <- data_masking_as_of(as_of_date, lags = data_masking_lags)
     co2 <- .run_get_co2_walk_forward_as_of(
       as_of_date = as_of_date,

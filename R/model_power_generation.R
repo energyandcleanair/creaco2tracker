@@ -488,11 +488,11 @@ get_power_generation <- function(
     )
 
   if (nrow(gaps) == 0) {
-    message("No gaps in EMBER monthly data to fill from yearly")
+    log_debug("No gaps in EMBER monthly data to fill from yearly")
     return(ember_monthly)
   }
 
-  message(
+  log_info(
     sprintf(
       "Filling %d year/country/source gaps in EMBER monthly from yearly data",
       nrow(gaps)
@@ -555,7 +555,7 @@ get_power_generation <- function(
     arrange(iso2, source, date)
 
   n_filled <- sum(result$filled_from_yearly, na.rm = TRUE)
-  message(sprintf("Filled %d monthly observations from yearly data", n_filled))
+  log_info(sprintf("Filled %d monthly observations from yearly data", n_filled))
 
   return(result)
 }
@@ -589,7 +589,7 @@ get_power_generation <- function(
     filter(source %in% ember_only_sources, iso2 %in% iso2s)
 
   if (nrow(ember_subset) == 0) {
-    message("No EMBER-only sources found for the requested countries")
+    log_debug("No EMBER-only sources found for the requested countries")
     return(NULL)
   }
 
@@ -679,7 +679,7 @@ get_power_generation <- function(
       value_mw_raw, value_mwh_raw, correction_tier, correction_ratio
     )
 
-  message(
+  log_info(
     sprintf(
       "Added %d daily observations from EMBER-only sources (%s)",
       nrow(daily_data),
@@ -766,7 +766,7 @@ get_power_generation_tiers <- function(
   result,
   diagnostics_folder
 ) {
-  message("Generating power generation diagnostics...")
+  log_info("Generating power generation diagnostics...")
   create_dir(diagnostics_folder)
 
   # Prepare data for plots
@@ -1096,5 +1096,5 @@ get_power_generation_tiers <- function(
     )
   }
 
-  message("Diagnostics saved to: ", diagnostics_folder)
+  log_info(glue::glue("Diagnostics saved to: {diagnostics_folder}"))
 }

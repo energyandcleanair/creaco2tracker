@@ -11,7 +11,7 @@ upload_co2_daily <- function(co2_daily, production = TRUE, clear_all_first = FAL
   # Formatting / cleaning for db
   co2_daily_formatted <- format_co2_for_db(co2_daily)
 
-  print(
+  log_info(
     sprintf("=== Uploading co2_daily (%s) ===", ifelse(production, "production", "development"))
   )
 
@@ -38,7 +38,7 @@ upload_co2_daily <- function(co2_daily, production = TRUE, clear_all_first = FAL
 
 
 upload_corrected_demand <- function(corrected_demand, production = TRUE, clear_all_first = FALSE) {
-  print(
+  log_info(
     sprintf(
       "=== Uploading corrected_demand (%s) ===",
       ifelse(production, "production", "development")
@@ -70,7 +70,7 @@ upload_corrected_demand <- function(corrected_demand, production = TRUE, clear_a
 
 
 upload_gas_demand <- function(gas_demand, production = TRUE, clear_all_first = FALSE) {
-  print(
+  log_info(
     sprintf("=== Uploading gas demand (%s) ===", ifelse(production, "production", "development"))
   )
 

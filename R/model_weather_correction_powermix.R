@@ -50,10 +50,10 @@ get_weather_correction_powermix <- function(
   use_cache = TRUE,
   diagnostics_folder = "diagnostics/weather_correction"
 ) {
-  message(sprintf("Calculating weather correction factors: %s", paste(iso2s, collapse = ", ")))
+  log_info(sprintf("Calculating weather correction factors: %s", paste(iso2s, collapse = ", ")))
 
   # Get power generation once
-  message("Getting power generation data...")
+  log_info("Getting power generation data...")
   pwr_generation <- get_power_generation(
     iso2s = iso2s,
     date_from = date_from,
@@ -61,7 +61,7 @@ get_weather_correction_powermix <- function(
   )
 
   # Step 1: Get weather-corrected renewable generation
-  message("Step 1/2: Getting weather-corrected renewable generation...")
+  log_info("Step 1/2: Getting weather-corrected renewable generation...")
   weather_corrected_renewables <- get_weather_corrected_renewables(
     iso2s = iso2s,
     date_from = date_from,
@@ -85,14 +85,14 @@ get_weather_correction_powermix <- function(
   }
 
   # Step 2: Calculate generation shares and correction factors
-  message("Step 2/2: Calculating weather correction factors...")
+  log_info("Step 2/2: Calculating weather correction factors...")
   correction_factors <- calculate_powermix_correction_factors(
     weather_corrected_renewables = weather_corrected_renewables,
     pwr_generation = pwr_generation,
     diagnostics_folder = diagnostics_folder
   )
 
-  message(
+  log_info(
     sprintf(
       "Weather correction complete. Generated %d correction factors.",
       nrow(correction_factors)

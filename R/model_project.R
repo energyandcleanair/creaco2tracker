@@ -26,22 +26,6 @@ project_until_now_lm <- function(
 ) {
   fill_mode <- match.arg(fill_mode)
 
-  log_warn_safe <- function(msg) {
-    if (exists("log_warn", mode = "function")) {
-      log_warn(msg)
-    } else {
-      warning(msg)
-    }
-  }
-
-  log_success_safe <- function(msg) {
-    if (exists("log_success", mode = "function")) {
-      log_success(msg)
-    } else {
-      message(msg)
-    }
-  }
-
   co2_untouched <- x %>% anti_join(proxy %>% distinct(iso2, fuel, sector),
     by = c("iso2", "fuel", "sector")
   )
@@ -62,7 +46,7 @@ project_until_now_lm <- function(
       sector <- unique(keys$sector)
 
       if (verbose) {
-        print(keys)
+        log_debug(glue::glue("project_until_now_lm: iso2={iso2}, fuel={fuel}, sector={sector}"))
       }
 
       value_proxy_cols <- grep("value_proxy", colnames(proxy), value = TRUE)
@@ -147,7 +131,7 @@ project_until_now_lm <- function(
 
       # Best R2
       if (all(r2s == 0)) {
-        log_warn_safe(glue::glue("{iso2} - {fuel} {sector}: No proxy data. Leaving as such."))
+        log_warn(glue::glue("{iso2} - {fuel} {sector}: No proxy data. Leaving as such."))
         return(df)
       }
 
@@ -156,7 +140,7 @@ project_until_now_lm <- function(
 
       r2 <- model_adj_r2(model)
       if (r2 < min_r2) {
-        log_warn_safe(
+        log_warn(
           glue::glue(
             "{iso2} - {fuel} {sector}: Model CO2 ~ ",
             "proxy not good enough (R2={round(r2,2)}). Leaving as NA."
@@ -164,7 +148,7 @@ project_until_now_lm <- function(
         )
         return(df)
       }
-      log_success_safe(
+      log_success(
         glue::glue(
           "{iso2} - {fuel} {sector}: Model CO2 ~ ",
           "proxy OK (R2={round(r2,2)}). Using {n_year} years for training."
@@ -248,7 +232,7 @@ project_until_now_zeros <- function(x, proxy, dts_month, verbose = FALSE) {
       sector <- unique(keys$sector)
 
       if (verbose) {
-        print(keys)
+        log_debug(glue::glue("project_until_now_zeros: iso2={iso2}, fuel={fuel}, sector={sector}"))
       }
 
       value_proxy_cols <- grep("value_proxy", colnames(proxy), value = TRUE)

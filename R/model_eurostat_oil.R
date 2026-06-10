@@ -954,10 +954,9 @@ fix_eu_when_important_countries_missing <- function(
 
   # Print information if rows were removed
   if (nrow(to_remove) > 0) {
-    cat(
-      "Rows removed for EU where not all important countries are present: ", nrow(to_remove),
-      "\n"
-    )
+    log_warn(glue::glue(
+      "Rows removed for EU where not all important countries are present: {nrow(to_remove)}"
+    ))
   }
 
   return(data)

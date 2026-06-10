@@ -53,7 +53,7 @@ get_weather_corrected_co2 <- function(
 
   # Apply power mix correction
   if (apply_powermix_correction) {
-    message("Getting power generation mix correction...")
+    log_info("Getting power generation mix correction...")
     wc_powermix <- get_weather_correction_powermix(
       iso2s = iso2s,
       date_from = date_from,
@@ -89,7 +89,7 @@ get_weather_corrected_co2 <- function(
 
   # Apply demand correction
   if (apply_demand_correction) {
-    message("Getting demand correction...")
+    log_info("Getting demand correction...")
     wc_demand <- get_weather_correction_demand(
       iso2s = iso2s,
       date_from = date_from,
@@ -130,7 +130,7 @@ get_weather_corrected_co2 <- function(
   }
 
   # Combine corrections
-  message("Applying corrections")
+  log_info("Applying corrections")
   result_co2 <- result_co2 %>%
     mutate(
       correction_factor_total = correction_factor_powermix * correction_factor_demand,

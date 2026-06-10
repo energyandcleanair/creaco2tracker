@@ -24,7 +24,7 @@ get_validation_data <- function(region = "EU", source_name = NULL, ...) {
   # Load and combine all requested sources
 
   lapply(sources_to_load, function(src) {
-    message(sprintf("Loading %s data for %s", src, paste(region, collapse = ",")))
+    log_info(sprintf("Loading %s data for %s", src, paste(region, collapse = ",")))
     source_loaders[[src]](src, region) %>%
       mutate(source = src)
   }) %>%

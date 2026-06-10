@@ -101,7 +101,7 @@ get_weather_corrected_wind <- function(
       filter(date <= as.Date(date_to))
   }
 
-  message("Getting wind speed and temperature data from CREA DB")
+  log_info("Getting wind speed and temperature data from CREA DB")
   # If EU, we'll use weather in all countries as predictors
   weather_iso2s <- if ("EU" %in% iso2s) {
     get_eu_iso2s(include_eu = FALSE)
@@ -139,7 +139,7 @@ get_weather_corrected_wind <- function(
   stopifnot(all(lubridate::date(weather$date) == weather$date))
 
 
-  message("Fitting weather correction models...")
+  log_info("Fitting weather correction models...")
   # Fit model for each country
   corrected_data <- pblapply(iso2s, function(iso2) {
     keep_weather_iso2s <- if (iso2 == "EU") {
@@ -336,7 +336,7 @@ get_weather_corrected_solar <- function(
       filter(date <= as.Date(date_to))
   }
 
-  message("Getting solar radiation data from CREA DB")
+  log_info("Getting solar radiation data from CREA DB")
   # If EU, we'll use weather in all countries as predictors
   weather_iso2s <- if ("EU" %in% iso2s) {
     get_eu_iso2s(include_eu = FALSE)
@@ -370,7 +370,7 @@ get_weather_corrected_solar <- function(
   # Ensure daily data
   stopifnot(all(lubridate::date(weather$date) == weather$date))
 
-  message("Fitting weather correction models...")
+  log_info("Fitting weather correction models...")
   # Fit model for each country
   corrected_data <- pblapply(iso2s, function(iso2) {
     keep_weather_iso2s <- if (iso2 == "EU") {
@@ -545,7 +545,7 @@ get_weather_corrected_hydro <- function(
       filter(date <= as.Date(date_to))
   }
 
-  message("Getting ENTSOE capacity data")
+  log_info("Getting ENTSOE capacity data")
   # Get ENTSOE installed capacity data for hydro
   capacity_raw <- tryCatch(
     {
@@ -589,7 +589,7 @@ get_weather_corrected_hydro <- function(
     ungroup()
 
   # We don't have much more than 10 years of data, so we use a simple average
-  message("Calculating average capacity factors")
+  log_info("Calculating average capacity factors")
 
   # Merge generation with capacity
   cf <- hydro_generation %>%

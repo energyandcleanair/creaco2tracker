@@ -25,7 +25,7 @@ power_data_access_get_sources <- function(
   tier_calc_start <- as.Date("2020-01-01")
   fetch_from <- min(date_from, tier_calc_start)
 
-  message("Fetching ENTSOE daily data...")
+  log_info("Fetching ENTSOE daily data...")
   entsoe_daily <- entsoe.get_power_generation(
     date_from = fetch_from,
     date_to = date_to,
@@ -38,7 +38,7 @@ power_data_access_get_sources <- function(
       data_masking = data_masking
     )
 
-  message("Fetching EMBER monthly data...")
+  log_info("Fetching EMBER monthly data...")
   ember_monthly <- ember.get_power_generation(
     frequency = "monthly",
     iso2s = iso2s,
@@ -49,7 +49,7 @@ power_data_access_get_sources <- function(
       data_masking = data_masking
     )
 
-  message("Fetching EMBER yearly data...")
+  log_info("Fetching EMBER yearly data...")
   ember_yearly <- ember.get_power_generation(
     frequency = "yearly",
     iso2s = iso2s,

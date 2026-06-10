@@ -50,7 +50,7 @@ ember.get_power_generation <- function(frequency = "yearly", iso2s = "EU", use_c
           mutate(date = as.Date(date))
       },
       error = function(e) {
-        message("Error for ", iso2, ": ", e$message)
+        log_warn(glue::glue("Error for {iso2}: {e$message}"))
         return(NULL)
       }
     )

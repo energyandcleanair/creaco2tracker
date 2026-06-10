@@ -160,8 +160,8 @@ validate_ncv_completeness <- function(x_with_ncv) {
       arrange(desc(n_missing))
 
     # Print diagnostic information
-    cat("Missing NCV values found:\n")
-    print(diagnostic_info)
+    log_warn("Missing NCV values found:")
+    log_object(diagnostic_info, level = "warn")
 
     # Check if there are any SIEC codes that don't have mappings
     unmapped_siec <- missing_ncv %>%
@@ -169,8 +169,8 @@ validate_ncv_completeness <- function(x_with_ncv) {
       anti_join(create_siec_fuel_mapping(), by = "siec_code")
 
     if (nrow(unmapped_siec) > 0) {
-      cat("\nUnmapped SIEC codes:\n")
-      print(unmapped_siec)
+      log_warn("Unmapped SIEC codes:")
+      log_object(unmapped_siec, level = "warn")
     }
 
     # Check if there are any countries without conversion factors
@@ -179,8 +179,8 @@ validate_ncv_completeness <- function(x_with_ncv) {
       filter(!iso2 %in% get_eu_iso2s())
 
     if (nrow(countries_without_ncv) > 0) {
-      cat("\nCountries without NCV data:\n")
-      print(countries_without_ncv)
+      log_warn("Countries without NCV data:")
+      log_object(countries_without_ncv, level = "warn")
     }
 
     stop("NCV validation failed: ", nrow(missing_ncv), " records are missing NCV values")
@@ -378,10 +378,10 @@ diagnose_ncv_data <- function(conversion_filled, x = NULL, diagnostics_folder = 
   library(lubridate)
   library(ggrepel)
 
-  cat("=== NCV DATA DIAGNOSTIC ===\n")
+  log_info("=== NCV DATA DIAGNOSTIC ===")
 
   # 1. Summary statistics
-  cat("1. SUMMARY STATISTICS:\n")
+  log_info("1. SUMMARY STATISTICS:")
   summary_stats <- conversion_filled %>%
     group_by(siec_code) %>%
     summarise(
@@ -395,8 +395,7 @@ diagnose_ncv_data <- function(conversion_filled, x = NULL, diagnostics_folder = 
       .groups = "drop"
     )
 
-  print(summary_stats)
-  cat("\n")
+  log_object(summary_stats)
 
   # 2. Create time series plot with country labels at the end
   # Get the latest year for each country/SIEC combination for labeling
@@ -441,7 +440,7 @@ diagnose_ncv_data <- function(conversion_filled, x = NULL, diagnostics_folder = 
     # Save summary statistics
     write_csv(summary_stats, file.path(diagnostics_folder, "ncv_summary_stats.csv"))
 
-    cat("2. PLOT AND SUMMARY STATS SAVED TO:", diagnostics_folder, "\n")
+    log_info(glue::glue("2. PLOT AND SUMMARY STATS SAVED TO: {diagnostics_folder}"))
   }
 
   return(p1)

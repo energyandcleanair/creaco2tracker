@@ -213,7 +213,9 @@ test_that(
 
     unmapped_siec <- setdiff(test_siec_codes, mapping$siec_code)
     if (length(unmapped_siec) > 0) {
-      cat("Unmapped SIEC codes in test data:", paste(unmapped_siec, collapse = ", "), "\n")
+      logger::log_info(
+        paste("Unmapped SIEC codes in test data:", paste(unmapped_siec, collapse = ", "))
+      )
     }
 
     # Test 2: Check if all required columns exist in test data

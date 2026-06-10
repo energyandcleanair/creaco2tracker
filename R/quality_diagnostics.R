@@ -492,7 +492,7 @@ diagnose_eu_vs_countries <- function(
       filter(iso2 %in% get_eu_iso2s(include_eu = TRUE)) %>%
       {
         n_countries <- n_distinct(.$iso2)
-        print(n_countries)
+        log_debug(sprintf("Number of EU entries before check: %s", n_countries))
         stopifnot("Expected 27 EU countries + EU" = n_countries == 28)
         .
       } %>%

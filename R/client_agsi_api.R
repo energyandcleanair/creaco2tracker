@@ -1,6 +1,6 @@
 agsi.get_storage_change <- function(date_from, date_to, iso2, verbose = FALSE) {
   pbapply::pblapply(iso2, function(iso2) {
-    message(glue("Getting storage change data for {iso2} from {date_from} to {date_to}"))
+    log_info(glue::glue("Getting storage change data for {iso2} from {date_from} to {date_to}"))
 
     # Add api key in header
     api_key <- Sys.getenv("AGSI_API_KEY")
@@ -24,7 +24,7 @@ agsi.get_storage_change <- function(date_from, date_to, iso2, verbose = FALSE) {
     data <- data$data
 
     if (nrow(data) == 0 || !"netWithdrawal" %in% names(data)) {
-      message(glue("No data for {iso2} from {date_from} to {date_to}"))
+      log_info(glue::glue("No data for {iso2} from {date_from} to {date_to}"))
       return(NULL)
     }
     # Add a check for the size is near the limit of 100,000 records (let's do one extra)

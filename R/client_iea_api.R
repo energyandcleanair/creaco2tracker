@@ -44,8 +44,8 @@ iea.get_conversion_factors <- function(year_from = 2000, year_to = 2022, iso2, u
     return(readRDS(filepath))
   } else {
     # Fetch the data
-    print(
-      glue(
+    log_info(
+      glue::glue(
         "Getting conversion factors from IEA for ",
         "{paste(iso2, sep=',')} from {year_from} to {year_to}"
       )
@@ -58,7 +58,7 @@ iea.get_conversion_factors <- function(year_from = 2000, year_to = 2022, iso2, u
       api_key = Sys.getenv("API_KEY")
     )
 
-    print(glue("Got {nrow(result)} records"))
+    log_info(glue::glue("Got {nrow(result)} records"))
     # Save the fetched data to cache
     if (!dir.exists(cache_dir)) {
       dir.create(cache_dir)

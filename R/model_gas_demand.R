@@ -84,11 +84,11 @@ get_gas_demand <- function(
   )
 
   # Estimate with two different methods
-  message("Getting gas demand from Consumption + Distribution ENTSOG points")
+  log_info("Getting gas demand from Consumption + Distribution ENTSOG points")
   consdist <- get_gas_demand_consdist(entsog_data = entsog_data, years = years, verbose = verbose)
-  message("Getting gas demand from storage,crossborder,production")
+  log_info("Getting gas demand from storage,crossborder,production")
   apparent <- get_gas_demand_apparent(entsog_data = entsog_data, years = years, verbose = verbose)
-  message("Getting gas demand from storage,crossborder,production using AGSI for storage")
+  log_info("Getting gas demand from storage,crossborder,production using AGSI for storage")
   apparent_w_agsi <- get_gas_demand_apparent(
     entsog_data = entsog_data,
     years = years,
@@ -117,7 +117,7 @@ get_gas_demand <- function(
 
   # Apply Eurostat correction if requested
   if (correct_to_eurostat) {
-    message("Applying Eurostat correction to gas demand...")
+    log_info("Applying Eurostat correction to gas demand...")
     gas_demand <- .apply_eurostat_gas_correction(
       gas_demand = gas_demand,
       data_masking = data_masking
@@ -572,7 +572,7 @@ keep_best <- function(
   gas_demand_corrected,
   diagnostics_folder
 ) {
-  message("Generating gas demand diagnostics...")
+  log_info("Generating gas demand diagnostics...")
   create_dir(diagnostics_folder)
 
   # Get Eurostat data
@@ -659,5 +659,5 @@ keep_best <- function(
     width = 10, height = 10, bg = "white"
   )
 
-  message("Gas demand diagnostics saved to: ", diagnostics_folder)
+  log_info(glue::glue("Gas demand diagnostics saved to: {diagnostics_folder}"))
 }
