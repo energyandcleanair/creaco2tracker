@@ -1,6 +1,6 @@
 ---
 name: run-r-code
-description: 'Run R code in this repository. Use when you need to execute non-interactive R checks, inspect data, run one-off scripts, or validate package behavior from the command line. Prefer Rscript from the repository root.'
+description: 'Run R code in this repository. Use when you need to execute non-interactive R checks, inspect data, run one-off scripts, or validate package behavior from the command line.'
 argument-hint: 'Rscript expression or workflow'
 user-invocable: true
 ---

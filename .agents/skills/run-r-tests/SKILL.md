@@ -1,6 +1,6 @@
 ---
 name: run-r-tests
-description: 'Run R package tests in this repository. Use when you need to execute the full testthat suite, rerun a specific test file, validate after code changes, or troubleshoot test failures in creaco2tracker. Prefer devtools::test() for authoritative package-level runs; use TEST_LOCAL_API=TRUE only for the weather local API test.'
+description: 'Run R package tests in this repository. Use when you need to execute the full testthat suite, rerun a specific test file, validate after code changes, or troubleshoot test failures in creaco2tracker.'
 argument-hint: 'full suite | single test file | local API test'
 user-invocable: true
 ---

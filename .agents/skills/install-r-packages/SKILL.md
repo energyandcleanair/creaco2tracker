@@ -1,6 +1,6 @@
 ---
 name: install-r-packages
-description: 'Install R packages for this repository. Use when adding or refreshing package dependencies, installing one-off R packages into the project library, or reconciling package requirements after a container rebuild. Prefer pak::pkg_install() and never install packages globally.'
+description: 'Install R packages for this repository. Use when adding or refreshing package dependencies, installing one-off R packages into the project library, or reconciling package requirements after a container rebuild.'
 argument-hint: 'package names or dependency workflow'
 user-invocable: true
 ---
