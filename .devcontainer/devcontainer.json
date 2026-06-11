@@ -20,7 +20,8 @@
     "vscode": {
       "extensions": [
         "REditorSupport.r",
-        "RDebugger.r-debugger"
+        "RDebugger.r-debugger",
+        "openai.chatgpt"
       ],
       "settings": {
         "r.sessionWatcher": true,
