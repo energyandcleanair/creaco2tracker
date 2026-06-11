@@ -27,6 +27,9 @@ project_until_now_lm <- function(
   fill_mode <- match.arg(fill_mode)
 
   value_proxy_cols <- grep("value_proxy", colnames(proxy), value = TRUE)
+  proxy_keys <- c("iso2", "fuel", "sector", "date")
+  proxy_selected <- proxy %>%
+    select(all_of(proxy_keys), any_of(value_proxy_cols))
 
   co2_untouched <- x %>% anti_join(proxy %>% distinct(iso2, fuel, sector),
     by = c("iso2", "fuel", "sector")
@@ -39,6 +42,7 @@ project_until_now_lm <- function(
     expand_dates("date", dts_month) %>%
     arrange(desc(date)) %>%
     ungroup() %>%
+    left_join(proxy_selected, by = c("iso2", "fuel", "sector", "date")) %>%
     group_by(iso2, fuel, sector, unit) %>%
     group_modify(function(df, keys, ...) {
       iso2 <- keys %>%
@@ -51,16 +55,10 @@ project_until_now_lm <- function(
         log_debug(glue::glue("project_until_now_lm: iso2={iso2}, fuel={fuel}, sector={sector}"))
       }
 
-      data <- df %>%
-        left_join(
-          keys %>%
-            left_join(
-              proxy %>%
-                select_at(c("iso2", "date", value_proxy_cols, "fuel", "sector")),
-              by = c("iso2", "fuel", "sector")
-            ),
-          by = c("date")
-        )
+      data <- df
+      strip_proxy_cols <- function(y) {
+        y %>% select(-any_of(value_proxy_cols))
+      }
 
       model_adj_r2 <- function(model) {
         r2 <- suppressWarnings(summary(model)$adj.r.squared)
@@ -120,7 +118,8 @@ project_until_now_lm <- function(
       }
 
       # We automatically determine the number of years to consider based on adjusted R2
-      n_years <- seq(2, 10)
+      # Fibonacci-ish. This keeps processing time down while covering a broad range.
+      n_years <- c(2, 3, 5, 10)
       trained_models <- lapply(n_years, function(n_year) {
         get_trained_model(data, n_year)
       })
@@ -135,7 +134,7 @@ project_until_now_lm <- function(
       # Best R2
       if (all(r2s == 0)) {
         log_warn(glue::glue("{iso2} - {fuel} {sector}: No proxy data. Leaving as such."))
-        return(df)
+        return(strip_proxy_cols(df))
       }
 
       best_idx <- which.max(r2s)
@@ -150,7 +149,7 @@ project_until_now_lm <- function(
             "proxy not good enough (R2={round(r2,2)}). Leaving as NA."
           )
         )
-        return(df)
+        return(strip_proxy_cols(df))
       }
       log_success(
         glue::glue(
@@ -190,7 +189,7 @@ project_until_now_lm <- function(
           mutate(value = value_filled) %>%
           select(-value_filled)
       }
-      df
+      strip_proxy_cols(df)
     }) %>%
     ungroup()
 
@@ -544,18 +543,18 @@ project_until_now_forecast <- function(co2, dts_month, last_years = 10, conf_lev
         )
       )
 
+      future_dates <- dts_month[dts_month > latest_data]
+
       # Forecast using Holt-Winters method
       forecasted <- tryCatch(
         {
-          forecast::hw(ts_data, level = conf_level) %>%
-            as.data.frame() %>%
-            `names<-`(c("mean", "lower", "upper")) %>%
-            mutate(
-              date = strptime(paste("01", row.names(.)), format = "%d %b %Y") %>%
-                as.Date()
-            ) %>%
-            `rownames<-`(NULL) %>%
-            filter(date %in% dts_month)
+          fc <- forecast::hw(ts_data, h = length(future_dates), level = conf_level)
+          tibble(
+            date = future_dates,
+            mean = as.numeric(fc$mean),
+            lower = as.numeric(fc$lower[, 1]),
+            upper = as.numeric(fc$upper[, 1])
+          )
         },
         error = function(e) {
           log_warn(

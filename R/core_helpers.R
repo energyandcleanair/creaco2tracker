@@ -29,26 +29,36 @@ add_iso2 <- function(x, country_col = "geo") {
     x$iso2 <- NA
   }
 
-  x %>%
+  country_values <- x %>%
+    mutate(.country_value = .data[[country_col]]) %>%
+    select(.country_value) %>%
+    distinct()
+
+  country_lookup <- country_values %>%
     mutate(
-      iso2 = coalesce(
-        iso2,
-        countrycode::countrycode(!!sym(country_col), "eurostat", "iso2c",
-          custom_match = c(
-            "EU27_2020" = "EU",
-            "EU28" = "EU28",
-            "XK" = "XK"
-          )
-        ),
-        countrycode::countrycode(!!sym(country_col), "country.name", "iso2c",
-          custom_match = c(
-            "European Union - 27 countries (from 2020)" = "EU",
-            "EU27 & UK" = "EU28",
-            "Kosovo*" = "XK"
-          )
+      .iso2_eurostat = countrycode::countrycode(.country_value, "eurostat", "iso2c",
+        custom_match = c(
+          "EU27_2020" = "EU",
+          "EU28" = "EU28",
+          "XK" = "XK"
         )
-      )
-    )
+      ),
+      .iso2_country_name = countrycode::countrycode(.country_value, "country.name", "iso2c",
+        custom_match = c(
+          "European Union - 27 countries (from 2020)" = "EU",
+          "EU27 & UK" = "EU28",
+          "Kosovo*" = "XK"
+        )
+      ),
+      .iso2_lookup = coalesce(.iso2_eurostat, .iso2_country_name)
+    ) %>%
+    select(.country_value, .iso2_lookup)
+
+  x %>%
+    mutate(.country_value = .data[[country_col]]) %>%
+    left_join(country_lookup, by = ".country_value") %>%
+    mutate(iso2 = coalesce(iso2, .iso2_lookup)) %>%
+    select(-.country_value, -.iso2_lookup)
 }
 
 add_missing_cols <- function(df, cols) {

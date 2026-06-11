@@ -110,10 +110,6 @@ get_eurostat_cons <- function(
   }
 
   cons <- cons_combined %>%
-    group_by(iso2, sector, time, unit, siec, fuel) %>%
-    arrange(source) %>%
-    slice(1) %>%
-    ungroup() %>%
     select(-c(source))
 
   # Add infos
@@ -319,21 +315,24 @@ combine_monthly_yearly_with_cutoff <- function(cons_yearly_monthly, cons_monthly
       )
     )
 
-  # Combine monthly and yearly data with cutoff filtering
-  cons_combined <- bind_rows(
-    cons_yearly_monthly %>% mutate(source = "yearly"),
-    cons_monthly %>% mutate(source = "monthly") %>% filter(),
-  ) %>%
-    # Cut off monthly that didn't look good on charts
-    left_join(cutoff_monthly) %>%
-    filter(
-      is.na(cutoff_date) | time >= cutoff_date
+  # Filter monthly rows by per-fuel cutoff dates upfront, then fill remaining keys from yearly.
+  # This avoids a large combined bind followed by arrange+slice over every group.
+  cons_monthly_filtered <- cons_monthly %>%
+    left_join(
+      cutoff_monthly %>% select(iso2, siec, fuel, cutoff_date),
+      by = c("iso2", "siec", "fuel")
     ) %>%
-    select(-c(cutoff_date)) %>%
-    group_by(iso2, sector, time, unit, siec, fuel) %>%
-    arrange(source) %>% # "monthly" is sorted before "yearly"
-    slice(1) %>%
-    ungroup()
+    filter(is.na(cutoff_date) | time >= as.Date(cutoff_date)) %>%
+    select(-cutoff_date) %>%
+    mutate(source = "monthly")
+
+  cons_combined <- cons_yearly_monthly %>%
+    anti_join(
+      cons_monthly_filtered,
+      by = c("iso2", "sector", "time", "unit", "siec", "fuel")
+    ) %>%
+    mutate(source = "yearly") %>%
+    bind_rows(cons_monthly_filtered)
 
   return(cons_combined)
 }
