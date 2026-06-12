@@ -117,9 +117,7 @@ project_until_now_lm <- function(
         }
       }
 
-      # We automatically determine the number of years to consider based on adjusted R2
-      # Fibonacci-ish. This keeps processing time down while covering a broad range.
-      n_years <- c(2, 3, 5, 10)
+      n_years <- seq(2, 10)
       trained_models <- lapply(n_years, function(n_year) {
         get_trained_model(data, n_year)
       })
@@ -525,6 +523,12 @@ project_until_now_forecast <- function(co2, dts_month, last_years = 10, conf_lev
     expand_dates("date", dts_month) %>%
     arrange(date) %>%
     group_modify(function(df, group_keys) {
+      log_info(
+        glue::glue(
+          "project_until_now_forecast: iso2={group_keys$iso2}, fuel={group_keys$fuel}, ",
+          "sector={group_keys$sector}"
+        )
+      )
       # Get the latest date with actual data
       latest_data <- max(df$date[!is.na(df$value)])
 
@@ -549,18 +553,19 @@ project_until_now_forecast <- function(co2, dts_month, last_years = 10, conf_lev
         )
       )
 
-      future_dates <- dts_month[dts_month > latest_data]
-
       # Forecast using Holt-Winters method
       forecasted <- tryCatch(
         {
-          fc <- forecast::hw(ts_data, h = length(future_dates), level = conf_level)
-          tibble(
-            date = future_dates,
-            mean = as.numeric(fc$mean),
-            lower = as.numeric(fc$lower[, 1]),
-            upper = as.numeric(fc$upper[, 1])
-          )
+          forecast::hw(ts_data, level = conf_level) %>%
+            as.data.frame() %>%
+            stats::setNames(c("mean", "lower", "upper")) %>%
+            tibble::rownames_to_column("period") %>%
+            mutate(
+              date = strptime(paste("01", period), format = "%d %b %Y") %>%
+                as.Date()
+            ) %>%
+            select(-period) %>%
+            filter(date %in% dts_month)
         },
         error = function(e) {
           log_warn(
