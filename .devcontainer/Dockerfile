@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpng-dev \
     libtiff-dev \
     libjpeg-dev \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir /workspaces && \
@@ -42,6 +43,15 @@ USER rstudio
 
 COPY Rprofile.site /usr/local/lib/R/etc/Rprofile.site
 COPY Renviron.site /usr/local/lib/R/etc/Renviron.site
+
+RUN mkdir -p /home/rstudio/.local/share \
+    && python3 -m venv /home/rstudio/.local/share/datawrangler-venv \
+    && /home/rstudio/.local/share/datawrangler-venv/bin/python -m pip install --upgrade pip \
+    && /home/rstudio/.local/share/datawrangler-venv/bin/python -m pip install \
+        pandas \
+        ipykernel \
+        openpyxl \
+        pyarrow
 
 RUN mkdir -p /workspaces/.cache/pak/packages /workspaces/.cache/pak/metadata \
     && Rscript -e 'install.packages("pak")' \

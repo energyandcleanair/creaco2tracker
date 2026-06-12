@@ -28,6 +28,7 @@ The provides data to dashboard on a regular basis.
 - Keep changes consistent with the existing style.
 - The repo's lint rules prefer 100-character lines, snake_case or SNAKE_CASE object names, and `%>%` pipe consistency.
 - Avoid changing unrelated generated data or cache outputs when editing code.
+- Only change the README (unless otherwise requested) with critical information. Keep the rest of the documentation closer to the code.
 
 ## Validation
 

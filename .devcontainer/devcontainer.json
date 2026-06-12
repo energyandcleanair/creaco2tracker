@@ -21,9 +21,13 @@
       "extensions": [
         "REditorSupport.r",
         "RDebugger.r-debugger",
+        "ms-toolsai.datawrangler",
+        "ms-python.python",
+        "ms-toolsai.jupyter",
         "openai.chatgpt"
       ],
       "settings": {
+        "python.defaultInterpreterPath": "/home/rstudio/.local/share/datawrangler-venv/bin/python",
         "r.sessionWatcher": true,
         "r.plot.useHttpgd": true,
         "r.lsp.enabled": true
