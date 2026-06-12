@@ -68,20 +68,30 @@ get_gas_demand <- function(
     create_dir(diagnostics_folder)
   }
 
-  entsog_data <- gas_data_access_get_entsog_flow(
-    years = years,
-    use_cache = use_cache,
-    verbose = verbose,
-    data_masking = data_masking
+  entsog_data <- log_timed_stage(
+    "gas_data_access_get_entsog_flow: Fetching ENTSOG flow data for gas demand estimation...",
+    {
+      gas_data_access_get_entsog_flow(
+        years = years,
+        use_cache = use_cache,
+        verbose = verbose,
+        data_masking = data_masking
+      )
+    }
   )
 
-  agsi_storage_data <- gas_data_access_get_agsi_storage(
-    date_from = min(as.Date(entsog_data$date)),
-    date_to = max(as.Date(entsog_data$date)),
-    iso2 = get_eu_iso2s(),
-    use_cache = use_cache,
-    verbose = verbose,
-    data_masking = data_masking
+  agsi_storage_data <- log_timed_stage(
+    "gas_data_access_get_agsi_storage: Fetching AGSI storage data for gas demand estimation...",
+    {
+      gas_data_access_get_agsi_storage(
+        date_from = min(as.Date(entsog_data$date)),
+        date_to = max(as.Date(entsog_data$date)),
+        iso2 = get_eu_iso2s(),
+        use_cache = use_cache,
+        verbose = verbose,
+        data_masking = data_masking
+      )
+    }
   )
 
   # Estimate with two different methods

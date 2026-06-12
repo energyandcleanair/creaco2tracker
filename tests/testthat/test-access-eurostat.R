@@ -227,6 +227,104 @@ test_that("get_eurostat_from_code preserves *_code columns from raw dimensions",
   expect_length(list.files("cache", pattern = "^eurostat_nrg_cb_oilm_.*\\.parquet$"), 0)
 })
 
+test_that("get_eurostat_from_code retries transient EUROSTAT failures with exponential backoff", {
+  temp_cache <- tempfile("eurostat-client-test-")
+  dir.create(temp_cache, recursive = TRUE)
+  old_dir <- setwd(temp_cache)
+  on.exit(
+    {
+      setwd(old_dir)
+      unlink(temp_cache, recursive = TRUE)
+    },
+    add = TRUE
+  )
+
+  attempts <- 0
+  sleep_delays <- numeric()
+
+  withr::with_tempdir({
+    local_mocked_bindings(
+      get_eurostat = function(code, filters = NULL, keepFlags = FALSE, ...) {
+        attempts <<- attempts + 1
+
+        if (attempts < 3) {
+          stop(sprintf("transient failure %d", attempts))
+        }
+
+        tibble::tibble(
+          siec = "TOTAL",
+          TIME_PERIOD = as.Date("2024-01-01"),
+          values = 1
+        )
+      },
+      .package = "eurostat"
+    )
+
+    local_mocked_bindings(
+      Sys.sleep = function(time) {
+        sleep_delays <<- c(sleep_delays, time)
+        invisible(NULL)
+      },
+      .package = "base"
+    )
+
+    out <- get_eurostat_from_code(
+      code = "nrg_cb_oilm",
+      use_cache = FALSE
+    )
+
+    expect_equal(nrow(out), 1)
+  })
+
+  expect_equal(attempts, 3)
+  expect_equal(sleep_delays, c(1, 2))
+})
+
+test_that("get_eurostat_from_code rethrows after exhausting retries", {
+  temp_cache <- tempfile("eurostat-client-test-")
+  dir.create(temp_cache, recursive = TRUE)
+  old_dir <- setwd(temp_cache)
+  on.exit(
+    {
+      setwd(old_dir)
+      unlink(temp_cache, recursive = TRUE)
+    },
+    add = TRUE
+  )
+
+  attempts <- 0
+  sleep_delays <- numeric()
+
+  withr::with_tempdir({
+    local_mocked_bindings(
+      get_eurostat = function(code, filters = NULL, keepFlags = FALSE, ...) {
+        attempts <<- attempts + 1
+        stop("persistent failure")
+      },
+      .package = "eurostat"
+    )
+
+    local_mocked_bindings(
+      Sys.sleep = function(time) {
+        sleep_delays <<- c(sleep_delays, time)
+        invisible(NULL)
+      },
+      .package = "base"
+    )
+
+    expect_error(
+      get_eurostat_from_code(
+        code = "nrg_cb_oilm",
+        use_cache = FALSE
+      ),
+      "persistent failure"
+    )
+  })
+
+  expect_equal(attempts, 3)
+  expect_equal(sleep_delays, c(1, 2))
+})
+
 
 test_that("collect_oil applies source masking at fetch stage", {
   monthly_stub <- tibble::tibble(
