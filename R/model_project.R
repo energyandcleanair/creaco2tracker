@@ -511,6 +511,15 @@ project_until_now_coal_others <- function(
 
 
 project_until_now_forecast <- function(co2, dts_month, last_years = 10, conf_level = 0.90) {
+  fallback_forecast_values <- function(df) {
+    df %>%
+      rename(value_central = value) %>%
+      mutate(
+        value_lower = value_central,
+        value_upper = value_central
+      )
+  }
+
   res <- co2 %>%
     group_by(iso2, fuel, sector, unit) %>%
     expand_dates("date", dts_month) %>%
@@ -520,10 +529,7 @@ project_until_now_forecast <- function(co2, dts_month, last_years = 10, conf_lev
       latest_data <- max(df$date[!is.na(df$value)])
 
       if (max(dts_month) == latest_data | all(is.na(df$value))) {
-        return(
-          df %>%
-            rename(value_central = value)
-        )
+        return(fallback_forecast_values(df))
       }
 
       # Create time series object from historical data, limited to last_years
@@ -560,7 +566,7 @@ project_until_now_forecast <- function(co2, dts_month, last_years = 10, conf_lev
           log_warn(
             glue(
               "{group_keys$iso2} - ",
-              "{group_keys$fuel} {group_keys$sector}: Forecast model failed."
+              "{group_keys$fuel} {group_keys$sector}: Forecast model failed: {e$message}"
             )
           )
           return(NULL)
@@ -568,7 +574,7 @@ project_until_now_forecast <- function(co2, dts_month, last_years = 10, conf_lev
       )
 
       if (is.null(forecasted)) {
-        return(df)
+        return(fallback_forecast_values(df))
       }
 
       # Update values in the original dataframe
