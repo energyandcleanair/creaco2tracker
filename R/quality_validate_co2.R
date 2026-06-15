@@ -3,6 +3,8 @@ validate_co2 <- function(
   diagnostics_folder = "diagnostics",
   date_from = "1990-01-01"
 ) {
+  validate_co2_no_negative_components(co2)
+
   if (is_null_or_empty(diagnostics_folder)) {
     log_info("No diagnostics folder provided. Skipping validation.")
     return()
@@ -38,6 +40,43 @@ validate_co2 <- function(
     co2,
     folder = file.path(diagnostics_folder, "co2_transport"),
     year_to = latest_year
+  )
+}
+
+validate_co2_no_negative_components <- function(co2, tolerance = 1e-6) {
+  required_cols <- c("iso2", "date", "fuel", "sector", "estimate", "value")
+  if (!all(required_cols %in% names(co2))) {
+    return(invisible(TRUE))
+  }
+
+  negative_components <- co2 %>%
+    filter(
+      estimate == "central",
+      fuel != FUEL_TOTAL,
+      value < -tolerance
+    )
+
+  if (nrow(negative_components) == 0) {
+    return(invisible(TRUE))
+  }
+
+  examples <- negative_components %>%
+    arrange(value) %>%
+    head(5) %>%
+    mutate(
+      example = glue::glue(
+        "{iso2} {date} {fuel}/{sector}: {round(value, 3)}"
+      )
+    ) %>%
+    pull(example) %>%
+    paste(collapse = "; ")
+
+  stop(
+    glue::glue(
+      "Negative central CO2 component values found in {nrow(negative_components)} rows. ",
+      "Examples: {examples}"
+    ),
+    call. = FALSE
   )
 }
 

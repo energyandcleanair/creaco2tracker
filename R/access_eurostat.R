@@ -66,6 +66,10 @@ eurostat_data_access_get_indprod <- function(
 #' @return Raw oil consumption data from EUROSTAT
 #' @export
 collect_oil <- function(use_cache = FALSE, data_masking = NULL) {
+  drop_missing_values <- function(x) {
+    x %>% filter(!is.na(values))
+  }
+
   oil_siec_codes <- c(
     SIEC_OIL_PRODUCTS,
     SIEC_CRUDE_OIL,
@@ -91,7 +95,8 @@ collect_oil <- function(use_cache = FALSE, data_masking = NULL) {
       apply_source_data_mask(
         source_name = "eurostat_oil_monthly",
         data_masking = data_masking
-      )
+      ) %>%
+      drop_missing_values()
   })
 
   # Yearly data
@@ -105,7 +110,8 @@ collect_oil <- function(use_cache = FALSE, data_masking = NULL) {
       apply_source_data_mask(
         source_name = "eurostat_oil_yearly",
         data_masking = data_masking
-      )
+      ) %>%
+      drop_missing_values()
   })
 
   # Add missing GID_NE when it happens
@@ -254,5 +260,4 @@ collect_gas <- function(use_cache = FALSE, data_masking = NULL) {
     yearly = cons_yearly_raw %>% add_iso2() %>% filter(!is.na(iso2))
   )
 }
-
 

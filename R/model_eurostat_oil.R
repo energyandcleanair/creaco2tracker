@@ -94,6 +94,14 @@ process_oil <- function(x) {
     add_iso2() %>%
     select(siec, nrg_bal, iso2, time, values, unit)
 
+  complete_oil_all_keys <- x %>%
+    filter(
+      siec == SIEC_OIL_PRODUCTS,
+      nrg_bal == "GID_OBS",
+      !is.na(values)
+    ) %>%
+    distinct(iso2, time, unit)
+
   # Step 1: Filter the data based on the filter matrix
   x_filtered <- x %>%
     inner_join(filter_matrix %>% filter(keep), by = c("siec", "nrg_bal"))
@@ -125,7 +133,7 @@ process_oil <- function(x) {
           group_id %in% base_data$group_id
         ) %>%
         group_by(group_id) %>%
-        summarise(deduction = sum(values, na.rm = TRUE))
+        summarise(deduction = sum_or_na(values), .groups = "drop")
 
       # Join with base data
       base_data %>%
@@ -155,7 +163,14 @@ process_oil <- function(x) {
       values = values * factor
     ) %>%
     select(-factor) %>%
-    arrange(desc(time))
+    arrange(desc(time)) %>%
+    {
+      bind_rows(
+        filter(., sector != SECTOR_ALL),
+        filter(., sector == SECTOR_ALL) %>%
+          dplyr::semi_join(complete_oil_all_keys, by = c("iso2", "time", "unit"))
+      )
+    }
 
   # Apply gap filling
   x_processed <- fill_gaps_in_time_series(
@@ -202,7 +217,7 @@ process_oil <- function(x) {
   result <- x_processed %>%
     mutate(fuel = FUEL_OIL) %>%
     group_by(iso2, time, fuel, unit, siec, sector) %>%
-    summarise(values = sum(values, na.rm = TRUE)) %>%
+    summarise(values = sum_or_na(values), .groups = "drop") %>%
     ungroup()
 
   return(result)

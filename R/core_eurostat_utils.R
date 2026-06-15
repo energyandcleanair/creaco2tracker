@@ -82,6 +82,14 @@ fill_gaps_with_interp_when_suitable <- function(x, cv_threshold = 0.1, maxgap = 
   }
 }
 
+sum_or_na <- function(x) {
+  if (all(is.na(x))) {
+    return(NA_real_)
+  }
+
+  sum(x, na.rm = TRUE)
+}
+
 
 #' Fill missing EU values using the sum of EU member countries when the sum is historically close
 #' enough
