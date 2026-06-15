@@ -13,6 +13,8 @@
 #'   aggregating to months for comparison.
 #' @param data_masking_lags Named publication lags passed to
 #'   [`data_masking_as_of()`].
+#' @param data_masking_publication_months Named annual publication months passed
+#'   to [`data_masking_as_of()`].
 #' @param ncv_source NCV source passed to `get_co2()`.
 #' @param fill_mode Projection fill mode passed to `get_co2()`.
 #' @param co2_diagnostics Whether to keep per-run `get_co2()` diagnostics.
@@ -32,6 +34,7 @@ validate_get_co2_walk_forward_2025 <- function(
   use_cache = TRUE,
   downscale_daily = FALSE,
   data_masking_lags = default_source_lags(),
+  data_masking_publication_months = default_source_publication_months(),
   ncv_source = "iea",
   fill_mode = c("missing", "overwrite", "ratio"),
   co2_diagnostics = FALSE,
@@ -69,7 +72,11 @@ validate_get_co2_walk_forward_2025 <- function(
   )
 
   log_info(glue::glue("Running final get_co2 comparison as of {final_as_of}..."))
-  final_masking <- data_masking_as_of(final_as_of, lags = data_masking_lags)
+  final_masking <- data_masking_as_of(
+    final_as_of,
+    lags = data_masking_lags,
+    publication_months = data_masking_publication_months
+  )
   final_co2 <- .run_get_co2_walk_forward_as_of(
     as_of_date = final_as_of,
     date_to = final_as_of,
@@ -91,7 +98,11 @@ validate_get_co2_walk_forward_2025 <- function(
     target_month <- target_months[[i]]
 
     log_info(glue::glue("Running get_co2 walk-forward as of {as_of_date}..."))
-    masking <- data_masking_as_of(as_of_date, lags = data_masking_lags)
+    masking <- data_masking_as_of(
+      as_of_date,
+      lags = data_masking_lags,
+      publication_months = data_masking_publication_months
+    )
     co2 <- .run_get_co2_walk_forward_as_of(
       as_of_date = as_of_date,
       date_to = as_of_date,
@@ -128,7 +139,8 @@ validate_get_co2_walk_forward_2025 <- function(
   masking_cutoffs <- .summarise_get_co2_walk_forward_masking(
     as_of_dates = c(as_of_dates, final_as_of),
     run_type = c(rep("walk_forward", length(as_of_dates)), "final"),
-    lags = data_masking_lags
+    lags = data_masking_lags,
+    publication_months = data_masking_publication_months
   )
 
   readr::write_csv(run_info, file.path(output_folder, "run_info.csv"))
@@ -258,9 +270,18 @@ validate_get_co2_walk_forward_2025 <- function(
 }
 
 
-.summarise_get_co2_walk_forward_masking <- function(as_of_dates, run_type, lags) {
+.summarise_get_co2_walk_forward_masking <- function(
+  as_of_dates,
+  run_type,
+  lags,
+  publication_months
+) {
   bind_rows(lapply(seq_along(as_of_dates), function(i) {
-    cfg <- data_masking_as_of(as_of_dates[[i]], lags = lags)
+    cfg <- data_masking_as_of(
+      as_of_dates[[i]],
+      lags = lags,
+      publication_months = publication_months
+    )
     bind_rows(lapply(names(cfg), function(source_name) {
       rules <- .rule_list_from_config(cfg[[source_name]])
       if (length(rules) == 0) {
@@ -272,23 +293,12 @@ validate_get_co2_walk_forward_2025 <- function(
           run_type = run_type[[i]],
           as_of_date = as.Date(as_of_dates[[i]]),
           source_name = source_name,
-          mask_date_from = .coalesce_mask_field(rule$date_from, rule$available_from),
-          mask_date_to = .coalesce_mask_field(rule$date_to, rule$available_to)
+          mask_date_from = if (!is.null(rule$date_from)) as.character(rule$date_from) else NA_character_,
+          mask_date_to = if (!is.null(rule$date_to)) as.character(rule$date_to) else NA_character_
         )
       }))
     }))
   }))
-}
-
-
-.coalesce_mask_field <- function(...) {
-  values <- list(...)
-  for (value in values) {
-    if (!is.null(value)) {
-      return(as.character(value))
-    }
-  }
-  NA_character_
 }
 
 

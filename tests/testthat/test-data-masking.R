@@ -5,23 +5,24 @@ library(dplyr)
 test_that(
   "apply_source_data_mask applies source-specific and global rules",
   {
-    gas <- tibble(
-      iso2 = c("EU", "EU", "DE"),
+    weather <- tibble(
+      region_iso2 = c("EU", "EU", "DE"),
       date = as.Date(c("2024-01-01", "2024-02-01", "2024-02-01")),
+      variable = "hdd",
       value = c(10, 20, 30)
     )
 
     masks <- list(
-      all = list(date_to = "2024-01-31", iso2 = "EU"),
-      gas_demand = list(
-        list(date_from = "2024-02-01", iso2 = "DE")
+      all = list(date_to = "2024-01-31", region_iso2 = "EU"),
+      weather = list(
+        list(date_from = "2024-02-01", region_iso2 = "DE")
       )
     )
 
-    masked <- apply_source_data_mask(gas, "gas_demand", masks)
+    masked <- apply_source_data_mask(weather, "weather", masks)
 
     expect_equal(nrow(masked), 1)
-    expect_equal(masked$iso2, "EU")
+    expect_equal(masked$region_iso2, "EU")
     expect_equal(masked$date, as.Date("2024-02-01"))
     expect_equal(masked$value, 20)
   }
@@ -29,7 +30,7 @@ test_that(
 
 
 test_that(
-  "apply_source_data_mask supports source aliases",
+  "apply_source_data_mask rejects non-canonical source names",
   {
     pwr <- tibble(
       iso2 = c("EU", "EU"),
@@ -40,36 +41,36 @@ test_that(
     )
 
     masks <- list(
-      power_generation = list(
+      entsoe_power_daily = list(
         list(date_from = "2024-01-01", source = "Wind")
       )
     )
 
-    masked <- apply_source_data_mask(pwr, "power", masks)
-
-    expect_equal(nrow(masked), 1)
-    expect_equal(masked$source, "Solar")
-    expect_equal(masked$value_mw, 120)
-    expect_equal(masked$value_mwh, 2500)
+    expect_error(
+      apply_source_data_mask(pwr, "power", masks),
+      "canonical source key"
+    )
   }
 )
 
 
 test_that(
-  "apply_source_data_mask ignores unsupported value_cols option",
+  "apply_source_data_mask rejects removed compatibility keys",
   {
-    gas <- tibble(
-      iso2 = "EU",
+    weather <- tibble(
+      region_iso2 = "EU",
       date = as.Date("2024-01-01"),
       value = 10
     )
 
-    masks <- list(
-      gas_demand = list(date_from = "2024-01-01", value_cols = "value")
+    expect_error(
+      apply_source_data_mask(
+        weather,
+        "weather",
+        list(gas_demand = list(date_from = "2024-01-01"))
+      ),
+      "Unknown masking source keys"
     )
-
-    masked <- apply_source_data_mask(gas, "gas_demand", masks)
-    expect_equal(nrow(masked), 0)
   }
 )
 
@@ -95,13 +96,75 @@ test_that(
           "eurostat_solid_yearly",
           "eurostat_gas_monthly",
           "eurostat_gas_yearly",
-          "gas_demand",
-          "power_generation",
-          "eurostat_cons",
           "eurostat_indprod",
           "weather"
         ) %in% names(cfg)
       )
+    )
+  }
+)
+
+
+test_that(
+  "public pipeline defaults make masking intent explicit",
+  {
+    expect_identical(
+      formals(get_co2)$data_masking,
+      quote(DATA_MASKING_NONE)
+    )
+    expect_identical(
+      formals(get_gas_demand)$data_masking,
+      quote(DATA_MASKING_NONE)
+    )
+    expect_identical(
+      formals(get_power_generation)$data_masking,
+      quote(DATA_MASKING_NONE)
+    )
+    expect_identical(
+      formals(get_demand_components)$data_masking,
+      quote(DATA_MASKING_NONE)
+    )
+    expect_identical(
+      formals(get_corrected_demand)$data_masking,
+      quote(DATA_MASKING_NONE)
+    )
+  }
+)
+
+
+test_that(
+  "explicit masking modes resolve to configs",
+  {
+    resolver <- getFromNamespace(".resolve_data_masking_config", "creaco2tracker")
+    custom_config <- list(weather = list(date_from = "2024-01-01"))
+
+    expect_null(
+      resolver(
+        data_masking = DATA_MASKING_NONE,
+        reference_date = "2024-06-01"
+      )
+    )
+    expect_equal(
+      resolver(
+        data_masking = DATA_MASKING_HISTORICAL_DEFAULTS,
+        reference_date = "2024-06-01"
+      ),
+      data_masking_as_of("2024-06-01")
+    )
+    expect_equal(
+      resolver(
+        data_masking = custom_config,
+        reference_date = "2024-06-01"
+      ),
+      custom_config
+    )
+
+    expect_error(
+      resolver(
+        data_masking = "custom",
+        reference_date = "2024-06-01"
+      ),
+      "DATA_MASKING_NONE"
     )
   }
 )
@@ -137,17 +200,36 @@ test_that(
 
 
 test_that(
-  "data_masking_as_of applies the default publication lags",
+  "default_source_publication_months returns the expected annual source keys",
+  {
+    publication_months <- default_source_publication_months()
+
+    expect_named(
+      publication_months,
+      c(
+        "ember_power_yearly",
+        "eurostat_oil_yearly",
+        "eurostat_solid_yearly",
+        "eurostat_gas_yearly"
+      )
+    )
+    expect_true(all(vapply(publication_months, is.integer, logical(1))))
+  }
+)
+
+
+test_that(
+  "data_masking_as_of applies the default publication schedule",
   {
     cfg <- data_masking_as_of("2022-06-01")
 
     expect_equal(cfg$entsoe_power_daily$date_from, "2022-05-31")
     expect_equal(cfg$ember_power_monthly$date_from, "2022-04-01")
-    expect_equal(cfg$ember_power_yearly$date_from, "2021-01-01")
+    expect_equal(cfg$ember_power_yearly$date_from, "2022-01-01")
     expect_equal(cfg$eurostat_gas_monthly$date_from, "2022-02-01")
     expect_equal(cfg$weather$date_from, "2022-05-31")
     expect_equal(cfg$all, list())
-    expect_equal(cfg$gas_demand, list())
+    expect_false("gas_demand" %in% names(cfg))
   }
 )
 
@@ -176,7 +258,9 @@ test_that(
     expect_equal(length(cfgs), 2)
     expect_true(is.list(cfgs[[1]]))
     expect_equal(cfgs[[1]]$weather$date_from, "2021-12-31")
+    expect_equal(cfgs[[1]]$ember_power_yearly$date_from, "2021-01-01")
     expect_equal(cfgs[[2]]$eurostat_gas_monthly$date_from, "2022-09-01")
+    expect_equal(cfgs[[2]]$eurostat_gas_yearly$date_from, "2022-01-01")
   }
 )
 
@@ -187,6 +271,79 @@ test_that(
     cfg <- data_masking_as_of("2022-06-01", lags = c(weather = 0L))
 
     expect_equal(cfg$weather$date_from, "2022-06-02")
+  }
+)
+
+
+test_that(
+  "default annual publication months apply before and on release boundaries",
+  {
+    january_cfg <- data_masking_as_of("2025-01-31")
+    february_cfg <- data_masking_as_of("2025-02-01")
+    june_cfg <- data_masking_as_of("2025-06-30")
+    july_cfg <- data_masking_as_of("2025-07-01")
+
+    expect_equal(january_cfg$ember_power_yearly$date_from, "2024-01-01")
+    expect_equal(february_cfg$ember_power_yearly$date_from, "2025-01-01")
+    expect_equal(june_cfg$eurostat_gas_yearly$date_from, "2024-01-01")
+    expect_equal(july_cfg$eurostat_gas_yearly$date_from, "2025-01-01")
+    expect_equal(june_cfg$eurostat_oil_yearly$date_from, "2024-01-01")
+    expect_equal(july_cfg$eurostat_solid_yearly$date_from, "2025-01-01")
+  }
+)
+
+
+test_that(
+  "annual sources can fall back to lag-based handling",
+  {
+    cfg_without_months <- data_masking_as_of("2022-06-01", publication_months = NULL)
+    cfg_partial_months <- data_masking_as_of(
+      "2022-06-01",
+      publication_months = c(ember_power_yearly = 2L)
+    )
+
+    expect_equal(cfg_without_months$ember_power_yearly$date_from, "2021-01-01")
+    expect_equal(cfg_without_months$eurostat_gas_yearly$date_from, "2021-01-01")
+    expect_equal(cfg_partial_months$ember_power_yearly$date_from, "2022-01-01")
+    expect_equal(cfg_partial_months$eurostat_gas_yearly$date_from, "2021-01-01")
+  }
+)
+
+
+test_that(
+  "data_masking_as_of validates publication_months",
+  {
+    expect_error(
+      data_masking_as_of("2022-06-01", publication_months = c(2L, 7L)),
+      "named vector"
+    )
+    expect_error(
+      data_masking_as_of("2022-06-01", publication_months = c(weather = 2L)),
+      "yearly sources"
+    )
+    expect_error(
+      data_masking_as_of("2022-06-01", publication_months = c(ember_power_yearly = 13L)),
+      "between 1 and 12"
+    )
+  }
+)
+
+
+test_that(
+  "data_masking_as_of validates lag overrides strictly",
+  {
+    expect_error(
+      data_masking_as_of("2022-06-01", lags = c(2L, 7L)),
+      "named vector"
+    )
+    expect_error(
+      data_masking_as_of("2022-06-01", lags = c(gas_demand = 2L)),
+      "default publication lags"
+    )
+    expect_error(
+      data_masking_as_of("2022-06-01", lags = c(weather = -1L)),
+      "greater than or equal to 0"
+    )
   }
 )
 
@@ -210,6 +367,38 @@ test_that(
 
 
 test_that(
+  "apply_source_data_mask rejects legacy fields and unsupported columns",
+  {
+    pwr <- tibble(
+      iso2 = "EU",
+      source = "Wind",
+      date = as.Date("2024-01-01"),
+      value_mw = 100,
+      value_mwh = 2400
+    )
+
+    expect_error(
+      apply_source_data_mask(
+        pwr,
+        "entsoe_power_daily",
+        list(entsoe_power_daily = list(available_from = "2024-01-01"))
+      ),
+      "removed legacy fields"
+    )
+
+    expect_error(
+      apply_source_data_mask(
+        pwr,
+        "entsoe_power_daily",
+        list(entsoe_power_daily = list(date_from = "2024-01-01", value_cols = "value"))
+      ),
+      "missing columns"
+    )
+  }
+)
+
+
+test_that(
   "granular entsoe masking removes matching rows",
   {
     pwr <- tibble(
@@ -227,7 +416,7 @@ test_that(
       )
     )
 
-    masked <- apply_source_data_mask(pwr, "entsoe_daily", masks)
+    masked <- apply_source_data_mask(pwr, "entsoe_power_daily", masks)
 
     expect_equal(nrow(masked), 1)
     expect_equal(masked$source, "Solar")
@@ -252,7 +441,7 @@ test_that(
       entsog_flow_raw = list(type = c("storage", "production"))
     )
 
-    masked <- apply_source_data_mask(entsog_raw, "entsog_raw", masks)
+    masked <- apply_source_data_mask(entsog_raw, "entsog_flow_raw", masks)
 
     expect_equal(masked$value_m3[1], 1)
     expect_equal(nrow(masked), 1)

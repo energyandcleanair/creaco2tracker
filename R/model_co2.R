@@ -10,8 +10,9 @@
 #' applied.
 #' @param ncv_source iea, iea_shared, ipcc
 #' @param fill_mode one of "missing", "overwrite", or "ratio". Default is "missing".
-#' @param data_masking Optional named list of masking rules. See
-#'   `get_data_masking_config()` for a template.
+#' @param data_masking One of `DATA_MASKING_NONE` or
+#'   `DATA_MASKING_HISTORICAL_DEFAULTS`, or a named masking config list in the
+#'   same structure as `get_data_masking_config()`.
 #'
 #' @return
 #' @export
@@ -28,7 +29,7 @@ get_co2 <- function(
   fill_mode = c("missing", "overwrite", "ratio"),
   downscale_cut_latest_days = 3,
   correct_gas_demand_to_eurostat = TRUE,
-  data_masking = NULL
+  data_masking = DATA_MASKING_NONE
 ) {
   run_started_at <- Sys.time()
   log_info(
@@ -53,6 +54,11 @@ get_co2 <- function(
   } else {
     date_to_cut <- date_to
   }
+
+  data_masking <- .resolve_data_masking_config(
+    data_masking = data_masking,
+    reference_date = date_to
+  )
 
   # Collect necessary data
   gas_demand <- log_timed_stage("get_gas_demand", {

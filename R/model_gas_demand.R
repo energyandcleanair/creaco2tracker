@@ -33,6 +33,9 @@
 #' @param use_cache Whether to use cached data. Default is TRUE.
 #' @param correct_to_eurostat Whether to correct ENTSOG daily data to match
 #'   Eurostat monthly totals. Default is FALSE for backward compatibility.
+#' @param data_masking One of `DATA_MASKING_NONE` or
+#'   `DATA_MASKING_HISTORICAL_DEFAULTS`, or a named masking config list in the
+#'   same structure as `get_data_masking_config()`.
 #'
 #' @return Tibble with daily gas demand data
 #'
@@ -51,7 +54,7 @@ get_gas_demand <- function(
   verbose = FALSE,
   use_cache = TRUE,
   correct_to_eurostat = FALSE,
-  data_masking = NULL
+  data_masking = DATA_MASKING_NONE
 ) {
   date_to_for_years <- if (is.null(date_to)) {
     lubridate::today()
@@ -61,6 +64,11 @@ get_gas_demand <- function(
   if (length(date_to_for_years) != 1 || is.na(date_to_for_years)) {
     stop("date_to must be NULL or coercible to a single Date")
   }
+
+  data_masking <- .resolve_data_masking_config(
+    data_masking = data_masking,
+    reference_date = date_to_for_years
+  )
 
   years <- seq(2015, max(2015, lubridate::year(date_to_for_years)))
 

@@ -16,8 +16,9 @@
 #'   Only used when model_type = "lm". Ignored for "gam" (which uses smooth splines).
 #' @param diagnostics_folder Folder path for diagnostics outputs. Default is
 #'   "diagnostics/demand_components".
-#' @param data_masking Optional named list of masking rules. See
-#'   `get_data_masking_config()`.
+#' @param data_masking One of `DATA_MASKING_NONE` or
+#'   `DATA_MASKING_HISTORICAL_DEFAULTS`, or a named masking config list in the
+#'   same structure as `get_data_masking_config()`.
 #'
 #' @return Tibble with columns:
 #'   - iso2: Country code
@@ -51,12 +52,16 @@ get_demand_components <- function(
   model_type = c("gam", "lm"),
   include_time_interaction = TRUE,
   diagnostics_folder = "diagnostics/demand_components",
-  data_masking = NULL
+  data_masking = DATA_MASKING_NONE
 ) {
   model_type <- match.arg(model_type)
   iso2s <- unique(iso2s)
   date_from <- as.Date(date_from)
   date_to <- as.Date(date_to)
+  data_masking <- .resolve_data_masking_config(
+    data_masking = data_masking,
+    reference_date = date_to
+  )
   gas_diagnostics_folder <- if (is.null(diagnostics_folder)) {
     NULL
   } else {

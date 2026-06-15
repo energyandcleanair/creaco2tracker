@@ -23,6 +23,9 @@
 #'   to daily assuming constant production within each month. Default is TRUE.
 #' @param diagnostics_folder Folder path for diagnostics outputs. Set to NULL
 #'   to disable diagnostics. Default is "diagnostics/power_generation".
+#' @param data_masking One of `DATA_MASKING_NONE` or
+#'   `DATA_MASKING_HISTORICAL_DEFAULTS`, or a named masking config list in the
+#'   same structure as `get_data_masking_config()`.
 #'
 #' @return Tibble with columns:
 #'   - iso2: Country code
@@ -58,10 +61,14 @@ get_power_generation <- function(
   tier_threshold = c(0.7, 1.3),
   replace_entsoe_others_with_ember = TRUE,
   diagnostics_folder = "diagnostics/power_generation",
-  data_masking = NULL
+  data_masking = DATA_MASKING_NONE
 ) {
   date_from <- as.Date(date_from)
   date_to <- as.Date(date_to)
+  data_masking <- .resolve_data_masking_config(
+    data_masking = data_masking,
+    reference_date = date_to
+  )
 
   source_data <- power_data_access_get_sources(
     iso2s = iso2s,

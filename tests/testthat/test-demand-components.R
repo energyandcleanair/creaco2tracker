@@ -251,11 +251,13 @@ test_that("get_demand_components with LM decomposes mocked source data", {
   expect_equal(calls$gas[[1]]$iso2, "EU")
   expect_false(calls$gas[[1]]$use_cache)
   expect_true(calls$gas[[1]]$correct_to_eurostat)
+  expect_null(calls$gas[[1]]$data_masking)
 
   expect_length(calls$power, 1)
   expect_equal(calls$power[[1]]$iso2s, "EU")
   expect_equal(as.Date(calls$power[[1]]$date_from), as.Date("2022-01-01"))
   expect_false(calls$power[[1]]$use_cache)
+  expect_null(calls$power[[1]]$data_masking)
 
   expect_length(calls$weather, 1)
   expect_equal(calls$weather[[1]]$variable, "HDD,CDD")
@@ -302,4 +304,27 @@ test_that("get_demand_components with GAM returns the same component structure",
     filter(.data$component == "heating", !is.na(.data$value))
   expect_gt(mean(heating$value > 0, na.rm = TRUE), 0.95)
   expect_gt(mean(abs(heating$value - heating$value_weather_corrected) > 1e-6), 0.5)
+})
+
+test_that("get_demand_components resolves historical defaults before fetching sources", {
+  source_data <- make_mock_demand_component_sources()
+  calls <- mock_demand_component_sources(source_data)
+
+  suppressMessages(
+    get_demand_components(
+      iso2s = "EU",
+      date_from = "2023-01-01",
+      date_to = "2023-12-31",
+      use_cache = FALSE,
+      model_type = "lm",
+      diagnostics_folder = NULL,
+      data_masking = DATA_MASKING_HISTORICAL_DEFAULTS
+    )
+  )
+
+  expected_config <- data_masking_as_of("2023-12-31")
+
+  expect_equal(calls$gas[[1]]$data_masking, expected_config)
+  expect_equal(calls$power[[1]]$data_masking, expected_config)
+  expect_equal(calls$weather[[1]]$data_masking, expected_config)
 })

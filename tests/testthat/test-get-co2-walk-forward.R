@@ -83,5 +83,41 @@ test_that(
       )(list(date_to = "2025-01-31")),
       "date_to"
     )
+    expect_error(
+      getFromNamespace(
+        ".validate_get_co2_walk_forward_args",
+        "creaco2tracker"
+      )(list(data_masking = DATA_MASKING_NONE)),
+      "data_masking"
+    )
+  }
+)
+
+
+test_that(
+  "walk-forward masking summary uses annual publication months",
+  {
+    masking_cutoffs <- getFromNamespace(
+      ".summarise_get_co2_walk_forward_masking",
+      "creaco2tracker"
+    )(
+      as_of_dates = as.Date(c("2025-01-31", "2025-02-01", "2025-07-01")),
+      run_type = c("walk_forward", "walk_forward", "final"),
+      lags = default_source_lags(),
+      publication_months = default_source_publication_months()
+    )
+
+    ember_cutoffs <- masking_cutoffs %>%
+      filter(source_name == "ember_power_yearly") %>%
+      arrange(as_of_date)
+    eurostat_cutoffs <- masking_cutoffs %>%
+      filter(source_name == "eurostat_gas_yearly") %>%
+      arrange(as_of_date)
+
+    expect_equal(ember_cutoffs$mask_date_from, c("2024-01-01", "2025-01-01", "2025-01-01"))
+    expect_equal(
+      eurostat_cutoffs$mask_date_from,
+      c("2024-01-01", "2024-01-01", "2025-01-01")
+    )
   }
 )

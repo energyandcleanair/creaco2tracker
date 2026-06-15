@@ -1,3 +1,26 @@
+#' Data Masking Option Constants
+#'
+#' Use these with `data_masking` in public pipeline functions.
+#'
+#' - `DATA_MASKING_NONE` disables source masking.
+#' - `DATA_MASKING_HISTORICAL_DEFAULTS` builds masking from default source
+#'   publication schedules.
+#'
+#' A custom masking configuration can also be supplied directly as a named list
+#' in the same structure as `get_data_masking_config()`.
+#'
+#' @name data_masking_options
+NULL
+
+
+#' @rdname data_masking_options
+DATA_MASKING_NONE <- "none"
+
+
+#' @rdname data_masking_options
+DATA_MASKING_HISTORICAL_DEFAULTS <- "historical_defaults"
+
+
 # Sectors
 SECTOR_ELEC <- "electricity"
 SECTOR_ALL <- "all"

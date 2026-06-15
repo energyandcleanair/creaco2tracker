@@ -24,7 +24,7 @@
         "ms-toolsai.datawrangler",
         "ms-python.python",
         "ms-toolsai.jupyter",
-        "openai.chatgpt"
+        "mechatroner.rainbow-csv"
       ],
       "settings": {
         "python.defaultInterpreterPath": "/home/rstudio/.local/share/datawrangler-venv/bin/python",

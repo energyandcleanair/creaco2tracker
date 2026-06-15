@@ -7,8 +7,9 @@
 #' @param diagnostics_folder Folder for diagnostic outputs.
 #' @param use_cache Whether to use cached data.
 #' @param model_type Model type for demand decomposition: "lm" or "gam".
-#' @param data_masking Optional named list of masking rules. See
-#'   `get_data_masking_config()`.
+#' @param data_masking One of `DATA_MASKING_NONE` or
+#'   `DATA_MASKING_HISTORICAL_DEFAULTS`, or a named masking config list in the
+#'   same structure as `get_data_masking_config()`.
 #'
 #' @return Tibble formatted for DB upload with columns:
 #'   date, unit, value, fuel, sector, data_source, frequency, region_id, region_type
@@ -18,9 +19,10 @@ get_corrected_demand <- function(
   diagnostics_folder = "diagnostics",
   use_cache = TRUE,
   model_type = c("gam", "lm"),
-  data_masking = NULL
+  data_masking = DATA_MASKING_NONE
 ) {
   model_type <- match.arg(model_type)
+  data_masking <- .resolve_data_masking_config(data_masking = data_masking)
   create_dir(diagnostics_folder)
 
   # Get demand components with weather correction

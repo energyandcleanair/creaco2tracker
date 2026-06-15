@@ -5,6 +5,9 @@
 #' @param diagnostics_folder
 #' @param use_cache
 #' @param iso2s
+#' @param data_masking One of `DATA_MASKING_NONE` or
+#'   `DATA_MASKING_HISTORICAL_DEFAULTS`, or a named masking config list in the
+#'   same structure as `get_data_masking_config()`.
 #'
 #' @return
 #' @export
@@ -15,8 +18,11 @@ get_eurostat_cons <- function(
   diagnostics_folder = "diagnostics/eurostat",
   use_cache = FALSE,
   iso2s = NULL,
-  data_masking = NULL
+  data_masking = DATA_MASKING_NONE
 ) {
+  data_masking <- .resolve_data_masking_config(
+    data_masking = data_masking
+  )
   create_dir(diagnostics_folder)
 
 
@@ -241,6 +247,9 @@ remove_last_incomplete <- function(cons) {
 #' @param diagnostics_folder
 #' @param use_cache
 #' @param iso2s
+#' @param data_masking One of `DATA_MASKING_NONE` or
+#'   `DATA_MASKING_HISTORICAL_DEFAULTS`, or a named masking config list in the
+#'   same structure as `get_data_masking_config()`.
 #'
 #' @return
 #' @export
@@ -250,8 +259,11 @@ get_eurostat_indprod <- function(
   diagnostics_folder = NULL,
   use_cache = FALSE,
   iso2s = NULL,
-  data_masking = NULL
+  data_masking = DATA_MASKING_NONE
 ) {
+  data_masking <- .resolve_data_masking_config(
+    data_masking = data_masking
+  )
   indprod_raw <- eurostat_data_access_get_indprod(
     use_cache = use_cache,
     iso2s = iso2s,
