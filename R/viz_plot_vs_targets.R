@@ -14,6 +14,34 @@ plot_vs_targets <- function(
   # As per CAT, we assume the target translates into 44% below 2010 levels in 2030 and 93% in 2050
   # excluding LULUCF and international aviation
 
+  recode_sector_names <- function(x, power_sector_name = "Power Generation") {
+    x %>%
+      mutate(
+        sector = factor(
+          sector,
+          levels = c(
+            SECTOR_ELEC,
+            SECTOR_TRANSPORT,
+            SECTOR_TRANSPORT_DOMESTIC,
+            SECTOR_TRANSPORT_INTERNATIONAL_AVIATION,
+            SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING,
+            SECTOR_OTHERS,
+            SECTOR_ALL
+          ),
+          labels = c(
+            power_sector_name,
+            "Transport",
+            "Transport (Domestic)",
+            "Transport (International Aviation)",
+            "Transport (International Shipping)",
+            "Others (Industry & Buildings)",
+            "Total"
+          )
+        )
+      )
+  }
+
+
   # Set default title if not provided
   region_name <- if (length(iso2s) == 1) paste0(iso2_to_name(iso2s), " ") else ""
   colors <- get_colors()
