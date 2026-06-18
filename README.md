@@ -140,13 +140,29 @@ Rule fields:
 - Any other field is treated as a column filter for the source table (for example `iso2`, `source`, `fuel`, `sector`, `variable`, `nace_r2_code`, `siec_code`).
 - Matching rows are masked by removing them from the source table, simulating unavailable data as absent rows.
 
-For the default publication-lag walk-forward setup, use `data_masking_as_of()` or the 2025 CO2 validation workflow:
+For the default publication-lag revision-analysis setup, use `data_masking_as_of()` or the
+2025 CO2 revision-analysis workflow:
 
 ```r
-results <- validate_get_co2_walk_forward_2025()
+results <- validate_get_co2_revision_analysis()
 ```
 
-This runs `get_co2()` at each 2025 month-end using the default as-of masks and compares those results with the data generated as of `2026-03-31`. Outputs are written by default to `diagnostics/get_co2_walk_forward_2025`.
+This runs `get_co2()` at each 2025 month-end for all EU countries plus the EU aggregate,
+using the default as-of masks, and compares each vintage month with the reference vintage
+month `2026-03-01`. Outputs are written by default to
+`diagnostics/get_co2_revision_analysis_2025`.
+
+Key outputs:
+- `tables/vintage_revision_comparison.csv`: One row per comparable estimate with lag buckets,
+  revision metrics, and source-maturity shares.
+- `tables/debug_revision_summary.csv`: Lag-bucket and maturity-stage summaries for totals,
+  country totals, and country-components.
+- `tables/revision_outliers.csv`: Largest absolute revisions, sorted by tonnes CO2.
+- `tables/country_component_chart_inventory.csv`: Every generated country-component chart path.
+- `charts/summary/`: Aggregate debugging charts by lag bucket, data maturity, and gross
+  revision contribution.
+- `charts/aggregate_timeseries/` and `charts/country_component/`: Milestone-vintage time
+  series and full country-component debugging charts.
 
 
 ## TO DO

@@ -99,3 +99,20 @@ test_that("validate_co2 rejects materially negative central component rows", {
     "Negative central CO2 component values"
   )
 })
+
+test_that("validate_co2 allows materially negative non-EU central component rows with warning", {
+  co2 <- tibble::tibble(
+    iso2 = "NL",
+    date = as.Date("2026-03-01"),
+    unit = "t",
+    estimate = "central",
+    value = -1,
+    fuel = FUEL_OIL,
+    sector = SECTOR_OTHERS
+  )
+
+  expect_warning(
+    validate_co2(co2, diagnostics_folder = NULL),
+    "Negative central CO2 component values"
+  )
+})

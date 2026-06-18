@@ -73,6 +73,9 @@ importFrom(dplyr,vars)
 importFrom(dplyr,group_modify)
 importFrom(dplyr,"%>%")
 importFrom(dplyr,anti_join)
+importFrom(dplyr,transmute)
+importFrom(dplyr,slice_head)
+importFrom(dplyr,semi_join)
 
 importFrom(glue,glue)
 

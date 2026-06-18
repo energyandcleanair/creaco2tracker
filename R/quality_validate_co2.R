@@ -60,24 +60,46 @@ validate_co2_no_negative_components <- function(co2, tolerance = 1e-6) {
     return(invisible(TRUE))
   }
 
-  examples <- negative_components %>%
-    arrange(value) %>%
-    head(5) %>%
-    mutate(
-      example = glue::glue(
-        "{iso2} {date} {fuel}/{sector}: {round(value, 3)}"
-      )
-    ) %>%
-    pull(example) %>%
-    paste(collapse = "; ")
+  format_examples <- function(data) {
+    data %>%
+      arrange(value) %>%
+      head(5) %>%
+      mutate(
+        example = glue::glue(
+          "{iso2} {date} {fuel}/{sector}: {round(value, 3)}"
+        )
+      ) %>%
+      pull(example) %>%
+      paste(collapse = "; ")
+  }
 
-  stop(
-    glue::glue(
-      "Negative central CO2 component values found in {nrow(negative_components)} rows. ",
-      "Examples: {examples}"
-    ),
-    call. = FALSE
-  )
+  negative_eu <- negative_components %>%
+    filter(iso2 == "EU")
+
+  negative_non_eu <- negative_components %>%
+    filter(iso2 != "EU")
+
+  if (nrow(negative_non_eu) > 0) {
+    warning(
+      glue::glue(
+        "Negative central CO2 component values found in {nrow(negative_non_eu)} non-EU rows. ",
+        "Examples: {format_examples(negative_non_eu)}"
+      ),
+      call. = FALSE
+    )
+  }
+
+  if (nrow(negative_eu) > 0) {
+    stop(
+      glue::glue(
+        "Negative central CO2 component values found in {nrow(negative_eu)} EU rows. ",
+        "Examples: {format_examples(negative_eu)}"
+      ),
+      call. = FALSE
+    )
+  }
+
+  invisible(TRUE)
 }
 
 

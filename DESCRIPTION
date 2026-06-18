@@ -38,6 +38,7 @@ Imports:
     httr,
     ggrepel,
     forecast,
+    hexbin,
     mgcv,
     progress,
     logger
