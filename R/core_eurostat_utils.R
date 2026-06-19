@@ -278,11 +278,6 @@ fill_gaps_in_time_series <- function(
         return(group_data)
       }
 
-      # Short-circuit: if there are no NAs, the series needs no gap-filling
-      if (!anyNA(group_data$values)) {
-        return(group_data)
-      }
-
       # Get min and max time for this group
       min_time <- min(group_data$time, na.rm = TRUE)
       max_time <- max(group_data$time, na.rm = TRUE)
@@ -293,6 +288,12 @@ fill_gaps_in_time_series <- function(
           time = seq.Date(min_time, max_time, by = frequency)
         ) %>%
         arrange(time)
+
+      # Short-circuit: if completion added no rows and there are no NAs,
+      # the series is already structurally complete — skip expensive gap filling
+      if (nrow(complete_data) == nrow(group_data) && !anyNA(complete_data$values)) {
+        return(complete_data)
+      }
 
       # Apply gap filling methods
       complete_data %>%
