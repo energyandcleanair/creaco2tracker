@@ -257,4 +257,3 @@ collect_gas <- function(use_cache = FALSE, data_masking = NULL) {
     yearly = cons_yearly_raw %>% add_iso2() %>% filter(!is.na(iso2))
   )
 }
-
