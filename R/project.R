@@ -110,8 +110,18 @@ project_until_now_lm <- function(
                   by=c('date'))
 
       model_adj_r2 <- function(model){
-        r2 <- summary(model)$adj.r.squared
-        if(is.na(r2)){
+        r2 <- tryCatch({
+          model_summary <- summary(model)
+          if(is.list(model_summary) && "adj.r.squared" %in% names(model_summary)){
+            model_summary$adj.r.squared
+          }else{
+            0
+          }
+        }, error = function(e) {
+          0
+        })
+
+        if(length(r2) != 1 || is.na(r2) || !is.finite(r2)){
           0
         }else{
           r2
