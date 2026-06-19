@@ -1,0 +1,277 @@
+#!/usr/bin/env bash
+
+# Built by an agent.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}" && pwd)"
+REPO_BASENAME="$(basename "${REPO_ROOT}")"
+PROJECT_NAME="$(basename "${REPO_ROOT}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-')"
+IMAGE_NAME="localhost/${PROJECT_NAME}-rr:latest"
+PROJECT_LABEL="org.crea.rr.project=${PROJECT_NAME}"
+HASH_LABEL="org.crea.rr.hash"
+DOCKERFILE_REL="rr.Dockerfile"
+CONTAINER_REPO_ROOT="/workspaces/${REPO_BASENAME}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  rr run <script-or-rscript-args...>
+  rr shell
+  rr clean [--all] [--purge-cache]
+
+Modes:
+  run    Execute Rscript inside the project runtime image.
+  shell  Open an interactive shell in the same runtime context.
+  clean  Remove project containers and optionally image/cache volumes.
+EOF
+}
+
+require_cmd() {
+  local cmd="$1"
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "Error: required command not found: ${cmd}" >&2
+    exit 1
+  fi
+}
+
+hash_file() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1}'
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$file" | awk '{print $2}'
+  else
+    echo "Error: no supported SHA-256 tool found (sha256sum, shasum, openssl)." >&2
+    exit 1
+  fi
+}
+
+calc_build_hash() {
+  local rr_version="1"
+  local files=(
+    "${REPO_ROOT}/${DOCKERFILE_REL}"
+    "${REPO_ROOT}/DESCRIPTION"
+    "${REPO_ROOT}/rr"
+  )
+
+  local acc="rr_version=${rr_version}"
+  local f
+  for f in "${files[@]}"; do
+    if [[ ! -f "$f" ]]; then
+      echo "Error: required build input missing: $f" >&2
+      exit 1
+    fi
+    acc+="|${f}:$(hash_file "$f")"
+  done
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$acc" | sha256sum | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$acc" | shasum -a 256 | awk '{print $1}'
+  else
+    printf '%s' "$acc" | openssl dgst -sha256 | awk '{print $2}'
+  fi
+}
+
+image_exists() {
+  podman image exists "$IMAGE_NAME"
+}
+
+current_image_hash() {
+  podman image inspect --format "{{ index .Config.Labels \"${HASH_LABEL}\" }}" "$IMAGE_NAME" 2>/dev/null || true
+}
+
+load_github_pat() {
+  if [[ -n "${GITHUB_PAT:-}" ]]; then
+    return 0
+  fi
+
+  local renviron_file="${REPO_ROOT}/.Renviron"
+  if [[ ! -f "$renviron_file" ]]; then
+    return 0
+  fi
+
+  local github_pat
+  github_pat="$(awk -F= '/^GITHUB_PAT=/{sub(/^GITHUB_PAT=/, "", $0); print; exit}' "$renviron_file")"
+  if [[ -n "$github_pat" ]]; then
+    export GITHUB_PAT="$github_pat"
+  fi
+}
+
+build_secret_args() {
+  local args=(--secret id=github_pat,env=GITHUB_PAT)
+
+  printf '%s\n' "${args[@]}"
+}
+
+ensure_image() {
+  local build_hash="$1"
+  local secret_args=()
+  mapfile -t secret_args < <(build_secret_args)
+
+  load_github_pat
+
+  if ! image_exists; then
+    if [[ -z "${GITHUB_PAT:-}" ]]; then
+      echo "Error: GITHUB_PAT is required to build or rebuild the rr image." >&2
+      exit 1
+    fi
+    echo "[rr] Building runtime image (missing image)..."
+    podman build \
+      "${secret_args[@]}" \
+      --label "$PROJECT_LABEL" \
+      --label "${HASH_LABEL}=${build_hash}" \
+      -f "${REPO_ROOT}/${DOCKERFILE_REL}" \
+      -t "$IMAGE_NAME" \
+      "$REPO_ROOT"
+    return
+  fi
+
+  local existing_hash
+  existing_hash="$(current_image_hash)"
+  if [[ "$existing_hash" != "$build_hash" ]]; then
+    if [[ -z "${GITHUB_PAT:-}" ]]; then
+      echo "Error: GITHUB_PAT is required to build or rebuild the rr image." >&2
+      exit 1
+    fi
+    echo "[rr] Rebuilding runtime image (inputs changed)..."
+    podman build \
+      "${secret_args[@]}" \
+      --label "$PROJECT_LABEL" \
+      --label "${HASH_LABEL}=${build_hash}" \
+      -f "${REPO_ROOT}/${DOCKERFILE_REL}" \
+      -t "$IMAGE_NAME" \
+      "$REPO_ROOT"
+  fi
+}
+
+common_run_args() {
+  local args=()
+  args+=(--rm)
+  args+=(--label "$PROJECT_LABEL")
+  args+=(--userns keep-id)
+  args+=(-v "${REPO_ROOT}:${CONTAINER_REPO_ROOT}")
+  args+=(-v "${PROJECT_NAME}-pak-cache:/cache/pak")
+  args+=(-e "PKG_CACHE_DIR=/cache/pak")
+  args+=(-e "PKG_PACKAGE_CACHE_DIR=/cache/pak/packages")
+  args+=(-e "PKG_METADATA_CACHE_DIR=/cache/pak/metadata")
+  args+=(-w "${CONTAINER_REPO_ROOT}")
+
+  if [[ -t 0 && -t 1 ]]; then
+    args+=(-it)
+  fi
+
+  printf '%s\n' "${args[@]}"
+}
+
+run_mode() {
+  if [[ "$#" -lt 1 ]]; then
+    echo "Error: rr run requires a script path or Rscript arguments." >&2
+    usage
+    exit 1
+  fi
+
+  local cmd=(Rscript "$@")
+
+  mapfile -t run_args < <(common_run_args)
+  podman run "${run_args[@]}" "$IMAGE_NAME" "${cmd[@]}"
+}
+
+shell_mode() {
+  mapfile -t run_args < <(common_run_args)
+  podman run "${run_args[@]}" "$IMAGE_NAME" bash
+}
+
+clean_mode() {
+  local remove_image=0
+  local purge_cache=0
+
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --all)
+        remove_image=1
+        ;;
+      --purge-cache)
+        purge_cache=1
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        echo "Error: unknown clean option: $1" >&2
+        usage
+        exit 1
+        ;;
+    esac
+    shift
+  done
+
+  mapfile -t containers < <(podman ps -a --filter "label=${PROJECT_LABEL}" --format '{{.ID}}')
+  if [[ "${#containers[@]}" -gt 0 ]]; then
+    podman rm -f "${containers[@]}" >/dev/null
+    echo "[rr] Removed ${#containers[@]} project container(s)."
+  else
+    echo "[rr] No project containers to remove."
+  fi
+
+  podman image prune -f --filter "label=${PROJECT_LABEL}" >/dev/null || true
+
+  if [[ "$remove_image" -eq 1 ]]; then
+    if podman image exists "$IMAGE_NAME"; then
+      podman rmi "$IMAGE_NAME" >/dev/null
+      echo "[rr] Removed image ${IMAGE_NAME}."
+    else
+      echo "[rr] Image not found: ${IMAGE_NAME}."
+    fi
+  fi
+
+  if [[ "$purge_cache" -eq 1 ]]; then
+    if podman volume exists "${PROJECT_NAME}-pak-cache"; then
+      podman volume rm "${PROJECT_NAME}-pak-cache" >/dev/null
+      echo "[rr] Removed volume ${PROJECT_NAME}-pak-cache."
+    else
+      echo "[rr] Cache volume not found: ${PROJECT_NAME}-pak-cache."
+    fi
+  fi
+}
+
+main() {
+  local mode="${1:-}"
+  if [[ -z "$mode" || "$mode" == "-h" || "$mode" == "--help" ]]; then
+    usage
+    exit 0
+  fi
+  shift
+
+  require_cmd podman
+
+  case "$mode" in
+    run)
+      local build_hash
+      build_hash="$(calc_build_hash)"
+      ensure_image "$build_hash"
+      run_mode "$@"
+      ;;
+    shell)
+      local build_hash
+      build_hash="$(calc_build_hash)"
+      ensure_image "$build_hash"
+      shell_mode
+      ;;
+    clean)
+      clean_mode "$@"
+      ;;
+    *)
+      echo "Error: unknown mode: $mode" >&2
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

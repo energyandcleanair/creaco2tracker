@@ -172,6 +172,40 @@ Key outputs:
 
 [ ] Bring over benchmarks and some of Lauri's analysis from [2025 study](https://github.com/energyandcleanair/202511_2025_eu_emissions)
 
+
+## Running Scripts
+
+Use `./rr` to run repository scripts in a containerized R runtime.
+
+### Requirements
+
+- Podman
+- `GITHUB_PAT` in your enviironment or `.Renviron` to get the private R dependencies in our repo
+
+### Modes
+
+- `./rr run <script-or-rscript-args...>`: runs `Rscript` in the runtime image.
+- `./rr shell`: opens an interactive shell in the same runtime context.
+- `./rr clean [--all] [--purge-cache]`: removes project-scoped container artifacts.
+
+### Behavior
+
+- Automatically builds the runtime image on first use.
+- Automatically rebuilds when build inputs change (`rr.Dockerfile`, `DESCRIPTION`, `rr`).
+- Bind-mounts the full repository to preserve existing relative-path behavior.
+- Keeps R dependencies in image-managed library paths outside the workspace mount.
+- Persists pak cache in a project-scoped Podman volume.
+
+### Examples
+
+```bash
+./rr run <path-to-script>
+./rr run -e "<custom-code>"
+./rr shell
+./rr clean --all --purge-cache
+```
+
+
 ## Release Notes
 
 ### Version 1.1
