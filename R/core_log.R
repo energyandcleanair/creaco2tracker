@@ -6,10 +6,19 @@ configure_logger_layout <- function() {
   )
 }
 
-.onLoad <- function(libname, pkgname) {
+configure_logger_threshold <- function() {
+  logger::log_threshold(logger::DEBUG)
+}
+
+configure_logger <- function() {
   configure_logger_layout()
+  configure_logger_threshold()
+}
+
+.onLoad <- function(libname, pkgname) {
+  configure_logger()
 }
 
 .onAttach <- function(libname, pkgname) {
-  configure_logger_layout()
+  configure_logger()
 }
