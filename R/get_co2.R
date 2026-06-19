@@ -29,6 +29,13 @@ get_co2 <- function(diagnostics_folder='diagnostics',
 
   create_dir(diagnostics_folder)
 
+  diagnostics_path <- function(...){
+    if(is_null_or_empty(diagnostics_folder)){
+      NULL
+    } else {
+      file.path(diagnostics_folder, ...)
+    }
+  }
 
   # Add buffer to date_to if downscaling daily
   if(downscale_daily & !is.null(date_to)){
@@ -42,25 +49,27 @@ get_co2 <- function(diagnostics_folder='diagnostics',
     iso2s = iso2s,
     date_to = date_to_cut,
     correct_to_eurostat = correct_gas_demand_to_eurostat,
+    diagnostics_folder = diagnostics_path("gas_demand"),
     use_cache = use_cache
     )
 
   pwr_generation <- get_power_generation(
     iso2s = iso2s,
     date_to = date_to_cut,
+    diagnostics_folder = diagnostics_path("power_generation"),
     use_cache = use_cache)
 
 
   # Get fossil-fuel consumption based on Eurostat
   eurostat_cons <- get_eurostat_cons(
-    diagnostics_folder = file.path(diagnostics_folder, "eurostat"),
+    diagnostics_folder = diagnostics_path("eurostat"),
     pwr_generation = pwr_generation,
     use_cache = use_cache)
 
   # Get industrial production data from Eurostat
   eurostat_indprod <- get_eurostat_indprod(
     use_cache = use_cache,
-    diagnostics_folder = file.path(diagnostics_folder, 'eurostat')
+    diagnostics_folder = diagnostics_path("eurostat")
     )
 
   # Compute CO2 emissions based on Eurostat fossil-fuel consumption/oxydation
@@ -87,7 +96,7 @@ get_co2 <- function(diagnostics_folder='diagnostics',
       co2 = co2,
       pwr_generation = pwr_generation,
       eurostat_cons = eurostat_cons,
-      diagnostics_folder = file.path(diagnostics_folder, 'eu_vs_countries')
+      diagnostics_folder = diagnostics_path("eu_vs_countries")
       )
   }
 
