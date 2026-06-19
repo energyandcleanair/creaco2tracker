@@ -66,10 +66,6 @@ eurostat_data_access_get_indprod <- function(
 #' @return Raw oil consumption data from EUROSTAT
 #' @export
 collect_oil <- function(use_cache = FALSE, data_masking = NULL) {
-  drop_missing_values <- function(x) {
-    x %>% filter(!is.na(values))
-  }
-
   oil_siec_codes <- c(
     SIEC_OIL_PRODUCTS,
     SIEC_CRUDE_OIL,
@@ -88,30 +84,31 @@ collect_oil <- function(use_cache = FALSE, data_masking = NULL) {
   cons_monthly_raw <- log_timed_stage("collect_oil_fetch_monthly", {
     get_eurostat_from_code(
       code = "nrg_cb_oilm",
-      use_cache = use_cache,
-      filters = list(siec = oil_siec_codes)
+      use_cache = use_cache
     ) %>%
-      filter(siec %in% oil_siec_codes) %>%
       apply_source_data_mask(
         source_name = "eurostat_oil_monthly",
         data_masking = data_masking
-      ) %>%
-      drop_missing_values()
+      )
   })
 
   # Yearly data
   cons_yearly_raw <- log_timed_stage("collect_oil_fetch_yearly", {
-    get_eurostat_from_code(
-      code = "nrg_cb_oil",
-      use_cache = use_cache,
-      filters = list(siec = oil_siec_codes)
+    lapply(
+      oil_siec_codes,
+      function(siec_code) {
+        get_eurostat_from_code(
+          code = "nrg_cb_oil",
+          use_cache = use_cache,
+          filters = list(siec = siec_code)
+        )
+      }
     ) %>%
-      filter(siec %in% oil_siec_codes) %>%
+      bind_rows() %>%
       apply_source_data_mask(
         source_name = "eurostat_oil_yearly",
         data_masking = data_masking
-      ) %>%
-      drop_missing_values()
+      )
   })
 
   # Add missing GID_NE when it happens

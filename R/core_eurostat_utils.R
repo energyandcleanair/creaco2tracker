@@ -278,11 +278,6 @@ fill_gaps_in_time_series <- function(
         return(group_data)
       }
 
-      # Short-circuit: if there are no NAs, the series needs no gap-filling
-      if (!anyNA(group_data$values)) {
-        return(group_data)
-      }
-
       # Get min and max time for this group
       min_time <- min(group_data$time, na.rm = TRUE)
       max_time <- max(group_data$time, na.rm = TRUE)
