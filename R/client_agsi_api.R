@@ -1,3 +1,116 @@
+.agsi_retry_delay_seconds <- function(
+  retry_number,
+  initial_delay_seconds = 1,
+  backoff_multiplier = 2
+) {
+  initial_delay_seconds * backoff_multiplier^(retry_number - 1)
+}
+
+
+.fetch_agsi_storage_change_with_retry <- function(
+  url,
+  api_key,
+  iso2,
+  date_from,
+  date_to,
+  max_attempts = 4,
+  initial_delay_seconds = 1,
+  backoff_multiplier = 2
+) {
+  for (attempt in seq_len(max_attempts)) {
+    http_response <- tryCatch(
+      httr::GET(url, httr::add_headers("x-key" = api_key), httr::accept_json()),
+      error = function(e) e
+    )
+
+    if (inherits(http_response, "error")) {
+      if (attempt == max_attempts) {
+        warning(glue::glue(
+          "AGSI request failed for {iso2} from {date_from} to {date_to} on ",
+          "final attempt {attempt}/{max_attempts}: {conditionMessage(http_response)}"
+        ))
+        return(tibble())
+      }
+
+      delay_seconds <- .agsi_retry_delay_seconds(
+        retry_number = attempt,
+        initial_delay_seconds = initial_delay_seconds,
+        backoff_multiplier = backoff_multiplier
+      )
+
+      log_warn(glue::glue(
+        "AGSI request failed for {iso2} from {date_from} to {date_to} on ",
+        "attempt {attempt}/{max_attempts}: {conditionMessage(http_response)}. ",
+        "Retrying in {delay_seconds}s."
+      ))
+      Sys.sleep(delay_seconds)
+      next
+    }
+
+    status <- httr::status_code(http_response)
+    response_text <- httr::content(http_response, "text", encoding = "UTF-8")
+
+    if (!identical(status, 200L)) {
+      if (attempt == max_attempts) {
+        warning(glue::glue(
+          "AGSI request returned HTTP {status} for {iso2} from {date_from} to {date_to} ",
+          "on final attempt {attempt}/{max_attempts}."
+        ))
+        return(tibble())
+      }
+
+      delay_seconds <- .agsi_retry_delay_seconds(
+        retry_number = attempt,
+        initial_delay_seconds = initial_delay_seconds,
+        backoff_multiplier = backoff_multiplier
+      )
+
+      log_warn(glue::glue(
+        "AGSI request returned HTTP {status} for {iso2} from {date_from} to {date_to} ",
+        "on attempt {attempt}/{max_attempts}. Retrying in {delay_seconds}s."
+      ))
+      Sys.sleep(delay_seconds)
+      next
+    }
+
+    parsed_response <- tryCatch(
+      jsonlite::fromJSON(response_text),
+      error = function(e) e
+    )
+
+    if (inherits(parsed_response, "error")) {
+      warning(glue::glue(
+        "Unable to parse AGSI response for {iso2} from {date_from} to {date_to}: ",
+        "{conditionMessage(parsed_response)}"
+      ))
+      return(tibble())
+    }
+
+    data <- parsed_response$data
+    if (is.null(data)) {
+      return(tibble())
+    }
+
+    data <- tryCatch(
+      as_tibble(data),
+      error = function(e) e
+    )
+
+    if (inherits(data, "error")) {
+      warning(glue::glue(
+        "AGSI response data is not tabular for {iso2} from {date_from} to {date_to}: ",
+        "{conditionMessage(data)}"
+      ))
+      return(tibble())
+    }
+
+    return(data)
+  }
+
+  tibble()
+}
+
+
 agsi.get_storage_change <- function(date_from, date_to, iso2, use_cache = TRUE, verbose = FALSE) {
   pbapply::pblapply(iso2, function(iso2) {
     log_info(glue::glue("Getting storage change data for {iso2} from {date_from} to {date_to}"))
@@ -28,9 +141,13 @@ agsi.get_storage_change <- function(date_from, date_to, iso2, use_cache = TRUE, 
           return(tibble())
         }
 
-        http_response <- httr::GET(url, httr::add_headers("x-key" = api_key), httr::accept_json())
-        response_text <- httr::content(http_response, "text", encoding = "UTF-8")
-        jsonlite::fromJSON(response_text)$data
+        .fetch_agsi_storage_change_with_retry(
+          url = url,
+          api_key = api_key,
+          iso2 = iso2,
+          date_from = date_from,
+          date_to = date_to
+        )
       }
     )
 
