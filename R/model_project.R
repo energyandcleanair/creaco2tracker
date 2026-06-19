@@ -60,17 +60,23 @@ project_until_now_lm <- function(
         y %>% select(-any_of(value_proxy_cols))
       }
 
+      is_usable_lm_model <- function(model) {
+        inherits(model, "lm")
+      }
+
+      describe_model_object <- function(model) {
+        if (is.null(model)) {
+          "NULL"
+        } else {
+          glue::glue(
+            "class={paste(class(model), collapse = '/')}, ",
+            "type={typeof(model)}, length={length(model)}"
+          )
+        }
+      }
+
       model_adj_r2 <- function(model) {
-        r2 <- tryCatch({
-          model_summary <- suppressWarnings(summary(model))
-          if (is.list(model_summary) && "adj.r.squared" %in% names(model_summary)) {
-            model_summary$adj.r.squared
-          } else {
-            0
-          }
-        }, error = function(e) {
-          0
-        })
+        r2 <- suppressWarnings(summary(model)$adj.r.squared)
 
         if (length(r2) != 1 || is.na(r2) || !is.finite(r2)) {
           0
@@ -121,7 +127,30 @@ project_until_now_lm <- function(
             filter(if_any(everything(), ~ !is.na(.))) %>%
             nrow() > 0
         ) {
-          lm(data = data_training, formula = formula)
+          model <- tryCatch(
+            lm(data = data_training, formula = formula),
+            error = function(e) {
+              log_warn(
+                glue::glue(
+                  "{iso2} - {fuel} {sector}: LM training failed ",
+                  "using {n_year} years ({conditionMessage(e)}). Returning NULL."
+                )
+              )
+              NULL
+            }
+          )
+
+          if (is_usable_lm_model(model)) {
+            model
+          } else {
+            log_debug(
+              glue::glue(
+                "{iso2} - {fuel} {sector}: LM training returned an unusable model ",
+                "using {n_year} years ({describe_model_object(model)}). Returning NULL."
+              )
+            )
+            NULL
+          }
         } else {
           NULL
         }
@@ -132,7 +161,7 @@ project_until_now_lm <- function(
         get_trained_model(data, n_year)
       })
       r2s <- vapply(trained_models, function(model) {
-        if (!is.null(model)) {
+        if (is_usable_lm_model(model)) {
           model_adj_r2(model)
         } else {
           0
@@ -148,6 +177,11 @@ project_until_now_lm <- function(
       best_idx <- which.max(r2s)
       n_year <- n_years[[best_idx]]
       model <- trained_models[[best_idx]]
+
+      if (!is_usable_lm_model(model)) {
+        log_warn(glue::glue("{iso2} - {fuel} {sector}: No proxy data. Leaving as such."))
+        return(strip_proxy_cols(df))
+      }
 
       r2 <- model_adj_r2(model)
       if (r2 < min_r2) {
