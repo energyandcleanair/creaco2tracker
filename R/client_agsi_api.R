@@ -115,15 +115,18 @@ agsi.get_storage_change <- function(date_from, date_to, iso2, use_cache = TRUE, 
   pbapply::pblapply(iso2, function(iso2) {
     log_info(glue::glue("Getting storage change data for {iso2} from {date_from} to {date_to}"))
 
-    MAX_PAGE_SIZE <- 100000
+    MAX_PAGE_SIZE <- as.integer(100000)
 
     url <- glue(
-      "https://agsi.gie.eu/api?country={iso2}",
+      "https://agsi.gie.eu/api",
+      "?country={iso2}",
       "&from={date_from}",
       "&to={date_to}",
       "&page=1",
       "&size={MAX_PAGE_SIZE}"
     )
+
+    log_debug(glue::glue("AGSI request URL: {url}"))
 
     cache_key <- list(date_from = date_from, date_to = date_to, iso2 = iso2, url = url)
     cache_schema_version <- "v1_parquet_cache"

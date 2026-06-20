@@ -70,6 +70,7 @@ test_that("agsi.get_storage_change parses AGSI storage withdrawals", {
   expect_match(calls[[1]]$url, "country=DE")
   expect_match(calls[[1]]$url, "from=2023-01-01")
   expect_match(calls[[1]]$url, "to=2023-01-03")
+  expect_match(calls[[1]]$url, "size=100000")
   expect_equal(result$iso2, "DE")
   expect_equal(result$date, as.Date("2023-01-02"))
   expect_equal(result$value_gwh, 11.3505)
