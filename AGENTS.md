@@ -37,6 +37,16 @@ The provides data to dashboard on a regular basis.
 - If a direct `testthat::test_local()` run behaves differently from source-tree loading, confirm with `devtools::test()` before treating the result as a regression.
 - For documentation-only edits, `git diff --check` is usually sufficient.
 
+## Debugging and Validation Notes
+
+* For slow or expensive workflows, start with the smallest check that still exercises the relevant behaviour.
+* For behavioural regressions, inspect existing outputs or logs to locate the first likely divergence before changing code.
+* Narrow investigations by the smallest affected input set, date range, or workflow stage where possible.
+* For long debugging sessions, briefly record ruled-out causes when they affect the next steps.
+* For API-client changes, where relevant, check the actual request parameters, pagination, cache behaviour, and returned row coverage.
+* Store temporary diagnostics and long-running command logs under .tmp/.
+* Promote reusable diagnostics into tests or scripts, otherwise remove them before finishing.
+
 ## Working Notes
 
 - The package is organized around the CO2 pipeline, weather correction, demand decomposition, data masking, and publication workflows. When in doubt, follow the data flow from source loaders into model and workflow functions rather than editing surface wrappers first.
