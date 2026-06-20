@@ -150,6 +150,17 @@ ensure_image() {
 }
 
 common_run_args() {
+  local work_dir="${1:-$CONTAINER_REPO_ROOT}"
+  local container_work_dir="$work_dir"
+
+  if [[ "$container_work_dir" == "$REPO_ROOT" ]]; then
+    container_work_dir="$CONTAINER_REPO_ROOT"
+  elif [[ "$container_work_dir" == "$REPO_ROOT/"* ]]; then
+    container_work_dir="${CONTAINER_REPO_ROOT}${container_work_dir#$REPO_ROOT}"
+  elif [[ "$container_work_dir" != /* ]]; then
+    container_work_dir="${CONTAINER_REPO_ROOT}/${container_work_dir#./}"
+  fi
+
   local args=()
   args+=(--rm)
   args+=(--label "$PROJECT_LABEL")
@@ -159,7 +170,7 @@ common_run_args() {
   args+=(-e "PKG_CACHE_DIR=/cache/pak")
   args+=(-e "PKG_PACKAGE_CACHE_DIR=/cache/pak/packages")
   args+=(-e "PKG_METADATA_CACHE_DIR=/cache/pak/metadata")
-  args+=(-w "${CONTAINER_REPO_ROOT}")
+  args+=(-w "${container_work_dir}")
 
   if [[ -t 0 && -t 1 ]]; then
     args+=(-it)
@@ -176,8 +187,9 @@ run_mode() {
   fi
 
   local cmd=(Rscript "$@")
+  local work_dir="${RR_WORK_DIR:-$CONTAINER_REPO_ROOT}"
 
-  mapfile -t run_args < <(common_run_args)
+  mapfile -t run_args < <(common_run_args "$work_dir")
   podman run "${run_args[@]}" "$IMAGE_NAME" "${cmd[@]}"
 }
 

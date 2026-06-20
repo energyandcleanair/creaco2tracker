@@ -193,6 +193,8 @@ Use `./rr` to run repository scripts in a containerized R runtime.
 - Automatically builds the runtime image on first use.
 - Automatically rebuilds when build inputs change (`rr.Dockerfile`, `DESCRIPTION`, `rr`).
 - Bind-mounts the full repository to preserve existing relative-path behavior.
+- Accepts `RR_WORK_DIR` to run from a repository-relative working directory inside the runtime
+  image when a script needs an isolated source root.
 - Keeps R dependencies in image-managed library paths outside the workspace mount.
 - Persists pak cache in a project-scoped Podman volume.
 

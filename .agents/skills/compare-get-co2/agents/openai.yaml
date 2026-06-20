@@ -1,0 +1,4 @@
+interface:
+  display_name: "Compare get_co2"
+  short_description: "Run and inspect cached get_co2 comparisons"
+  default_prompt: "Use $compare-get-co2 to run a cached get_co2 comparison and summarize the result."

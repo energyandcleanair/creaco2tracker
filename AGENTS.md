@@ -47,6 +47,13 @@ The provides data to dashboard on a regular basis.
 * Store temporary diagnostics and long-running command logs under .tmp/.
 * Promote reusable diagnostics into tests or scripts, otherwise remove them before finishing.
 
+## Long-Running Commands
+
+Many operations in this repo include long 
+
+- Prefer bounded foreground runs with logs over background jobs. Use `.tmp/*.log` and `timeout` where appropriate.
+- Do not start background jobs and repeatedly poll them by default. Use background execution only when explicitly requested or when an attached foreground run is not practical.
+
 ## Working Notes
 
 - The package is organized around the CO2 pipeline, weather correction, demand decomposition, data masking, and publication workflows. When in doubt, follow the data flow from source loaders into model and workflow functions rather than editing surface wrappers first.
