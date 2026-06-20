@@ -179,10 +179,6 @@ get_gas_demand <- function(
 
 
 .summarise_masked_sum <- function(x, multiplier = 1) {
-  if (length(x) == 0 || all(is.na(x))) {
-    return(NA_real_)
-  }
-
   multiplier * sum(x, na.rm = TRUE)
 }
 

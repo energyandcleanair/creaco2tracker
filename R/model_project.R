@@ -27,9 +27,6 @@ project_until_now_lm <- function(
   fill_mode <- match.arg(fill_mode)
 
   value_proxy_cols <- grep("value_proxy", colnames(proxy), value = TRUE)
-  proxy_keys <- c("iso2", "fuel", "sector", "date")
-  proxy_selected <- proxy %>%
-    select(all_of(proxy_keys), any_of(value_proxy_cols))
 
   co2_untouched <- x %>% anti_join(proxy %>% distinct(iso2, fuel, sector),
     by = c("iso2", "fuel", "sector")
@@ -42,7 +39,6 @@ project_until_now_lm <- function(
     expand_dates("date", dts_month) %>%
     arrange(desc(date)) %>%
     ungroup() %>%
-    left_join(proxy_selected, by = c("iso2", "fuel", "sector", "date")) %>%
     group_by(iso2, fuel, sector, unit) %>%
     group_modify(function(df, keys, ...) {
       iso2 <- keys %>%
@@ -55,10 +51,16 @@ project_until_now_lm <- function(
         log_debug(glue::glue("project_until_now_lm: iso2={iso2}, fuel={fuel}, sector={sector}"))
       }
 
-      data <- df
-      strip_proxy_cols <- function(y) {
-        y %>% select(-any_of(value_proxy_cols))
-      }
+      data <- df %>%
+        left_join(
+          keys %>%
+            left_join(
+              proxy %>%
+                select(any_of(c("iso2", "date", value_proxy_cols, "fuel", "sector"))),
+              by = c("iso2", "fuel", "sector")
+            ),
+          by = c("date")
+        )
 
       is_usable_lm_model <- function(model) {
         inherits(model, "lm")
@@ -171,7 +173,7 @@ project_until_now_lm <- function(
       # Best R2
       if (all(r2s == 0)) {
         log_warn(glue::glue("{iso2} - {fuel} {sector}: No proxy data. Leaving as such."))
-        return(strip_proxy_cols(df))
+        return(df)
       }
 
       best_idx <- which.max(r2s)
@@ -180,7 +182,7 @@ project_until_now_lm <- function(
 
       if (!is_usable_lm_model(model)) {
         log_warn(glue::glue("{iso2} - {fuel} {sector}: No proxy data. Leaving as such."))
-        return(strip_proxy_cols(df))
+        return(df)
       }
 
       r2 <- model_adj_r2(model)
@@ -191,7 +193,7 @@ project_until_now_lm <- function(
             "proxy not good enough (R2={round(r2,2)}). Leaving as NA."
           )
         )
-        return(strip_proxy_cols(df))
+        return(df)
       }
       log_success(
         glue::glue(
@@ -231,7 +233,7 @@ project_until_now_lm <- function(
           mutate(value = value_filled) %>%
           select(-value_filled)
       }
-      strip_proxy_cols(df)
+      df
     }) %>%
     ungroup()
 
