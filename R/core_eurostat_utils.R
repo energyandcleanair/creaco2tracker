@@ -289,12 +289,6 @@ fill_gaps_in_time_series <- function(
         ) %>%
         arrange(time)
 
-      # Short-circuit: if completion added no rows and there are no NAs,
-      # the series is already structurally complete — skip expensive gap filling
-      if (nrow(complete_data) == nrow(group_data) && !anyNA(complete_data$values)) {
-        return(complete_data)
-      }
-
       # Apply gap filling methods
       complete_data %>%
         mutate(

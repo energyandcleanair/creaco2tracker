@@ -83,6 +83,49 @@ test_that("process_oil does not emit all-sector oil for incomplete latest month"
   )
 })
 
+test_that("process_oil does not materialize structurally missing months before gap filling", {
+  oil_input <- tibble::tribble(
+    ~geo, ~siec, ~nrg_bal, ~time, ~values, ~unit,
+    "EU27_2020", SIEC_OIL_PRODUCTS, "GID_OBS", "2026-01-01", 1000, EUROSTAT_UNIT_THOUSAND_TONNES,
+    "EU27_2020", SIEC_OIL_PRODUCTS, "GID_NE", "2026-01-01", 100, EUROSTAT_UNIT_THOUSAND_TONNES,
+    "EU27_2020", SIEC_HEATING_GASOIL, "GID_OBS", "2026-01-01", 100, EUROSTAT_UNIT_THOUSAND_TONNES,
+    "EU27_2020", SIEC_HEATING_GASOIL, "GID_NE", "2026-01-01", 10, EUROSTAT_UNIT_THOUSAND_TONNES,
+    "EU27_2020", SIEC_FUEL_OIL, "GID_OBS", "2026-01-01", 50, EUROSTAT_UNIT_THOUSAND_TONNES,
+    "EU27_2020", SIEC_FUEL_OIL, "GID_NE", "2026-01-01", 5, EUROSTAT_UNIT_THOUSAND_TONNES,
+    "EU27_2020", SIEC_BIOGASOLINE, "GID_OBS", "2026-01-01", 0, EUROSTAT_UNIT_THOUSAND_TONNES,
+    "EU27_2020", SIEC_BIODIESEL, "GID_OBS", "2026-01-01", 0, EUROSTAT_UNIT_THOUSAND_TONNES,
+    "EU27_2020", SIEC_OIL_PRODUCTS, "GID_OBS", "2026-03-01", 1000, EUROSTAT_UNIT_THOUSAND_TONNES,
+    "EU27_2020", SIEC_OIL_PRODUCTS, "GID_NE", "2026-03-01", 100, EUROSTAT_UNIT_THOUSAND_TONNES,
+    "EU27_2020", SIEC_HEATING_GASOIL, "GID_OBS", "2026-03-01", 100, EUROSTAT_UNIT_THOUSAND_TONNES,
+    "EU27_2020", SIEC_HEATING_GASOIL, "GID_NE", "2026-03-01", 10, EUROSTAT_UNIT_THOUSAND_TONNES,
+    "EU27_2020", SIEC_FUEL_OIL, "GID_OBS", "2026-03-01", 50, EUROSTAT_UNIT_THOUSAND_TONNES,
+    "EU27_2020", SIEC_FUEL_OIL, "GID_NE", "2026-03-01", 5, EUROSTAT_UNIT_THOUSAND_TONNES,
+    "EU27_2020", SIEC_BIOGASOLINE, "GID_OBS", "2026-03-01", 0, EUROSTAT_UNIT_THOUSAND_TONNES,
+    "EU27_2020", SIEC_BIODIESEL, "GID_OBS", "2026-03-01", 0, EUROSTAT_UNIT_THOUSAND_TONNES
+  ) %>%
+    dplyr::mutate(time = as.Date(time))
+
+  gap_fill_inputs <- list()
+
+  local_mocked_bindings(
+    add_iso2 = function(x, ...) dplyr::mutate(x, iso2 = "EU"),
+    fill_gaps_in_time_series = function(data, ...) {
+      gap_fill_inputs[[length(gap_fill_inputs) + 1]] <<- data
+      data
+    },
+    fill_eu_from_countries_sum = function(data, ...) data,
+    fix_eu_when_important_countries_missing = function(data, ...) data,
+    check_eurostat_oil_completeness = function(x) TRUE,
+    .package = "creaco2tracker"
+  )
+
+  process_oil(oil_input)
+
+  expect_length(gap_fill_inputs, 2)
+  expect_false(any(gap_fill_inputs[[1]]$time == as.Date("2026-02-01")))
+  expect_false(any(gap_fill_inputs[[2]]$time == as.Date("2026-02-01")))
+})
+
 test_that("validate_co2 rejects materially negative central component rows", {
   co2 <- tibble::tibble(
     iso2 = "EU",

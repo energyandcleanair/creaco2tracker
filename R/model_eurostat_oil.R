@@ -157,19 +157,6 @@ process_oil <- function(x) {
     select(-factor) %>%
     arrange(desc(time))
 
-  # Materialize monthly gaps so oil can be gap-filled even when source rows are
-  # structurally missing rather than explicitly NA.
-  completion_frequency <- if (all(lubridate::month(x_processed$time) == 1)) {
-    "year"
-  } else {
-    "month"
-  }
-
-  x_processed <- x_processed %>%
-    group_by(iso2, siec, nrg_bal, sector, unit) %>%
-    tidyr::complete(time = seq.Date(min(time), max(time), by = completion_frequency)) %>%
-    ungroup()
-
   # Apply gap filling
   x_processed <- fill_gaps_in_time_series(
     data = x_processed,
