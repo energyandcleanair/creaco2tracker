@@ -1,0 +1,225 @@
+process_gas <- function(x, pwr_generation) {
+  eurostat_tj_units <- c(
+    EUROSTAT_UNIT_TERAJOULE,
+    EUROSTAT_UNIT_TJ_GCV
+  )
+
+  # Monthly data only valid from 2014, way too low before
+  x <- x %>%
+    filter(freq != EUROSTAT_FREQ_MONTHLY | time >= "2015-01-01")
+
+  x_all <- x %>%
+    filter(
+      nrg_bal %in% c(
+        NRG_BAL_IC_OBS,
+        NRG_BAL_FC_NE
+      ),
+      unit %in% eurostat_tj_units,
+      siec == SIEC_NATURAL_GAS
+    ) %>%
+    group_by(across(-c(nrg_bal, values))) %>%
+    summarise(
+      values = sum(
+        values * case_when(
+          nrg_bal == NRG_BAL_IC_OBS ~ 1,
+          T ~ -1
+        )
+      ),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      sector = SECTOR_ALL,
+      fuel = FUEL_GAS
+    )
+
+  # Get months with fossil gas generation
+  # to remove EUROSTAT saying 0 while it is not (e.g. monthly Ireland in 2014)
+  has_gas_generation <- pwr_generation %>%
+    filter(source == "Fossil Gas") %>%
+    group_by(iso2, time = floor_date(date, "month")) %>%
+    summarise(value_mwh = sum(value_mwh, na.rm = TRUE)) %>%
+    mutate(
+      value_mwh_threshold = quantile(value_mwh[value_mwh > 0], 0.1), # Could be due to stock changes
+      has_gas_generation = value_mwh > value_mwh_threshold
+    ) %>%
+    ungroup() %>%
+    tidyr::complete(iso2, time = unique(x$time), fill = list(
+      has_gas_generation = FALSE,
+      value_mwh = NA
+    )) %>%
+    select(iso2, time, has_gas_generation) %>%
+    mutate(freq = EUROSTAT_FREQ_MONTHLY)
+
+
+  x_elec <- x %>%
+    filter(
+      (
+        freq == EUROSTAT_FREQ_MONTHLY & nrg_bal == NRG_BAL_TI_EHG_MAP) |
+        (
+          freq == EUROSTAT_FREQ_ANNUAL & nrg_bal %in% c(
+            NRG_BAL_TI_EHG_MAPE_E,
+            NRG_BAL_TI_EHG_MAPCHP_E
+          )),
+      unit %in% eurostat_tj_units,
+      siec == SIEC_NATURAL_GAS
+    ) %>%
+    mutate(
+      sector = SECTOR_ELEC,
+      fuel = FUEL_GAS
+    ) %>%
+    filter(time >= min(x_all$time)) %>%
+    # Remove months with 0 if there is gas generation
+    add_iso2() %>%
+    left_join(has_gas_generation) %>%
+    arrange(time) %>%
+    filter(
+      !(freq == EUROSTAT_FREQ_MONTHLY & has_gas_generation & values == 0)
+    )
+
+  bind_rows(
+    x_all,
+    x_elec
+  ) %>%
+    group_by(iso2, fuel, sector, siec, time, unit) %>%
+    summarise(
+      values = sum(values, na.rm = TRUE),
+      .groups = "drop"
+    )
+}
+
+process_gas_monthly <- function(x, pwr_generation) {
+  process_gas(x, pwr_generation)
+}
+
+process_gas_yearly <- function(x, pwr_generation) {
+  process_gas(x, pwr_generation)
+}
+
+
+#' Monthly data is not as detailed as yearly one.
+#' Most importantly, non-energy use
+#' is available in yearly but not in monthly data.
+#'
+#' We use yearly ratio 'Gross inland deliveries - energy use' / 'Gross inland deliveries - observed'
+#' to update monthly data
+#'
+#' A more accurate way would be to predict this ratio using industrial production index (e.g.
+#' fertiliser, petrochemicals)
+#' For a later version.
+#'
+#' @param cons_yearly_raw
+#' @param cons_monthly_raw
+#'
+#' @return
+#' @export
+#'
+#' @examples
+add_gas_non_energy <- function(cons_monthly_raw, cons_yearly_raw) {
+  eurostat_tj_units <- c(
+    EUROSTAT_UNIT_TERAJOULE,
+    EUROSTAT_UNIT_TJ_GCV
+  )
+
+  # TODO Add diagnostic chart
+  shares <- cons_yearly_raw %>%
+    filter(time >= "1990-01-01") %>%
+    filter(
+      nrg_bal %in% c(NRG_BAL_IC_OBS, NRG_BAL_FC_NE),
+      siec == SIEC_NATURAL_GAS,
+      unit %in% eurostat_tj_units
+    ) %>%
+    # Remove years with only NAs
+    # Important because last one could be 0
+    group_by(geo, time) %>%
+    filter(!all(is.na(values))) %>%
+    ungroup() %>%
+    mutate(year = year(time)) %>%
+    select(nrg_bal, siec, geo, year, values) %>%
+    tidyr::spread(nrg_bal, values) %>%
+    mutate(share_non_energy = tidyr::replace_na(.data[[NRG_BAL_FC_NE]] / .data[[NRG_BAL_IC_OBS]], 0)) %>%
+    select(-dplyr::any_of(c(NRG_BAL_FC_NE, NRG_BAL_IC_OBS)))
+
+  shares %>%
+    filter(geo == "Netherlands") %>%
+    ggplot(aes(year, share_non_energy)) +
+    geom_line() +
+    rcrea::scale_y_crea_zero()
+
+  # Project til now
+  years <- unique(year(cons_monthly_raw$time))
+  shares_filled <- shares %>%
+    tidyr::complete(year = years, geo, siec) %>%
+    group_by(geo, siec) %>%
+    arrange(year) %>%
+    tidyr::fill(share_non_energy) %>%
+    ungroup()
+
+
+  cons_monthly_raw_non_energy <- cons_monthly_raw %>%
+    filter(nrg_bal == NRG_BAL_IC_OBS) %>%
+    filter(siec == SIEC_NATURAL_GAS) %>%
+    mutate(year = year(time)) %>%
+    inner_join(shares_filled) %>%
+    mutate(
+      nrg_bal = NRG_BAL_FC_NE,
+      values = values * share_non_energy
+    ) %>%
+    select(-c(share_non_energy, year))
+
+  return(
+    bind_rows(
+      cons_monthly_raw,
+      cons_monthly_raw_non_energy
+    )
+  )
+}
+
+
+#' NG for Elec for EU27 is missing in 2019, simply because CY 0 data is missing...
+#'
+#' @param cons_monthly_raw
+#'
+#' @return
+#' @export
+#'
+#' @examples
+fill_ng_elec_eu27 <- function(cons_monthly_raw) {
+  nrg_bal_elec <- NRG_BAL_TI_EHG_MAP
+
+  eu27_ng_elec_new <- cons_monthly_raw %>%
+    add_iso2() %>%
+    filter(nrg_bal == nrg_bal_elec) %>%
+    filter(iso2 %in% get_eu_iso2s()) %>%
+    group_by(unit, time) %>%
+    summarise(values = sum(values, na.rm = TRUE), .groups = "drop")
+
+  eu27_ng_elec_old <- cons_monthly_raw %>%
+    add_iso2() %>%
+    filter(nrg_bal == nrg_bal_elec) %>%
+    filter(iso2 == "EU")
+
+  if (nrow(eu27_ng_elec_old) == 0) {
+    return(cons_monthly_raw)
+  }
+
+  eu27_ng_elec <- eu27_ng_elec_old %>%
+    group_by(unit) %>%
+    tidyr::complete(
+      tidyr::nesting(time = seq.Date(min(time), max(time), by = "month")),
+      tidyr::nesting(nrg_bal, siec, freq),
+      tidyr::nesting(geo, iso2)
+    ) %>%
+    left_join(
+      eu27_ng_elec_new %>%
+        select(unit, time, values_filler = values)
+    ) %>%
+    mutate(values = coalesce(values, values_filler)) %>%
+    select(-c(values_filler)) %>%
+    ungroup()
+
+
+  bind_rows(
+    cons_monthly_raw %>% add_iso2() %>% filter(nrg_bal != nrg_bal_elec | iso2 != "EU"),
+    eu27_ng_elec
+  )
+}

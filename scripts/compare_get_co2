@@ -1,0 +1,1164 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  scripts/compare_get_co2 [options] [base] [target]
+
+Defaults:
+  no args   compare master against HEAD, or working copy if source files changed
+  one arg   compare the provided base against HEAD, or working copy if source files changed
+  two args  compare base against target
+
+Options:
+  --date-to YYYY-MM-DD  Pin get_co2(date_to). Defaults to today's UTC date.
+  --runner MODE         R execution mode. Defaults to auto, which uses Rscript
+                        inside the devcontainer and ./rr run otherwise. Both
+                        runners support committed refs and working-copy targets
+                        through isolated source directories.
+  --worktree            Compare against the current working copy.
+
+Targets:
+  worktree, working-tree, .  aliases for the current working copy.
+
+Artifacts:
+  .tmp/comparison/ref_runs/<safe_ref>_<short_sha>_<run_hash>/
+  .tmp/comparison/comparisons/<safe_base>_<base_short>__<safe_target>_<target_short>/
+EOF
+}
+
+die() {
+  echo "Error: $*" >&2
+  exit 1
+}
+
+csv_quote() {
+  local value="${1//\"/\"\"}"
+  printf '"%s"' "$value"
+}
+
+hash_stream() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | awk '{print $1}'
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 | awk '{print $2}'
+  else
+    die "no supported SHA-256 tool found (sha256sum, shasum, openssl)"
+  fi
+}
+
+hash_file() {
+  local file="$1"
+
+  [[ -f "$file" ]] || die "cannot hash missing file: ${file}"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1}'
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$file" | awk '{print $2}'
+  else
+    die "no supported SHA-256 tool found (sha256sum, shasum, openssl)"
+  fi
+}
+
+hash_text() {
+  printf '%s' "$1" | hash_stream
+}
+
+short_hash() {
+  printf '%s' "$1" | cut -c 1-12
+}
+
+safe_path_label() {
+  local label="$1"
+  local safe
+
+  safe="$(printf '%s' "$label" |
+    tr '[:upper:]' '[:lower:]' |
+    sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//; s/-+/-/g')"
+
+  if [[ -z "$safe" ]]; then
+    safe="ref"
+  fi
+
+  printf '%s' "$safe"
+}
+
+resolve_commit() {
+  local ref="$1"
+  git rev-parse --verify "${ref}^{commit}" 2>/dev/null ||
+    die "could not resolve ref as a commit: ${ref}"
+}
+
+short_commit() {
+  local sha="$1"
+  git rev-parse --short=12 "$sha"
+}
+
+is_worktree_alias() {
+  case "$1" in
+    worktree | working-tree | .)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+has_tracked_changes() {
+  ! git diff --quiet HEAD --
+}
+
+has_untracked_unignored_files() {
+  local first_file
+
+  IFS= read -r -d '' first_file < <(git ls-files --others --exclude-standard -z)
+}
+
+has_working_copy_changes() {
+  has_tracked_changes || has_untracked_unignored_files
+}
+
+write_untracked_unignored_files() {
+  local nul_file="$1"
+  local text_file="$2"
+
+  git ls-files --others --exclude-standard -z | sort -z >"$nul_file"
+  tr '\0' '\n' <"$nul_file" >"$text_file"
+}
+
+compute_untracked_unignored_hash() {
+  local nul_file="$1"
+  local path
+
+  if [[ ! -s "$nul_file" ]]; then
+    hash_text "no-untracked-unignored-files"
+    return 0
+  fi
+
+  while IFS= read -r -d '' path; do
+    printf 'path\0%s\0sha256\0%s\0' "$path" "$(hash_file "$path")"
+  done <"$nul_file" | hash_stream
+}
+
+compute_worktree_hash() {
+  local head_sha="$1"
+  local untracked_nul_file="${2:-}"
+  local diff_hash untracked_hash temp_untracked_nul
+
+  diff_hash="$(git diff --binary HEAD -- | hash_stream)"
+
+  if [[ -n "$untracked_nul_file" ]]; then
+    untracked_hash="$(compute_untracked_unignored_hash "$untracked_nul_file")"
+  else
+    temp_untracked_nul="$(mktemp)"
+    write_untracked_unignored_files "$temp_untracked_nul" /dev/null
+    untracked_hash="$(compute_untracked_unignored_hash "$temp_untracked_nul")"
+    rm -f "$temp_untracked_nul"
+  fi
+
+  hash_text "$(printf '%s\n' \
+    "worktree_hash_version=2" \
+    "head_sha=${head_sha}" \
+    "tracked_diff_hash=${diff_hash}" \
+    "untracked_unignored_hash=${untracked_hash}")"
+}
+
+copy_untracked_unignored_files() {
+  local source_dir="$1"
+  local nul_file="$2"
+  local path
+
+  if [[ ! -s "$nul_file" ]]; then
+    return 0
+  fi
+
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --from0 --files-from="$nul_file" ./ "${source_dir}/"
+    return 0
+  fi
+
+  while IFS= read -r -d '' path; do
+    mkdir -p "${source_dir}/$(dirname "$path")"
+    cp -p "$path" "${source_dir}/${path}"
+  done <"$nul_file"
+}
+
+build_working_copy_snapshot() {
+  local source_dir="$1"
+  local diff_file="$2"
+  local untracked_nul_file="$3"
+
+  mkdir -p "$source_dir"
+  git archive --format=tar HEAD | tar -x -C "$source_dir"
+
+  if [[ -s "$diff_file" ]]; then
+    git -C "$source_dir" init -q
+    git -C "$source_dir" apply "$diff_file"
+    rm -rf "${source_dir}/.git"
+  fi
+
+  copy_untracked_unignored_files "$source_dir" "$untracked_nul_file"
+}
+
+copy_repo_renviron() {
+  local source_dir="$1"
+  local repo_renviron="$PWD/.Renviron"
+
+  if [[ -f "$repo_renviron" ]]; then
+    cp -p "$repo_renviron" "${source_dir}/.Renviron"
+  fi
+}
+
+validate_date_to() {
+  local value="$1"
+
+  if [[ ! "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    die "--date-to must use YYYY-MM-DD, got: ${value}"
+  fi
+
+  if [[ "$(date -u -d "$value" +%F 2>/dev/null || true)" != "$value" ]]; then
+    die "--date-to is not a valid date: ${value}"
+  fi
+}
+
+validate_runner() {
+  case "$1" in
+    auto | rscript | rr)
+      ;;
+    *)
+      die "--runner must be one of: auto, rscript, rr"
+      ;;
+  esac
+}
+
+is_devcontainer_environment() {
+  local repo_root="$1"
+
+  [[ "${REMOTE_CONTAINERS:-}" == "true" ]] && return 0
+  [[ -n "${CODESPACES:-}" ]] && return 0
+  [[ -n "${DEVCONTAINER:-}" ]] && return 0
+
+  if [[ -d "${repo_root}/.devcontainer" && "$repo_root" == /workspaces/* ]]; then
+    [[ "${R_LIBS_USER:-}" == "${repo_root}/.r-lib" ]] && return 0
+  fi
+
+  return 1
+}
+
+resolve_runner() {
+  local requested_runner="$1"
+  local repo_root="$2"
+
+  if [[ "$requested_runner" != "auto" ]]; then
+    printf '%s' "$requested_runner"
+    return 0
+  fi
+
+  if is_devcontainer_environment "$repo_root"; then
+    printf 'rscript'
+  else
+    printf 'rr'
+  fi
+}
+
+require_runner() {
+  local runner="$1"
+
+  case "$runner" in
+    rscript)
+      command -v Rscript >/dev/null 2>&1 || die "Rscript is required for --runner rscript"
+      ;;
+    rr)
+      [[ -x "./rr" ]] || die "missing executable rr script at repo root"
+      ;;
+  esac
+}
+
+run_rscript() {
+  local runner="$1"
+  local source_dir="$2"
+  shift
+  shift
+
+  case "$runner" in
+    rscript)
+      (cd "$source_dir" && Rscript "$@")
+      ;;
+    rr)
+      RR_WORK_DIR="$source_dir" ./rr run "$@"
+      ;;
+    *)
+      die "unsupported resolved runner: ${runner}"
+      ;;
+  esac
+}
+
+require_clean_tracked_tree() {
+  if ! git diff --quiet --ignore-submodules --; then
+    die "tracked files have unstaged changes; commit or stash them before comparing commits"
+  fi
+
+  if ! git diff --cached --quiet --ignore-submodules --; then
+    die "tracked files have staged changes; commit or stash them before comparing commits"
+  fi
+}
+
+write_metadata_entry() {
+  local key="$1"
+  local value="$2"
+
+  printf '%s,' "$key"
+  csv_quote "$value"
+  printf '\n'
+}
+
+metadata_value() {
+  local metadata_file="$1"
+  local key="$2"
+
+  awk -F, -v key="$key" '
+    $1 == key {
+      value = $2
+      gsub(/^"/, "", value)
+      gsub(/"$/, "", value)
+      gsub(/""/, "\"", value)
+      print value
+      exit
+    }
+  ' "$metadata_file"
+}
+
+metadata_matches() {
+  local metadata_file="$1"
+  local key="$2"
+  local expected="$3"
+
+  [[ -f "$metadata_file" ]] || return 1
+  [[ "$(metadata_value "$metadata_file" "$key")" == "$expected" ]]
+}
+
+write_ref_metadata() {
+  local metadata_file="$1"
+  local run_dir="$2"
+  local ref="$3"
+  local sha="$4"
+  local short_sha="$5"
+  local date_to="$6"
+  local args_hash="$7"
+  local collect_script_hash="$8"
+  local driver_script_hash="$9"
+  local run_hash="${10}"
+  local invocation="${11}"
+  local runner="${12}"
+
+  {
+    echo "key,value"
+    write_metadata_entry "layout_version" "2"
+    write_metadata_entry "artifact_type" "ref_run"
+    write_metadata_entry "source_type" "commit"
+    write_metadata_entry "ref" "$ref"
+    write_metadata_entry "sha" "$sha"
+    write_metadata_entry "short_sha" "$short_sha"
+    write_metadata_entry "date_to" "$date_to"
+    write_metadata_entry "args_hash" "$args_hash"
+    write_metadata_entry "collect_script_hash" "$collect_script_hash"
+    write_metadata_entry "driver_script_hash" "$driver_script_hash"
+    write_metadata_entry "run_hash" "$run_hash"
+    write_metadata_entry "raw_file" "raw.csv"
+    write_metadata_entry "run_dir" "$run_dir"
+    write_metadata_entry "runner" "$runner"
+    write_metadata_entry "generated_at_utc" "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+    write_metadata_entry "invocation" "$invocation"
+  } >"$metadata_file"
+}
+
+write_worktree_metadata() {
+  local metadata_file="$1"
+  local run_dir="$2"
+  local head_sha="$3"
+  local head_short="$4"
+  local worktree_hash="$5"
+  local dirty_tracked="$6"
+  local dirty_untracked_unignored="$7"
+  local date_to="$8"
+  local args_hash="$9"
+  local collect_script_hash="${10}"
+  local driver_script_hash="${11}"
+  local run_hash="${12}"
+  local invocation="${13}"
+  local runner="${14}"
+
+  {
+    echo "key,value"
+    write_metadata_entry "layout_version" "2"
+    write_metadata_entry "artifact_type" "ref_run"
+    write_metadata_entry "source_type" "worktree"
+    write_metadata_entry "ref" "worktree"
+    write_metadata_entry "sha" "$head_sha"
+    write_metadata_entry "head_sha" "$head_sha"
+    write_metadata_entry "short_sha" "$head_short"
+    write_metadata_entry "worktree_hash" "$worktree_hash"
+    write_metadata_entry "dirty_tracked" "$dirty_tracked"
+    write_metadata_entry "dirty_untracked_unignored" "$dirty_untracked_unignored"
+    write_metadata_entry "date_to" "$date_to"
+    write_metadata_entry "args_hash" "$args_hash"
+    write_metadata_entry "collect_script_hash" "$collect_script_hash"
+    write_metadata_entry "driver_script_hash" "$driver_script_hash"
+    write_metadata_entry "run_hash" "$run_hash"
+    write_metadata_entry "raw_file" "raw.csv"
+    write_metadata_entry "run_dir" "$run_dir"
+    write_metadata_entry "runner" "$runner"
+    write_metadata_entry "generated_at_utc" "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+    write_metadata_entry "invocation" "$invocation"
+  } >"$metadata_file"
+}
+
+write_comparison_metadata() {
+  local metadata_file="$1"
+  local comparison_dir="$2"
+  local base_ref="$3"
+  local target_ref="$4"
+  local base_sha="$5"
+  local target_sha="$6"
+  local base_short="$7"
+  local target_short="$8"
+  local date_to="$9"
+  local raw_base_file="${10}"
+  local raw_target_file="${11}"
+  local base_run_dir="${12}"
+  local target_run_dir="${13}"
+  local base_run_hash="${14}"
+  local target_run_hash="${15}"
+  local compare_script_hash="${16}"
+  local driver_script_hash="${17}"
+  local report_hash="${18}"
+  local invocation="${19}"
+  local runner="${20}"
+  local base_source_type="${21}"
+  local target_source_type="${22}"
+  local base_source_id="${23}"
+  local target_source_id="${24}"
+  local target_worktree_hash="${25:-}"
+
+  {
+    echo "key,value"
+    write_metadata_entry "layout_version" "2"
+    write_metadata_entry "artifact_type" "comparison"
+    write_metadata_entry "base_ref" "$base_ref"
+    write_metadata_entry "target_ref" "$target_ref"
+    write_metadata_entry "base_source_type" "$base_source_type"
+    write_metadata_entry "target_source_type" "$target_source_type"
+    write_metadata_entry "base_source_id" "$base_source_id"
+    write_metadata_entry "target_source_id" "$target_source_id"
+    write_metadata_entry "base_sha" "$base_sha"
+    write_metadata_entry "target_sha" "$target_sha"
+    write_metadata_entry "base_short_sha" "$base_short"
+    write_metadata_entry "target_short_sha" "$target_short"
+    write_metadata_entry "date_to" "$date_to"
+    write_metadata_entry "raw_base_file" "$raw_base_file"
+    write_metadata_entry "raw_target_file" "$raw_target_file"
+    write_metadata_entry "base_run_dir" "$base_run_dir"
+    write_metadata_entry "target_run_dir" "$target_run_dir"
+    write_metadata_entry "base_run_hash" "$base_run_hash"
+    write_metadata_entry "target_run_hash" "$target_run_hash"
+    write_metadata_entry "compare_script_hash" "$compare_script_hash"
+    write_metadata_entry "driver_script_hash" "$driver_script_hash"
+    write_metadata_entry "report_hash" "$report_hash"
+    write_metadata_entry "comparison_dir" "$comparison_dir"
+    write_metadata_entry "runner" "$runner"
+    if [[ -n "$target_worktree_hash" ]]; then
+      write_metadata_entry "target_worktree_hash" "$target_worktree_hash"
+    fi
+    write_metadata_entry "generated_at_utc" "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+    write_metadata_entry "invocation" "$invocation"
+  } >"$metadata_file"
+}
+
+build_invocation() {
+  local invocation="$1"
+  shift || true
+
+  local arg
+  for arg in "$@"; do
+    invocation+=" $(printf '%q' "$arg")"
+  done
+
+  printf '%s' "$invocation"
+}
+
+compute_args_hash() {
+  local date_to="$1"
+
+  hash_text "$(printf 'args_version=1\ndate_to=%s\n' "$date_to")"
+}
+
+compute_run_hash() {
+  local args_hash="$1"
+  local collect_script_hash="$2"
+  local driver_script_hash="$3"
+
+  hash_text "$(printf \
+    'run_hash_version=2\nargs_hash=%s\ncollect_script_hash=%s\ndriver_script_hash=%s\n' \
+    "$args_hash" \
+    "$collect_script_hash" \
+    "$driver_script_hash")"
+}
+
+compute_report_hash() {
+  local base_source_id="$1"
+  local target_source_id="$2"
+  local base_run_hash="$3"
+  local target_run_hash="$4"
+  local compare_script_hash="$5"
+  local driver_script_hash="$6"
+
+  hash_text "$(printf '%s\n' \
+    "report_hash_version=2" \
+    "base_source_id=${base_source_id}" \
+    "target_source_id=${target_source_id}" \
+    "base_run_hash=${base_run_hash}" \
+    "target_run_hash=${target_run_hash}" \
+    "compare_script_hash=${compare_script_hash}" \
+    "driver_script_hash=${driver_script_hash}")"
+}
+
+ref_run_allows_reuse() {
+  local run_dir="$1"
+  local sha="$2"
+  local date_to="$3"
+  local run_hash="$4"
+  local collect_script_hash="$5"
+  local driver_script_hash="$6"
+  local metadata_file="${run_dir}/metadata.csv"
+
+  [[ -f "${run_dir}/complete.ok" ]] || return 1
+  [[ -s "${run_dir}/raw.csv" ]] || return 1
+  [[ -f "${run_dir}/collect_get_co2.R" ]] || return 1
+  [[ "$(hash_file "${run_dir}/collect_get_co2.R")" == "$collect_script_hash" ]] || return 1
+  metadata_matches "$metadata_file" "artifact_type" "ref_run" || return 1
+  metadata_matches "$metadata_file" "sha" "$sha" || return 1
+  metadata_matches "$metadata_file" "date_to" "$date_to" || return 1
+  metadata_matches "$metadata_file" "collect_script_hash" "$collect_script_hash" || return 1
+  metadata_matches "$metadata_file" "driver_script_hash" "$driver_script_hash" || return 1
+  metadata_matches "$metadata_file" "run_hash" "$run_hash" || return 1
+}
+
+worktree_run_allows_reuse() {
+  local run_dir="$1"
+  local head_sha="$2"
+  local worktree_hash="$3"
+  local date_to="$4"
+  local run_hash="$5"
+  local collect_script_hash="$6"
+  local driver_script_hash="$7"
+  local metadata_file="${run_dir}/metadata.csv"
+
+  [[ -f "${run_dir}/complete.ok" ]] || return 1
+  [[ -s "${run_dir}/raw.csv" ]] || return 1
+  [[ -f "${run_dir}/collect_get_co2.R" ]] || return 1
+  [[ "$(hash_file "${run_dir}/collect_get_co2.R")" == "$collect_script_hash" ]] || return 1
+  metadata_matches "$metadata_file" "artifact_type" "ref_run" || return 1
+  metadata_matches "$metadata_file" "source_type" "worktree" || return 1
+  metadata_matches "$metadata_file" "head_sha" "$head_sha" || return 1
+  metadata_matches "$metadata_file" "worktree_hash" "$worktree_hash" || return 1
+  metadata_matches "$metadata_file" "date_to" "$date_to" || return 1
+  metadata_matches "$metadata_file" "collect_script_hash" "$collect_script_hash" || return 1
+  metadata_matches "$metadata_file" "driver_script_hash" "$driver_script_hash" || return 1
+  metadata_matches "$metadata_file" "run_hash" "$run_hash" || return 1
+}
+
+comparison_allows_reuse() {
+  local comparison_dir="$1"
+  local report_hash="$2"
+  local compare_script_hash="$3"
+  local driver_script_hash="$4"
+  local metadata_file="${comparison_dir}/metadata.csv"
+
+  [[ -f "${comparison_dir}/complete.ok" ]] || return 1
+  [[ -f "${comparison_dir}/compare_get_co2.R" ]] || return 1
+  [[ "$(hash_file "${comparison_dir}/compare_get_co2.R")" == "$compare_script_hash" ]] || return 1
+  metadata_matches "$metadata_file" "artifact_type" "comparison" || return 1
+  metadata_matches "$metadata_file" "compare_script_hash" "$compare_script_hash" || return 1
+  metadata_matches "$metadata_file" "driver_script_hash" "$driver_script_hash" || return 1
+  metadata_matches "$metadata_file" "report_hash" "$report_hash" || return 1
+}
+
+remove_temp_git_worktree() {
+  local source_dir="$1"
+
+  if [[ -n "$source_dir" && -d "$source_dir" ]]; then
+    git worktree remove --force "$source_dir" >/dev/null 2>&1 || rm -rf "$source_dir"
+    git worktree prune >/dev/null 2>&1 || true
+  fi
+}
+
+collect_ref_run() {
+  local label="$1"
+  local ref="$2"
+  local sha="$3"
+  local short_sha="$4"
+  local run_dir="$5"
+  local collect_src="$6"
+  local date_to="$7"
+  local args_hash="$8"
+  local collect_script_hash="$9"
+  local driver_script_hash="${10}"
+  local run_hash="${11}"
+  local invocation="${12}"
+  local runner="${13}"
+  local max_attempts="${COMPARE_GET_CO2_COLLECT_RETRIES:-3}"
+  local run_dir_abs run_parent tmp_dir collect_copy metadata_file
+  local collect_script_arg raw_file source_dir temp_git_worktree
+
+  if ref_run_allows_reuse \
+    "$run_dir" \
+    "$sha" \
+    "$date_to" \
+    "$run_hash" \
+    "$collect_script_hash" \
+    "$driver_script_hash"; then
+    echo "[compare_get_co2] Reusing cached ${label} run: ${run_dir}"
+    return 0
+  fi
+
+  run_parent="$(mkdir -p "$(dirname "$run_dir")" && cd "$(dirname "$run_dir")" && pwd)"
+  run_dir_abs="${run_parent}/$(basename "$run_dir")"
+  tmp_dir="${run_dir}.tmp.$$"
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir"
+
+  collect_copy="${tmp_dir}/collect_get_co2.R"
+  collect_script_arg="../collect_get_co2.R"
+  raw_file="../raw.csv"
+  metadata_file="${tmp_dir}/metadata.csv"
+  cp "$collect_src" "$collect_copy"
+
+  source_dir="${tmp_dir}/source"
+  temp_git_worktree="$source_dir"
+
+  write_ref_metadata \
+    "$metadata_file" \
+    "$run_dir_abs" \
+    "$ref" \
+    "$sha" \
+    "$short_sha" \
+    "$date_to" \
+    "$args_hash" \
+    "$collect_script_hash" \
+    "$driver_script_hash" \
+    "$run_hash" \
+    "$invocation" \
+    "$runner"
+
+  echo "[compare_get_co2] Collecting ${label} ${ref} (${short_sha}) into ${run_dir}..."
+
+  if ! git worktree add --detach --quiet "$source_dir" "$sha"; then
+    remove_temp_git_worktree "$temp_git_worktree"
+    die "failed to create temporary worktree for ${label} ${ref} (${short_sha})"
+  fi
+  copy_repo_renviron "$source_dir"
+
+  local attempt
+  for attempt in $(seq 1 "$max_attempts"); do
+    rm -f "$raw_file"
+
+    if run_rscript "$runner" "$source_dir" "$collect_script_arg" \
+      --output "$raw_file" \
+      --date-to "$date_to" \
+      --sha "$sha"; then
+      printf 'completed_at_utc=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >"${tmp_dir}/complete.ok"
+      remove_temp_git_worktree "$temp_git_worktree"
+      rm -rf "$run_dir"
+      mv "$tmp_dir" "$run_dir"
+      return 0
+    fi
+
+    if [[ "$attempt" -eq "$max_attempts" ]]; then
+      remove_temp_git_worktree "$temp_git_worktree"
+      die "failed to collect ${label} ${ref} (${short_sha}) after ${max_attempts} attempt(s)"
+    fi
+
+    echo "[compare_get_co2] ${label} collection failed; retrying (${attempt}/${max_attempts})..."
+    sleep $((attempt * 10))
+  done
+}
+
+collect_worktree_run() {
+  local head_sha="$1"
+  local head_short="$2"
+  local worktree_hash="$3"
+  local dirty_tracked="$4"
+  local dirty_untracked_unignored="$5"
+  local run_dir="$6"
+  local collect_src="$7"
+  local date_to="$8"
+  local args_hash="$9"
+  local collect_script_hash="${10}"
+  local driver_script_hash="${11}"
+  local run_hash="${12}"
+  local invocation="${13}"
+  local runner="${14}"
+  local max_attempts="${COMPARE_GET_CO2_COLLECT_RETRIES:-3}"
+  local run_dir_abs run_parent tmp_dir tmp_dir_abs collect_copy metadata_file
+  local collect_script_arg raw_file source_dir diff_file status_file untracked_nul_file untracked_file
+
+  if worktree_run_allows_reuse \
+    "$run_dir" \
+    "$head_sha" \
+    "$worktree_hash" \
+    "$date_to" \
+    "$run_hash" \
+    "$collect_script_hash" \
+    "$driver_script_hash"; then
+    echo "[compare_get_co2] Reusing cached worktree run: ${run_dir}"
+    return 0
+  fi
+
+  run_parent="$(mkdir -p "$(dirname "$run_dir")" && cd "$(dirname "$run_dir")" && pwd)"
+  run_dir_abs="${run_parent}/$(basename "$run_dir")"
+  tmp_dir="${run_dir}.tmp.$$"
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir"
+  tmp_dir_abs="$(cd "$tmp_dir" && pwd)"
+
+  collect_copy="${tmp_dir_abs}/collect_get_co2.R"
+  collect_script_arg="../collect_get_co2.R"
+  raw_file="../raw.csv"
+  metadata_file="${tmp_dir_abs}/metadata.csv"
+  diff_file="${tmp_dir_abs}/worktree_diff.patch"
+  status_file="${tmp_dir_abs}/worktree_status.txt"
+  untracked_nul_file="${tmp_dir_abs}/untracked_files.nul"
+  untracked_file="${tmp_dir_abs}/untracked_files.txt"
+  source_dir="${tmp_dir_abs}/source"
+
+  cp "$collect_src" "$collect_copy"
+  git status --short --untracked-files=all >"$status_file"
+  git diff --binary HEAD -- >"$diff_file"
+  write_untracked_unignored_files "$untracked_nul_file" "$untracked_file"
+
+  write_worktree_metadata \
+    "$metadata_file" \
+    "$run_dir_abs" \
+    "$head_sha" \
+    "$head_short" \
+    "$worktree_hash" \
+    "$dirty_tracked" \
+    "$dirty_untracked_unignored" \
+    "$date_to" \
+    "$args_hash" \
+    "$collect_script_hash" \
+    "$driver_script_hash" \
+    "$run_hash" \
+    "$invocation" \
+    "$runner"
+
+  echo "[compare_get_co2] Collecting working copy (${worktree_hash}) into ${run_dir}..."
+  build_working_copy_snapshot "$source_dir" "$diff_file" "$untracked_nul_file"
+  copy_repo_renviron "$source_dir"
+  rm -f "$untracked_nul_file"
+
+  local attempt
+  for attempt in $(seq 1 "$max_attempts"); do
+    rm -f "$raw_file"
+
+    if run_rscript "$runner" "$source_dir" "$collect_script_arg" \
+      --output "$raw_file" \
+      --date-to "$date_to" \
+      --sha "${head_sha}+worktree:${worktree_hash}"; then
+      rm -rf "$source_dir"
+      printf 'completed_at_utc=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >"${tmp_dir}/complete.ok"
+      rm -rf "$run_dir"
+      mv "$tmp_dir" "$run_dir"
+      return 0
+    fi
+
+    if [[ "$attempt" -eq "$max_attempts" ]]; then
+      rm -rf "$source_dir"
+      die "failed to collect working copy (${worktree_hash}) after ${max_attempts} attempt(s)"
+    fi
+
+    echo "[compare_get_co2] worktree collection failed; retrying (${attempt}/${max_attempts})..."
+    sleep $((attempt * 10))
+  done
+}
+
+build_comparison_report() {
+  local comparison_dir="$1"
+  local compare_src="$2"
+  local base_ref="$3"
+  local target_ref="$4"
+  local base_sha="$5"
+  local target_sha="$6"
+  local base_short="$7"
+  local target_short="$8"
+  local date_to="$9"
+  local base_run_dir="${10}"
+  local target_run_dir="${11}"
+  local base_run_hash="${12}"
+  local target_run_hash="${13}"
+  local compare_script_hash="${14}"
+  local driver_script_hash="${15}"
+  local report_hash="${16}"
+  local invocation="${17}"
+  local runner="${18}"
+  local base_source_type="${19}"
+  local target_source_type="${20}"
+  local base_source_id="${21}"
+  local target_source_id="${22}"
+  local target_worktree_hash="${23:-}"
+  local comparison_dir_abs comparison_parent tmp_dir metadata_file compare_copy
+  local raw_base_file raw_target_file
+
+  if comparison_allows_reuse \
+    "$comparison_dir" \
+    "$report_hash" \
+    "$compare_script_hash" \
+    "$driver_script_hash"; then
+    echo "[compare_get_co2] Reusing cached comparison report: ${comparison_dir}"
+    return 0
+  fi
+
+  comparison_parent="$(
+    mkdir -p "$(dirname "$comparison_dir")" && cd "$(dirname "$comparison_dir")" && pwd
+  )"
+  comparison_dir_abs="${comparison_parent}/$(basename "$comparison_dir")"
+  tmp_dir="${comparison_dir}.tmp.$$"
+  rm -rf "$tmp_dir"
+  mkdir -p "${tmp_dir}/plots"
+
+  metadata_file="${tmp_dir}/metadata.csv"
+  compare_copy="${tmp_dir}/compare_get_co2.R"
+  raw_base_file="../../ref_runs/$(basename "$base_run_dir")/raw.csv"
+  raw_target_file="../../ref_runs/$(basename "$target_run_dir")/raw.csv"
+
+  cp "$compare_src" "$compare_copy"
+
+  write_comparison_metadata \
+    "$metadata_file" \
+    "$comparison_dir_abs" \
+    "$base_ref" \
+    "$target_ref" \
+    "$base_sha" \
+    "$target_sha" \
+    "$base_short" \
+    "$target_short" \
+    "$date_to" \
+    "$raw_base_file" \
+    "$raw_target_file" \
+    "$base_run_dir" \
+    "$target_run_dir" \
+    "$base_run_hash" \
+    "$target_run_hash" \
+    "$compare_script_hash" \
+    "$driver_script_hash" \
+    "$report_hash" \
+    "$invocation" \
+    "$runner" \
+    "$base_source_type" \
+    "$target_source_type" \
+    "$base_source_id" \
+    "$target_source_id" \
+    "$target_worktree_hash"
+
+  echo "[compare_get_co2] Building comparison report: ${comparison_dir}"
+  run_rscript "$runner" "." "$compare_copy" --comparison-dir "$tmp_dir"
+
+  printf 'completed_at_utc=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >"${tmp_dir}/complete.ok"
+  rm -rf "$comparison_dir"
+  mv "$tmp_dir" "$comparison_dir"
+}
+
+main() {
+  local original_args=("$@")
+  local date_to=""
+  local requested_runner="${COMPARE_GET_CO2_RUNNER:-auto}"
+  local force_worktree=0
+  local positional=()
+
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      --date-to)
+        [[ "$#" -ge 2 ]] || die "missing value for --date-to"
+        date_to="$2"
+        shift 2
+        ;;
+      --date-to=*)
+        date_to="${1#--date-to=}"
+        shift
+        ;;
+      --runner)
+        [[ "$#" -ge 2 ]] || die "missing value for --runner"
+        requested_runner="$2"
+        shift 2
+        ;;
+      --runner=*)
+        requested_runner="${1#--runner=}"
+        shift
+        ;;
+      --worktree)
+        force_worktree=1
+        shift
+        ;;
+      --*)
+        die "unknown option: $1"
+        ;;
+      *)
+        positional+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  if [[ "${#positional[@]}" -gt 2 ]]; then
+    usage >&2
+    exit 1
+  fi
+
+  if [[ -z "$date_to" ]]; then
+    date_to="$(date -u +%F)"
+  fi
+  validate_date_to "$date_to"
+  validate_runner "$requested_runner"
+
+  local repo_root
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" ||
+    die "not inside a git repository"
+  cd "$repo_root"
+
+  local collect_src compare_src
+  collect_src="${repo_root}/scripts/collect_get_co2.R"
+  compare_src="${repo_root}/scripts/compare_get_co2.R"
+  [[ -f "$collect_src" ]] || die "missing R collect script: ${collect_src}"
+  [[ -f "$compare_src" ]] || die "missing R compare script: ${compare_src}"
+
+  local runner
+  runner="$(resolve_runner "$requested_runner" "$repo_root")"
+  require_runner "$runner"
+
+  local tracked_dirty=0
+  local untracked_dirty=0
+  local working_copy_dirty=0
+  if has_tracked_changes; then
+    tracked_dirty=1
+  fi
+  if has_untracked_unignored_files; then
+    untracked_dirty=1
+  fi
+  if [[ "$tracked_dirty" == "1" || "$untracked_dirty" == "1" ]]; then
+    working_copy_dirty=1
+  fi
+
+  local base_ref target_ref target_source_type
+  target_source_type="commit"
+  case "${#positional[@]}" in
+    0)
+      base_ref="master"
+      if [[ "$force_worktree" == "1" || "$working_copy_dirty" == "1" ]]; then
+        target_ref="worktree"
+        target_source_type="worktree"
+      else
+        target_ref="HEAD"
+      fi
+      ;;
+    1)
+      if [[ "$force_worktree" == "1" ]]; then
+        base_ref="${positional[0]}"
+        target_ref="worktree"
+        target_source_type="worktree"
+      elif is_worktree_alias "${positional[0]}"; then
+        base_ref="master"
+        target_ref="worktree"
+        target_source_type="worktree"
+      else
+        base_ref="${positional[0]}"
+        if [[ "$working_copy_dirty" == "1" ]]; then
+          target_ref="worktree"
+          target_source_type="worktree"
+        else
+          target_ref="HEAD"
+        fi
+      fi
+      ;;
+    2)
+      if [[ "$force_worktree" == "1" ]]; then
+        die "--worktree accepts at most one positional base ref"
+      fi
+      base_ref="${positional[0]}"
+      target_ref="${positional[1]}"
+      if is_worktree_alias "$target_ref"; then
+        target_ref="worktree"
+        target_source_type="worktree"
+      fi
+      ;;
+  esac
+
+  if is_worktree_alias "$base_ref"; then
+    die "base ref cannot be the working tree"
+  fi
+
+  local base_sha target_sha base_short target_short
+  local head_sha head_short worktree_hash target_worktree_hash
+  local base_source_type target_source_id base_source_id
+  base_source_type="commit"
+  target_worktree_hash=""
+
+  base_sha="$(resolve_commit "$base_ref")"
+  base_short="$(short_commit "$base_sha")"
+  base_source_id="$base_sha"
+
+  if [[ "$target_source_type" == "worktree" ]]; then
+    head_sha="$(resolve_commit "HEAD")"
+    head_short="$(short_commit "$head_sha")"
+    worktree_hash="$(short_hash "$(compute_worktree_hash "$head_sha")")"
+    target_worktree_hash="$worktree_hash"
+    target_sha="$head_sha"
+    target_short="$head_short"
+    target_source_id="worktree:${head_sha}:${worktree_hash}"
+  else
+    target_sha="$(resolve_commit "$target_ref")"
+    target_short="$(short_commit "$target_sha")"
+    target_source_id="$target_sha"
+  fi
+
+  if [[ "$base_source_id" == "$target_source_id" ]]; then
+    die "base and target resolve to the same source: ${base_short}"
+  fi
+
+  local cache_root ref_runs_root comparisons_root
+  cache_root=".tmp/comparison"
+  ref_runs_root="${cache_root}/ref_runs"
+  comparisons_root="${cache_root}/comparisons"
+  mkdir -p "$ref_runs_root" "$comparisons_root"
+
+  local invocation collect_script_hash compare_script_hash driver_script_hash args_hash run_hash report_hash
+  invocation="$(build_invocation "$0" "${original_args[@]}")"
+  collect_script_hash="$(hash_file "$collect_src")"
+  compare_script_hash="$(hash_file "$compare_src")"
+  driver_script_hash="$(hash_file "${repo_root}/scripts/compare_get_co2")"
+  args_hash="$(compute_args_hash "$date_to")"
+  run_hash="$(short_hash "$(compute_run_hash \
+    "$args_hash" \
+    "$collect_script_hash" \
+    "$driver_script_hash")")"
+
+  local base_label target_label target_dir_label base_run_dir target_run_dir comparison_dir
+  base_label="$(safe_path_label "$base_ref")"
+  target_label="$(safe_path_label "$target_ref")"
+  target_dir_label="$target_label"
+  base_run_dir="${ref_runs_root}/${base_label}_${base_short}_${run_hash}"
+  if [[ "$target_source_type" == "worktree" ]]; then
+    target_dir_label="worktree_${target_short}_${target_worktree_hash}"
+    target_run_dir="${ref_runs_root}/${target_dir_label}_${run_hash}"
+  else
+    target_run_dir="${ref_runs_root}/${target_label}_${target_short}_${run_hash}"
+  fi
+
+  report_hash="$(short_hash "$(compute_report_hash \
+    "$base_source_id" \
+    "$target_source_id" \
+    "$run_hash" \
+    "$run_hash" \
+    "$compare_script_hash" \
+    "$driver_script_hash")")"
+  comparison_dir="${comparisons_root}/${base_label}_${base_short}__${target_dir_label}"
+
+  echo "[compare_get_co2] Cache root: ${cache_root}"
+  echo "[compare_get_co2] Pinned date_to: ${date_to}"
+  echo "[compare_get_co2] R runner: ${runner}"
+  echo "[compare_get_co2] Base source: ${base_ref} (${base_short})"
+  echo "[compare_get_co2] Target source: ${target_ref} (${target_source_type})"
+  if [[ "$target_source_type" == "worktree" ]]; then
+    echo "[compare_get_co2] Worktree hash: ${target_worktree_hash}"
+  fi
+  echo "[compare_get_co2] Collection run hash: ${run_hash}"
+  echo "[compare_get_co2] Report hash: ${report_hash}"
+
+  collect_ref_run \
+    "base" \
+    "$base_ref" \
+    "$base_sha" \
+    "$base_short" \
+    "$base_run_dir" \
+    "$collect_src" \
+    "$date_to" \
+    "$args_hash" \
+    "$collect_script_hash" \
+    "$driver_script_hash" \
+    "$run_hash" \
+    "$invocation" \
+    "$runner"
+
+  if [[ "$target_source_type" == "worktree" ]]; then
+    collect_worktree_run \
+      "$target_sha" \
+      "$target_short" \
+      "$target_worktree_hash" \
+      "$tracked_dirty" \
+      "$untracked_dirty" \
+      "$target_run_dir" \
+      "$collect_src" \
+      "$date_to" \
+      "$args_hash" \
+      "$collect_script_hash" \
+      "$driver_script_hash" \
+      "$run_hash" \
+      "$invocation" \
+      "$runner"
+  else
+    collect_ref_run \
+      "target" \
+      "$target_ref" \
+      "$target_sha" \
+      "$target_short" \
+      "$target_run_dir" \
+      "$collect_src" \
+      "$date_to" \
+      "$args_hash" \
+      "$collect_script_hash" \
+      "$driver_script_hash" \
+      "$run_hash" \
+      "$invocation" \
+      "$runner"
+  fi
+
+  build_comparison_report \
+    "$comparison_dir" \
+    "$compare_src" \
+    "$base_ref" \
+    "$target_ref" \
+    "$base_sha" \
+    "$target_sha" \
+    "$base_short" \
+    "$target_short" \
+    "$date_to" \
+    "$base_run_dir" \
+    "$target_run_dir" \
+    "$run_hash" \
+    "$run_hash" \
+    "$compare_script_hash" \
+    "$driver_script_hash" \
+    "$report_hash" \
+    "$invocation" \
+    "$runner" \
+    "$base_source_type" \
+    "$target_source_type" \
+    "$base_source_id" \
+    "$target_source_id" \
+    "$target_worktree_hash"
+
+  echo "[compare_get_co2] Done: ${comparison_dir}"
+}
+
+main "$@"

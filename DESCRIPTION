@@ -16,6 +16,7 @@ Depends:
     creahelpers,
     rcrea
 Imports:
+    arrow,
     tidyverse,
     lubridate,
     scales,
@@ -37,12 +38,15 @@ Imports:
     httr,
     ggrepel,
     forecast,
+    hexbin,
     mgcv,
-    progress
+    progress,
+    logger
 Suggests:
-    testthat (>= 3.0.0)
+    testthat (>= 3.0.0),
+    styler
 Remotes:
     energyandcleanair/creahelpers,
     energyandcleanair/rcrea
-RoxygenNote: 7.2.3
+RoxygenNote: 7.3.3
 Config/testthat/edition: 3

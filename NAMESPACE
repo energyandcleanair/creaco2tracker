@@ -73,6 +73,9 @@ importFrom(dplyr,vars)
 importFrom(dplyr,group_modify)
 importFrom(dplyr,"%>%")
 importFrom(dplyr,anti_join)
+importFrom(dplyr,transmute)
+importFrom(dplyr,slice_head)
+importFrom(dplyr,semi_join)
 
 importFrom(glue,glue)
 
@@ -100,6 +103,7 @@ importFrom(lubridate,mdy)
 importFrom(lubridate,ymd)
 importFrom(lubridate,ymd_h)
 
+importFrom(magrittr,`%>%`)
 importFrom(magrittr,"%<>%")
 importFrom(magrittr,"%T>%")
 importFrom(magrittr,add)

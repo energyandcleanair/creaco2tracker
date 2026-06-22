@@ -1,0 +1,5 @@
+"date","variable","region_id","region_type","region_iso2","value","source","region_name"
+2024-01-01,"cdd","FR","country","FR",0,"ERA5","France"
+2024-01-01,"hdd","FR","country","FR",10.4829867945623,"ERA5","France"
+2024-01-02,"cdd","FR","country","FR",0,"ERA5","France"
+2024-01-02,"hdd","FR","country","FR",8.34220318391003,"ERA5","France"

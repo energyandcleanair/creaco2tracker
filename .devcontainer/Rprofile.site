@@ -1,0 +1,22 @@
+local({
+  ppm <- Sys.getenv("CRAN", unset = "https://packagemanager.posit.co/cran/__linux__/bookworm/latest")
+
+  options(
+    repos = c(CRAN = ppm),
+    pkg.cran_mirror = ppm,
+    pkg.sysreqs = TRUE,
+    pkg.sysreqs_sudo = TRUE,
+    Ncpus = max(1L, parallel::detectCores() - 1L),
+    HTTPUserAgent = sprintf(
+      "R/%s R (%s)",
+      getRversion(),
+      paste(getRversion(), R.version["platform"], R.version["arch"], R.version["os"])
+    )
+  )
+
+  project_lib <- Sys.getenv("R_LIBS_USER", unset = "")
+  if (nzchar(project_lib)) {
+    dir.create(project_lib, recursive = TRUE, showWarnings = FALSE)
+    .libPaths(c(project_lib, .libPaths()))
+  }
+})

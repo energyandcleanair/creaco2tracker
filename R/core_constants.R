@@ -1,0 +1,100 @@
+#' Data Masking Option Constants
+#'
+#' Use these with `data_masking` in public pipeline functions.
+#'
+#' - `DATA_MASKING_NONE` disables source masking.
+#' - `DATA_MASKING_HISTORICAL_DEFAULTS` builds masking from default source
+#'   publication schedules.
+#'
+#' A custom masking configuration can also be supplied directly as a named list
+#' in the same structure as `get_data_masking_config()`.
+#'
+#' @name data_masking_options
+NULL
+
+
+#' @rdname data_masking_options
+DATA_MASKING_NONE <- "none"
+
+
+#' @rdname data_masking_options
+DATA_MASKING_HISTORICAL_DEFAULTS <- "historical_defaults"
+
+
+# Sectors
+SECTOR_ELEC <- "electricity"
+SECTOR_ALL <- "all"
+SECTOR_OTHERS <- "others"
+
+SECTOR_TRANSPORT <- "transport"
+SECTOR_TRANSPORT_DOMESTIC <- "transport_domestic"
+SECTOR_TRANSPORT_INTERNATIONAL_AVIATION <- "transport_international_aviation"
+SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING <- "transport_international_shipping"
+
+# Fuel families
+FUEL_COAL <- "coal"
+FUEL_COKE <- "coke"
+FUEL_PEAT <- "peat"
+FUEL_OIL <- "oil"
+FUEL_GAS <- "gas"
+FUEL_TOTAL <- "total"
+
+# SIEC code for Eurostat
+
+## Oil products
+SIEC_OIL_PRODUCTS <- "O4600"
+SIEC_CRUDE_OIL <- "O4100_TOT_4200-4500"
+SIEC_GASOIL_DIESEL <- "O4671"
+SIEC_FUEL_OIL <- "O4680"
+SIEC_HEATING_GASOIL <- "O46712"
+SIEC_ROAD_DIESEL <- "O46711"
+SIEC_MOTOR_GASOLINE_XBIO <- "O4652XR5210B"
+SIEC_KEROSENE_XBIO <- "O4661XR5230B"
+SIEC_AVIATION_GASOLINE <- "O4651"
+SIEC_BIOGASOLINE <- "R5210B"
+SIEC_BIODIESEL <- "R5220B"
+
+## Solid fuels
+SIEC_BROWN_COAL <- "C0200"
+SIEC_HARD_COAL <- "C0100"
+SIEC_COKE_OVEN_COKE <- "C0311"
+SIEC_BROWN_COAL_BRIQUETTES <- "C0330"
+SIEC_OIL_SHALE <- "S2000"
+SIEC_PEAT <- "P1100"
+
+HARDCOAL_COKING_RATE_FACTOR <- 0.08 # See investigate_coking_emissions
+
+## Gas
+SIEC_NATURAL_GAS <- "G3000"
+SIEC_COKE_OVEN_GAS <- "C0350"
+
+
+# Conversion factors
+gcv_kwh_m3 <- 11.3505
+ncv_kwh_m3 <- gcv_kwh_m3 / 1.108
+ncv_gcv_gas <- 0.9
+
+# Eurostat value constants
+EUROSTAT_UNIT_TERAJOULE <- "TJ"
+EUROSTAT_UNIT_TJ_GCV <- "TJ_GCV"
+EUROSTAT_UNIT_THOUSAND_TONNES <- "THS_T"
+EUROSTAT_UNIT_INDEX_2021 <- "I21"
+EUROSTAT_SADJ_CALENDAR_ADJUSTED <- "CA"
+EUROSTAT_STK_FLOW_EMISSION_RELEVANT <- "ER_USE"
+EUROSTAT_FREQ_MONTHLY <- "M"
+EUROSTAT_FREQ_ANNUAL <- "A"
+
+# Eurostat energy balance codes (nrg_bal)
+NRG_BAL_IC_OBS <- "IC_OBS"
+NRG_BAL_FC_NE <- "FC_NE"
+NRG_BAL_TI_EHG_MAP <- "TI_EHG_MAP"
+NRG_BAL_TI_EHG_MAPE_E <- "TI_EHG_MAPE_E"
+NRG_BAL_TI_EHG_MAPH_E <- "TI_EHG_MAPH_E"
+NRG_BAL_TI_EHG_MAPCHP_E <- "TI_EHG_MAPCHP_E"
+
+# Industrial index product mapping by fuel
+INDPROD_PRODUCT_CODES <- list(
+    gas = "P13",
+    oil = c("P12", "P14", "P15", "P16", "P17", "P18", "P19", "P20", "P21"),
+    coal = c("P08", "P09", "P10", "P11")
+)

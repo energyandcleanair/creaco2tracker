@@ -1,0 +1,136 @@
+download_co2 <- function(
+  date_from = "2015-01-01", use_cache = FALSE, version = NULL, iso2s =
+    NULL
+) {
+  creahelpers::api.get(
+    "api.energyandcleanair.org/emission/co2",
+    date_from = date_from,
+    # The meaning of use_cache is different
+    # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means
+    # weather or not to invalidate it
+    use_cache = TRUE,
+    refresh_cache = !use_cache,
+    cache_folder = "cache",
+    region = iso2s,
+    version = version
+  ) %>%
+    select_if_exists(region, fuel, sector, unit, date, frequency, value, version) %>%
+    # Poor design/naming of the API and db
+    mutate(iso2 = region) %>%
+    # Format it back
+    mutate(
+      fuel = fuel_label_to_code(fuel),
+      sector = sector_label_to_code(sector)
+    )
+}
+
+download_gas_demand <- function(
+  iso2 = NULL,
+  use_cache = FALSE,
+  refresh_cache = FALSE,
+  date_from = "2015-01-01",
+  date_to = NULL
+) {
+  params <- list(
+    fuel = "fossil_gas",
+    data_source = "crea",
+    date_from = date_from,
+    date_to = date_to,
+    format = "csv",
+    region_id = iso2
+  )
+
+  # Remove null elements
+  params <- purrr::compact(params)
+
+  creahelpers::api.get(
+    "api.energyandcleanair.org/energy/demand",
+    params = params,
+    # The meaning of use_cache is different
+    # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means
+    # weather or not to invalidate it
+    use_cache = TRUE,
+    refresh_cache = !use_cache,
+    cache_folder = "cache"
+  ) %>%
+    select_if_exists(region_id, date, fuel, sector, unit, frequency, value) %>%
+    rename(iso2 = region_id)
+}
+
+
+download_corrected_demand <- function(
+  region_id = NULL,
+  sector = "total",
+  date_from = "2015-01-01",
+  use_cache = FALSE
+) {
+  params <- list(
+    fuel = "electricity_temperature_corrected,fossil_gas_temperature_corrected",
+    sector = sector,
+    date_from = date_from,
+    format = "csv",
+    region_id = region_id
+  )
+
+  # Remove null elements
+  params <- purrr::compact(params)
+
+  creahelpers::api.get(
+    "api.energyandcleanair.org/energy/demand",
+    params = params,
+    # The meaning of use_cache is different
+    # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means
+    # weather or not to invalidate it
+    use_cache = TRUE,
+    refresh_cache = !use_cache,
+    cache_folder = "cache"
+  ) %>%
+    select_if_exists(region_id, date, fuel, sector, unit, frequency, value)
+}
+
+
+#' Get power plant effiency directly from IEA data.
+#'
+#' Most likely reported on a LHV basis
+#'
+#' @return
+#' @export
+#'
+#' @examples
+download_thermal_efficiency <- function(region_id = NULL) {
+  if (!is.null(region_id)) {
+    region_id <- paste(region_id, collapse = ",")
+  }
+
+  api_key <- Sys.getenv("API_KEY")
+  if (api_key == "") {
+    stop("API_KEY not set")
+  }
+
+  params <- list(
+    source = "NATGAS",
+    year = 2020,
+    format = "csv",
+    country = region_id,
+    flow_raw = "EFFELE",
+    product_raw = "NATGAS",
+    unit = "TJ",
+    api_key = api_key
+  )
+
+  # Create URL params
+  eff <- creahelpers::api.get("api.energyandcleanair.org/energy/iea_balance", params = params) %>%
+    mutate(value = value / 100) %>%
+    select(region_id = iso2, product_raw, flow_raw, unit, year, value)
+
+  # Fill missing countries with median
+  if (!is.null(region_id)) {
+    eff <- eff %>%
+      tidyr::complete(
+        region_id = unique(!!region_id), product_raw, flow_raw, unit, year,
+        fill = list(value = median(eff$value))
+      )
+  }
+
+  return(eff)
+}
