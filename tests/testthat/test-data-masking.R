@@ -522,7 +522,7 @@ test_that(
 
 
 test_that(
-  "get_gas_demand_consdist preserves explicitly masked gaps",
+  "get_gas_demand_consdist treats all-missing daily aggregates as zero",
   {
     entsog_data <- tibble(
       destination_iso2 = c("DE", "DE", "DE"),
@@ -535,14 +535,14 @@ test_that(
     result <- get_gas_demand_consdist(entsog_data, years = 2024)
 
     expect_equal(result$value_m3[result$date == as.Date("2024-01-01")], 10)
-    expect_true(is.na(result$value_m3[result$date == as.Date("2024-01-02")]))
+    expect_equal(result$value_m3[result$date == as.Date("2024-01-02")], 0)
     expect_equal(result$value_m3[result$date == as.Date("2024-01-03")], 30)
   }
 )
 
 
 test_that(
-  "get_gas_demand_apparent preserves explicitly masked gaps",
+  "get_gas_demand_apparent interpolates internal gaps",
   {
     entsog_data <- tibble(
       destination_iso2 = c("DE", "DE", "DE"),
@@ -559,7 +559,7 @@ test_that(
     )
 
     expect_equal(result$value_m3[result$iso2 == "DE" & result$date == as.Date("2024-01-01")], 10)
-    expect_true(is.na(result$value_m3[result$iso2 == "DE" & result$date == as.Date("2024-01-02")]))
+    expect_equal(result$value_m3[result$iso2 == "DE" & result$date == as.Date("2024-01-02")], 20)
     expect_equal(result$value_m3[result$iso2 == "DE" & result$date == as.Date("2024-01-03")], 30)
   }
 )

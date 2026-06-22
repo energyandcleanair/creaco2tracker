@@ -1,6 +1,6 @@
 library(testthat)
 
-test_that("collect_oil queries yearly oil data in one batched request", {
+test_that("collect_oil queries yearly oil data once per oil SIEC code", {
   yearly_calls <- list()
 
   monthly_stub <- tibble::tibble(
@@ -41,10 +41,9 @@ test_that("collect_oil queries yearly oil data in one batched request", {
 
   out <- collect_oil(use_cache = FALSE)
 
-  expect_equal(length(yearly_calls), 1)
-  expect_equal(length(yearly_calls[[1]]), 11)
+  expect_equal(length(yearly_calls), 11)
   expect_setequal(
-    yearly_calls[[1]],
+    unlist(yearly_calls),
     c(
       SIEC_OIL_PRODUCTS,
       SIEC_CRUDE_OIL,

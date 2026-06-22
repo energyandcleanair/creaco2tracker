@@ -5,7 +5,7 @@ test_that("sum_or_na keeps all-missing aggregates missing", {
   expect_equal(sum_or_na(c(1, NA_real_, 2)), 3)
 })
 
-test_that("collect_oil drops unavailable Eurostat oil rows", {
+test_that("collect_oil preserves unavailable Eurostat oil rows", {
   monthly_stub <- tibble::tibble(
     siec = c(SIEC_OIL_PRODUCTS, SIEC_OIL_PRODUCTS),
     nrg_bal = "GID_OBS",
@@ -42,11 +42,11 @@ test_that("collect_oil drops unavailable Eurostat oil rows", {
 
   result <- collect_oil(use_cache = FALSE)
 
-  expect_equal(result$monthly$time, as.Date("2026-02-01"))
-  expect_false(any(is.na(result$monthly$values)))
+  expect_equal(result$monthly$time, as.Date(c("2026-02-01", "2026-03-01")))
+  expect_equal(result$monthly$values, c(10, NA_real_))
 })
 
-test_that("process_oil does not emit all-sector oil for incomplete latest month", {
+test_that("process_oil keeps available all-sector components for incomplete latest month", {
   oil_input <- tibble::tribble(
     ~geo, ~siec, ~nrg_bal, ~time, ~values, ~unit,
     "EU27_2020", SIEC_OIL_PRODUCTS, "GID_OBS", "2026-02-01", 1000, EUROSTAT_UNIT_THOUSAND_TONNES,
@@ -77,7 +77,7 @@ test_that("process_oil does not emit all-sector oil for incomplete latest month"
     nrow(result %>% dplyr::filter(time == as.Date("2026-02-01"), sector == SECTOR_ALL)),
     0
   )
-  expect_equal(
+  expect_gt(
     nrow(result %>% dplyr::filter(time == as.Date("2026-03-01"), sector == SECTOR_ALL)),
     0
   )
