@@ -60,7 +60,7 @@
         backoff_multiplier = backoff_multiplier
       )
 
-      log_warn(glue::glue(
+      log_warn(paste0(
         "AGSI request failed for {iso2} from {date_from} to {date_to} on ",
         "attempt {attempt}/{max_attempts}: {conditionMessage(http_response)}. ",
         "Retrying in {delay_seconds}s."
@@ -71,7 +71,7 @@
 
     status <- httr::status_code(http_response)
     response_text <- httr::content(http_response, "text", encoding = "UTF-8")
-    logger::log_trace(glue::glue(
+    logger::log_trace(paste0(
       "AGSI response for {iso2} from {date_from} to {date_to} ",
       "returned HTTP {status}: {response_text}"
     ))
@@ -91,7 +91,7 @@
         backoff_multiplier = backoff_multiplier
       )
 
-      log_warn(glue::glue(
+      log_warn(paste0(
         "AGSI request returned HTTP {status} for {iso2} from {date_from} to {date_to} ",
         "on attempt {attempt}/{max_attempts}. Retrying in {delay_seconds}s."
       ))
@@ -147,7 +147,7 @@
 
 agsi.get_storage_change <- function(date_from, date_to, iso2, use_cache = TRUE, verbose = FALSE) {
   pbapply::pblapply(iso2, function(iso2) {
-    log_info(glue::glue("Getting storage change data for {iso2} from {date_from} to {date_to}"))
+    log_info("Getting storage change data for {iso2} from {date_from} to {date_to}")
 
     MAX_PAGE_SIZE <- as.integer(100000)
 
@@ -160,7 +160,7 @@ agsi.get_storage_change <- function(date_from, date_to, iso2, use_cache = TRUE, 
       "&size={MAX_PAGE_SIZE}"
     )
 
-    log_debug(glue::glue("AGSI request URL: {url}"))
+    log_debug("AGSI request URL: {url}")
 
     cache_key <- list(date_from = date_from, date_to = date_to, iso2 = iso2, url = url)
     cache_schema_version <- "v1_parquet_cache"
@@ -189,7 +189,7 @@ agsi.get_storage_change <- function(date_from, date_to, iso2, use_cache = TRUE, 
     )
 
     if (nrow(data) == 0 || !"netWithdrawal" %in% names(data)) {
-      log_info(glue::glue("No data for {iso2} from {date_from} to {date_to}"))
+      log_info("No data for {iso2} from {date_from} to {date_to}")
       return(NULL)
     }
     # Add a check for the size is near the limit of 100,000 records (let's do one extra)
