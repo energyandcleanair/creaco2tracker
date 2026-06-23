@@ -71,7 +71,7 @@
 
     status <- httr::status_code(http_response)
     response_text <- httr::content(http_response, "text", encoding = "UTF-8")
-    logger::log_trace(paste0(
+    log_debug(paste0(
       "AGSI response for {iso2} from {date_from} to {date_to} ",
       "returned HTTP {status}: {response_text}"
     ))
