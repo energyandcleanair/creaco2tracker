@@ -7,7 +7,7 @@ configure_logger_layout <- function() {
 }
 
 configure_logger_threshold <- function() {
-  logger::log_threshold(logger::DEBUG)
+  logger::log_threshold(logger::TRACE)
 }
 
 configure_logger <- function() {

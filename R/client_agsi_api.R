@@ -6,6 +6,28 @@
   initial_delay_seconds * backoff_multiplier^(retry_number - 1)
 }
 
+.agsi_json_field_has_value <- function(value) {
+  if (is.null(value) || length(value) == 0) {
+    return(FALSE)
+  }
+
+  value <- unlist(value, use.names = FALSE)
+  any(!is.na(value) & nzchar(as.character(value)))
+}
+
+.agsi_response_error_message <- function(parsed_response) {
+  error_value <- parsed_response$error
+  if (!.agsi_json_field_has_value(error_value)) {
+    return(NULL)
+  }
+
+  message_parts <- c(parsed_response$message, error_value)
+  message_parts <- unlist(message_parts, use.names = FALSE)
+  message_parts <- as.character(message_parts[!is.na(message_parts) & nzchar(message_parts)])
+
+  paste(unique(message_parts), collapse = "; ")
+}
+
 
 .fetch_agsi_storage_change_with_retry <- function(
   url,
@@ -49,6 +71,10 @@
 
     status <- httr::status_code(http_response)
     response_text <- httr::content(http_response, "text", encoding = "UTF-8")
+    logger::log_trace(glue::glue(
+      "AGSI response for {iso2} from {date_from} to {date_to} ",
+      "returned HTTP {status}: {response_text}"
+    ))
 
     if (!identical(status, 200L)) {
       if (attempt == max_attempts) {
@@ -84,6 +110,14 @@
         "{conditionMessage(parsed_response)}"
       ))
       return(tibble())
+    }
+
+    error_message <- .agsi_response_error_message(parsed_response)
+    if (!is.null(error_message)) {
+      stop(glue::glue(
+        "AGSI response returned error for {iso2} from {date_from} to {date_to}: ",
+        "{error_message}"
+      ), call. = FALSE)
     }
 
     data <- parsed_response$data
