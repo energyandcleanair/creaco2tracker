@@ -9,12 +9,20 @@ The comparison wrapper stores generated artifacts under `.tmp/comparison/`.
   ref_runs/
     <ref_run_hash_prefix>__commit_<short_sha>/
       raw.csv
+      metadata.json
       complete.ok
     <ref_run_hash_prefix>__worktree_<head_short>_<worktree_hash>/
       raw.csv
+      metadata.json
       worktree_status.txt
       worktree_diff.patch
       untracked_files.txt
+      complete.ok
+  external_sources/
+    <external_source_hash_prefix>__<target_label>/
+      external_sources.csv
+      source_status.csv
+      metadata.json
       complete.ok
   comparisons/
     <comparison_hash_prefix>__<base_label>__<target_label>/
@@ -28,6 +36,19 @@ The comparison wrapper stores generated artifacts under `.tmp/comparison/`.
       plots/
       summary.md
       complete.ok
+  external_comparisons/
+    <external_comparison_hash_prefix>__<target_label>__external/
+      normalized_external_sources.csv
+      crea_totals.csv
+      annual_pairs.csv
+      monthly_pairs.csv
+      comparison_totals_eu.csv
+      comparison_totals_country.csv
+      source_coverage.csv
+      source_status.csv
+      plots/
+      summary.md
+      complete.ok
 ```
 
 Committed refs use `commit_<short_sha>` labels and working-copy snapshots use
@@ -36,12 +57,14 @@ the directory name and is the cache identity.
 
 ## Hashes
 
-- `collect_script_hash`: SHA-256 of the working-copy `scripts/collect_get_co2.R`.
+- `collect_script_hash`: SHA-256 of the working-copy
+  `scripts/compare_lib/collect_get_co2.R`.
 - `raw_cache_key`: Full hash of the raw-run cache key. Raw-run keys combine source identity
   (commit SHA or working-copy hash), effective collection arguments, and `collect_script_hash`.
 - `ref_run_hash_prefix`: Leading 7 hex chars of `raw_cache_key`, used in ref-run directory names.
 - `run_hash`: Short hash of `raw_cache_key`, used in logging and summary context.
-- `compare_script_hash`: SHA-256 of the working-copy `scripts/compare_get_co2.R`.
+- `compare_script_hash`: SHA-256 of the working-copy
+  `scripts/compare_lib/compare_get_co2.R` or external report script.
 - `report_cache_key`: Full hash of the comparison cache key. Comparison keys combine the base
   raw-run key, target raw-run key, and `compare_script_hash`.
 - `comparison_hash_prefix`: Leading 7 hex chars of `report_cache_key`, used in comparison
@@ -52,28 +75,30 @@ the directory name and is the cache identity.
   unignored file paths and contents.
 
 Changing only the report script should reuse `ref_runs/` and regenerate the comparison report.
-Changing collection arguments, `collect_get_co2.R`, the committed source SHA, or worktree source
-files should create new ref-run cache directories for affected sources. Changing only the wrapper
-driver should not invalidate raw runs.
+Changing collection arguments, `scripts/compare_lib/collect_get_co2.R`, the committed source SHA,
+or worktree source files should create new ref-run cache directories for affected sources.
+Changing only the wrapper driver should not invalidate raw runs.
 
 ## Explicit Inputs
 
 The wrapper passes required values explicitly to downstream scripts.
 
-- `scripts/compare_get_co2.R` receives `--raw-base`, `--raw-target`,
-  `--base-short-sha`, and `--target-short-sha`.
-- `scripts/summarize_compare_get_co2.py` receives explicit summary context
-  (`--base-ref`, `--target-ref`, short SHAs, `--date-to`, `--runner`, and hash values).
+- `scripts/compare_lib/compare_get_co2.R` receives `--raw-base`, `--raw-target`,
+  short SHAs, refs, `--date-to`, `--runner`, and hash values, then writes `summary.md`.
+- `scripts/compare_lib/compare_get_co2_external.R` receives the target raw run, normalized
+  external source file, source status file, target label, and `--date-to`, then writes
+  `summary.md`.
 
 ## Working-Copy Mode
 
-The wrapper uses a working-copy target when:
+The public `version` and `external` commands, and the CI-oriented `collect` subcommands, use a
+working-copy target when:
 
-- no target is provided and tracked files or untracked unignored files differ from `HEAD`;
-- one positional base is provided and tracked files or untracked unignored files differ from
-  `HEAD`;
-- `--worktree` is passed;
-- the target is `worktree`, `working-tree`, or `.`.
+- `version` or `external` is run without an explicit target, and tracked files or untracked
+  unignored files differ from `HEAD`;
+- `collect target` or `collect external` is run without `--ref`, and tracked files or untracked
+  unignored files differ from `HEAD`;
+- `--ref worktree`, `--ref working-tree`, or `--ref .` is passed.
 
 The snapshot is built from `git archive HEAD`, then `git diff HEAD --binary` is applied, then
 untracked files reported by `git ls-files --others --exclude-standard` are copied in. Ignored
@@ -110,33 +135,20 @@ The wrapper accepts `--runner auto|rscript|rr` and `COMPARE_GET_CO2_RUNNER`.
 Runner mode is not part of the cache key, so matching cached raw runs can be reused across runner
 modes.
 
-## Summary Helper
+## Summary And Handoff
 
-Use:
+The version and external report scripts write `summary.md` directly. The GitHub workflow combines
+completed summaries in shell and rewrites plot links relative to the combined GitHub/CML Markdown
+file.
 
-```bash
-python3 scripts/summarize_compare_get_co2.py \
-  .tmp/comparison/comparisons/<comparison-dir> \
-  --base-ref <base-ref> \
-  --target-ref <target-ref> \
-  --base-short-sha <base-short-sha> \
-  --target-short-sha <target-short-sha> \
-  --date-to <YYYY-MM-DD> \
-  --runner <rscript|rr> \
-  --report-hash <report-hash> \
-  --base-run-hash <base-run-hash> \
-  --target-run-hash <target-run-hash>
-```
-
-The helper reads explicit run context arguments and available comparison CSVs, then writes
-Markdown to stdout. It should tolerate missing optional CSVs and mention what was unavailable.
-The wrapper writes
-`summary.md` on every successful comparison.
-
-The wrapper supports explicit machine handoff via:
+The wrapper supports explicit machine handoff via collection and comparison emit files:
 
 ```bash
-scripts/compare_get_co2 --emit-comparison-dir <path/to/output-file> ...
+scripts/compare collect base --emit-run-dir <path/to/output-file> ...
+scripts/compare collect target --emit-run-dir <path/to/output-file> ...
+scripts/compare collect external --emit-run-dir <path/to/output-file> ...
+scripts/compare version --emit-comparison-dir <path/to/output-file> ...
+scripts/compare external --emit-comparison-dir <path/to/output-file> ...
 ```
 
 On success, the wrapper writes one line containing the absolute comparison directory path.
