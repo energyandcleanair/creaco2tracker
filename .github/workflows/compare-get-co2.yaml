@@ -608,21 +608,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          version_summary=".tmp/comparison/inputs/version-comparison/summary.md"
+          external_summary=".tmp/comparison/inputs/external-comparison/summary.md"
           summaries=()
-          if [[ -f .tmp/comparison/inputs/version-comparison/summary.md ]]; then
-            summaries+=(.tmp/comparison/inputs/version-comparison/summary.md)
+          missing_notes=()
+
+          if [[ -f "$version_summary" ]]; then
+            summaries+=("$version_summary")
+          else
+            missing_notes+=("**Missing version summary**: \`$version_summary\`")
           fi
-          if [[ -f .tmp/comparison/inputs/external-comparison/summary.md ]]; then
-            summaries+=(.tmp/comparison/inputs/external-comparison/summary.md)
-          fi
-          if (( ${#summaries[@]} == 0 )); then
-            echo "No comparison summaries were available."
-            exit 0
+
+          if [[ -f "$external_summary" ]]; then
+            summaries+=("$external_summary")
+          else
+            missing_notes+=("**Missing external summary**: \`$external_summary\`")
           fi
 
           combined=".tmp/comparison/outputs/combined-summary.md"
           mkdir -p "$(dirname "$combined")"
           : > "$combined"
+
+          for note in "${missing_notes[@]}"; do
+            printf '%s\n\n' "$note" >> "$combined"
+          done
+
           append_summary() {
             local summary="$1"
             local summary_dir combined_dir rel_dir
@@ -634,9 +644,15 @@ jobs:
             fi
             sed "s#](plots/#](${rel_dir}/plots/#g" "$summary" >> "$combined"
           }
-          for summary in "${summaries[@]}"; do
-            append_summary "$summary"
-          done
+
+          if (( ${#summaries[@]} == 0 )); then
+            printf '_No comparison summaries were available._\n' >> "$combined"
+          else
+            for summary in "${summaries[@]}"; do
+              append_summary "$summary"
+            done
+          fi
+
           echo "summary_md=${combined}" >> "$GITHUB_OUTPUT"
 
       - name: Add GitHub Actions summary
