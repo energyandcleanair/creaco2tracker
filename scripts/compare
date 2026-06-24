@@ -413,9 +413,12 @@ def chmod_public_dir(path: Path) -> None:
 def prepare_collection_source_dir(source_dir: Path, log_prefix: str = LOG_PREFIX) -> None:
     artifact_dir = source_dir.parent
     cache_dir = source_dir / "cache"
+    data_dir = source_dir / "data"
     cache_dir.mkdir(parents=True, exist_ok=True)
+    data_dir.mkdir(parents=True, exist_ok=True)
     chmod_public_dir(artifact_dir)
     chmod_public_dir(cache_dir)
+    chmod_public_dir(data_dir)
     log(f"Source cache dir: {cache_dir}", prefix=log_prefix)
 
 
