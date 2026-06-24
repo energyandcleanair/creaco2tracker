@@ -47,6 +47,7 @@ require_option <- function(opts, name) {
   value
 }
 
+
 run_collect <- function(opts) {
   output <- require_option(opts, "output")
   date_to <- as.Date(require_option(opts, "date_to"))
@@ -57,10 +58,13 @@ run_collect <- function(opts) {
   }
 
   dir.create(dirname(output), recursive = TRUE, showWarnings = FALSE)
+  dir.create("cache", recursive = TRUE, showWarnings = FALSE)
 
   message("[collect_get_co2.R] Loading package at ", sha)
   devtools::load_all(".", quiet = TRUE)
-
+  if (requireNamespace("logger", quietly = TRUE)) {
+    logger::log_threshold(logger::TRACE)
+  }
   message("[collect_get_co2.R] Running get_co2(date_to = ", date_to, ")")
   get_co2_args <- list()
   get_co2_formals <- names(formals(get_co2))
@@ -81,7 +85,19 @@ run_collect <- function(opts) {
     co2 <- co2 %>% filter(as.Date(date) <= date_to)
   }
 
+  required_cols <- c("iso2", "date", "fuel", "sector", "estimate", "value")
+  missing_cols <- setdiff(required_cols, names(co2))
+  if (length(missing_cols) > 0) {
+    stop(
+      "get_co2 output is missing required columns: ",
+      paste(missing_cols, collapse = ", ")
+    )
+  }
+
   write_csv(co2, output, na = "")
+  if (!file.exists(output) || file.info(output)$size <= 0) {
+    stop("Failed to write usable raw output: ", output)
+  }
   message("[collect_get_co2.R] Wrote ", output)
 }
 

@@ -32,7 +32,14 @@ cache_parquet_get_or_fetch <- function(
   filepath <- cache_parquet_path(cache_prefix, cache_hash, use_cache = use_cache)
 
   if (use_cache && file.exists(filepath)) {
+    log_debug("Parquet cache hit for {cache_prefix} ({cache_hash}): {filepath}")
     return(cache_parquet_read(filepath))
+  }
+
+  if (use_cache) {
+    log_debug("Parquet cache miss for {cache_prefix} ({cache_hash}); fetching into {filepath}")
+  } else {
+    log_debug("Parquet cache disabled for {cache_prefix} ({cache_hash}); fetching into {filepath}")
   }
 
   value <- fetch_fun()

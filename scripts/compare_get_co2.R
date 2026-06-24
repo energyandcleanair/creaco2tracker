@@ -7,12 +7,28 @@ suppressPackageStartupMessages({
 })
 
 DEFAULT_DIFF_TOLERANCE <- 1e-6
-VALID_OPTIONS <- c("comparison_dir")
+VALID_OPTIONS <- c(
+  "comparison_dir",
+  "raw_base",
+  "raw_target",
+  "base_short_sha",
+  "target_short_sha"
+)
+REQUIRED_OUTPUTS <- c(
+  "comparison_totals_eu.csv",
+  "comparison_totals_eu_component.csv",
+  "comparison_totals_country.csv",
+  "comparison_totals_component.csv",
+  "monthly_eu_component_metrics.csv",
+  "monthly_country_metrics.csv",
+  "monthly_component_metrics.csv"
+)
 
 usage <- function() {
   cat(paste(
     "Usage:",
-    "  compare_get_co2.R --comparison-dir <dir>",
+    "  compare_get_co2.R --comparison-dir <dir> --raw-base <csv> --raw-target <csv>",
+    "    --base-short-sha <sha12> --target-short-sha <sha12>",
     sep = "\n"
   ), "\n")
 }
@@ -136,35 +152,6 @@ theme_compare <- function() {
       legend.position = "bottom",
       strip.text = element_text(face = "bold", size = 8)
     )
-}
-
-read_metadata <- function(comparison_dir) {
-  metadata_file <- file.path(comparison_dir, "metadata.csv")
-  if (!file.exists(metadata_file)) {
-    stop("Missing metadata file: ", metadata_file)
-  }
-
-  read_csv(
-    metadata_file,
-    col_types = cols(.default = col_character()),
-    show_col_types = FALSE
-  )
-}
-
-metadata_value <- function(metadata, key) {
-  value <- metadata$value[metadata$key == key]
-  if (length(value) != 1 || is.na(value)) {
-    stop("Missing metadata key: ", key)
-  }
-  value
-}
-
-metadata_path <- function(comparison_dir, path) {
-  if (grepl("^(/|[A-Za-z]:[/\\\\])", path)) {
-    path
-  } else {
-    file.path(comparison_dir, path)
-  }
 }
 
 read_raw <- function(path) {
@@ -620,12 +607,12 @@ plot_scatter_facets <- function(data, plots_dir, filename, title, subtitle_conte
   )
 }
 
-write_plots <- function(pairs, metadata, comparison_dir) {
+write_plots <- function(pairs, comparison_dir, base_short_sha, target_short_sha) {
   plots_dir <- file.path(comparison_dir, "plots")
   dir.create(plots_dir, recursive = TRUE, showWarnings = FALSE)
 
-  base_label <- paste0("Base ", metadata_value(metadata, "base_short_sha"))
-  target_label <- paste0("Target ", metadata_value(metadata, "target_short_sha"))
+  base_label <- paste0("Base ", base_short_sha)
+  target_label <- paste0("Target ", target_short_sha)
 
   eu_component_pairs_for_plots <- pairs$eu_component_pairs %>%
     mutate(fuel_sector = paste(fuel, sector, sep = " / "))
@@ -705,18 +692,37 @@ write_plots <- function(pairs, metadata, comparison_dir) {
   )
 }
 
+validate_comparison_outputs <- function(comparison_dir) {
+  missing_outputs <- REQUIRED_OUTPUTS[
+    !file.exists(file.path(comparison_dir, REQUIRED_OUTPUTS)) |
+      file.info(file.path(comparison_dir, REQUIRED_OUTPUTS))$size <= 0
+  ]
+  if (length(missing_outputs) > 0) {
+    stop(
+      "Comparison report is missing required outputs: ",
+      paste(missing_outputs, collapse = ", ")
+    )
+  }
+
+  plots_dir <- file.path(comparison_dir, "plots")
+  if (!dir.exists(plots_dir)) {
+    stop("Comparison report is missing plots directory: ", plots_dir)
+  }
+}
+
 run_compare <- function(opts) {
   comparison_dir <- normalizePath(require_option(opts, "comparison_dir"), mustWork = TRUE)
-  metadata <- read_metadata(comparison_dir)
-
-  raw_base <- metadata_path(comparison_dir, metadata_value(metadata, "raw_base_file"))
-  raw_target <- metadata_path(comparison_dir, metadata_value(metadata, "raw_target_file"))
+  raw_base <- normalizePath(require_option(opts, "raw_base"), mustWork = TRUE)
+  raw_target <- normalizePath(require_option(opts, "raw_target"), mustWork = TRUE)
+  base_short_sha <- require_option(opts, "base_short_sha")
+  target_short_sha <- require_option(opts, "target_short_sha")
 
   base_data <- read_raw(raw_base) %>% normalise_for_compare()
   target_data <- read_raw(raw_target) %>% normalise_for_compare()
 
   pairs <- write_comparison_tables(comparison_dir, base_data, target_data)
-  write_plots(pairs, metadata, comparison_dir)
+  write_plots(pairs, comparison_dir, base_short_sha, target_short_sha)
+  validate_comparison_outputs(comparison_dir)
 
   message("[compare_get_co2.R] Wrote comparison report to ", comparison_dir)
 }

@@ -29,6 +29,7 @@ The provides data to dashboard on a regular basis.
 - The repo's lint rules prefer 100-character lines, snake_case or SNAKE_CASE object names, and `%>%` pipe consistency.
 - Avoid changing unrelated generated data or cache outputs when editing code.
 - Only change the README (unless otherwise requested) with critical information. Keep the rest of the documentation closer to the code.
+- When documenting code behavior, describe the current behavior directly in present tense. If something has been removed, don't refer to it. Do not frame it as a change from previous behavior unless writing release notes, migration notes, or a changelog.
 
 ## Validation
 
