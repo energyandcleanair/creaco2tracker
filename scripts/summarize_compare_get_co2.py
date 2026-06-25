@@ -105,7 +105,7 @@ def plot_lines(comparison_dir: Path) -> list[str]:
     ])
     for plot in other_plots:
         rel = plot.relative_to(comparison_dir)
-        lines.append(f"- [`{rel}`]({rel})")
+        lines.append(f"![{rel}]({rel})")
     lines.extend([
         "",
         "</details>",
