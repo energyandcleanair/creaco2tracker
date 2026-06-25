@@ -907,12 +907,15 @@ write_version_summary <- function(
     select(Component, `Diff (Mt CO2)`, `% diff`, Rows)
 
   lines <- c(
-    "# get_co2 Comparison Summary",
+    "# get_co2 comparison summary",
     "",
     paste0(
       "**Headline:** EU total diff is **", diff, " Mt CO2 (", pct, ")** for `",
       target_label, "` vs `", base_label, "`."
     ),
+    "",
+    "<details>",
+    "<summary>Detailed comparison</summary>",
     "",
     "## Top-line metrics",
     paste0("- Base: `", base_label, "`"),
@@ -1005,6 +1008,8 @@ write_version_summary <- function(
     "<summary>Artifact status</summary>",
     "",
     md_table(c("Artifact", "Status"), artifact_status(comparison_dir)),
+    "",
+    "</details>",
     "",
     "</details>"
   )

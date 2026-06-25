@@ -814,6 +814,10 @@ fmt_pct <- function(x) {
   ifelse(is.na(x), "NA", paste0(fmt_number(x, 2), "%"))
 }
 
+fmt_whole_pct <- function(x) {
+  ifelse(is.na(x), "NA", paste0(fmt_number(x, 1), "%"))
+}
+
 md_table <- function(headers, rows) {
   if (nrow(rows) == 0) {
     return("_No rows available._")
@@ -829,9 +833,44 @@ md_table <- function(headers, rows) {
   )
 }
 
+trend_agreement <- function(annual_pairs) {
+  annual_pairs %>%
+    filter(
+      crea_variant == "raw",
+      has_external,
+      has_crea,
+      !is.na(external_value_mt),
+      !is.na(crea_value_mt)
+    ) %>%
+    distinct(source_id, source_short, iso2, year, date, external_value_mt, crea_value_mt) %>%
+    arrange(source_id, iso2, date) %>%
+    group_by(source_id, source_short, iso2) %>%
+    mutate(
+      external_delta = external_value_mt - lag(external_value_mt),
+      crea_delta = crea_value_mt - lag(crea_value_mt),
+      trend_compared = !is.na(external_delta) & !is.na(crea_delta),
+      trend_agrees = sign(external_delta) == sign(crea_delta)
+    ) %>%
+    ungroup()
+}
+
 write_summary <- function(comparison_dir, target_label, date_to, eu_totals, country_totals,
-                          coverage, source_status) {
-  eu_headline <- eu_totals %>%
+                          coverage, source_status, annual_pairs) {
+  eu_raw <- eu_totals %>%
+    filter(period == "annual", crea_variant == "raw") %>%
+    arrange(desc(abs(diff_mt))) %>%
+    mutate(
+      `Source` = source_short,
+      `Target raw (Mt)` = fmt_number(crea_total_mt),
+      `External (Mt)` = fmt_number(external_total_mt),
+      `Diff (Mt)` = fmt_number(diff_mt),
+      `% diff` = fmt_pct(pct_diff),
+      `Rows` = as.character(n_compared)
+    ) %>%
+    select(`Source`, `Target raw (Mt)`, `External (Mt)`, `Diff (Mt)`, `% diff`, `Rows`) %>%
+    slice_head(n = 8)
+
+  eu_adjusted <- eu_totals %>%
     filter(period == "annual", crea_variant == "adjusted") %>%
     arrange(desc(abs(diff_mt))) %>%
     mutate(
@@ -858,6 +897,10 @@ write_summary <- function(comparison_dir, target_label, date_to, eu_totals, coun
     slice_head(n = 10)
 
   status_rows <- source_status %>%
+    filter(
+      is.na(message) |
+        message != "Monthly comparison is only supported for Carbon Monitor in v1."
+    ) %>%
     mutate(
       `Source` = short_source_name(source_id, source),
       `Period` = period,
@@ -878,30 +921,92 @@ write_summary <- function(comparison_dir, target_label, date_to, eu_totals, coun
     ) %>%
     select(`Source`, `Period`, `Compared rows`, `Regions`, `Range`)
 
+  trend_rows <- trend_agreement(annual_pairs)
+  trend_eu_rows <- trend_rows %>%
+    filter(iso2 == "EU", trend_compared) %>%
+    group_by(source_id, source_short) %>%
+    summarise(
+      n_agree = sum(trend_agrees, na.rm = TRUE),
+      n_compared = n(),
+      agreement_pct = 100 * n_agree / n_compared,
+      .groups = "drop"
+    ) %>%
+    arrange(desc(agreement_pct), source_short) %>%
+    mutate(
+      `Source` = source_short,
+      `Trend agreement` = fmt_whole_pct(agreement_pct),
+      `Agreeing changes` = as.character(n_agree),
+      `Compared changes` = as.character(n_compared)
+    ) %>%
+    select(`Source`, `Trend agreement`, `Agreeing changes`, `Compared changes`)
+
+  trend_country_rows <- trend_rows %>%
+    filter(iso2 != "EU", trend_compared) %>%
+    group_by(source_id, source_short) %>%
+    summarise(
+      n_agree = sum(trend_agrees, na.rm = TRUE),
+      n_compared = n(),
+      n_iso2 = n_distinct(iso2),
+      agreement_pct = 100 * n_agree / n_compared,
+      .groups = "drop"
+    ) %>%
+    arrange(desc(agreement_pct), source_short) %>%
+    mutate(
+      `Source` = source_short,
+      `Trend agreement` = fmt_whole_pct(agreement_pct),
+      `Agreeing changes` = as.character(n_agree),
+      `Compared changes` = as.character(n_compared),
+      `Countries` = as.character(n_iso2)
+    ) %>%
+    select(`Source`, `Trend agreement`, `Agreeing changes`, `Compared changes`, `Countries`)
+
   lines <- c(
-    "# External CO2 Source Comparison Summary",
+    "# External CO2 source comparison summary",
     "",
     paste0("**Target:** `", target_label, "`"),
     paste0("**date_to:** `", date_to, "`"),
     "",
-    "## EU Annual Adjusted Totals",
-    md_table(names(eu_headline), eu_headline),
+    "Annual adjustment removes emissions from international aviation from CREA totals so the",
+    "annual comparison is closer to the territorial scope used by most external CO2 datasets.",
     "",
-    "## Largest Country Differences",
+    "![annual_eu_timeseries_by_provider.png](plots/annual_eu_timeseries_by_provider.png)",
+    "",
+    "<details>",
+    "<summary>Detailed comparison</summary>",
+    "",
+    "## EU annual raw totals",
+    md_table(names(eu_raw), eu_raw),
+    "",
+    "## EU annual adjusted totals",
+    md_table(names(eu_adjusted), eu_adjusted),
+    "",
+    "## Trend agreement",
+    "Trend agreement compares the year-over-year direction of CREA raw totals with each",
+    "external source. It counts a match when both sources move in the same direction for",
+    "the same region and year pair.",
+    "",
+    "### EU trend agreement",
+    md_table(names(trend_eu_rows), trend_eu_rows),
+    "",
+    "### Country trend agreement",
+    md_table(names(trend_country_rows), trend_country_rows),
+    "",
+    "## Largest country differences",
     md_table(names(country_headline), country_headline),
     "",
     "## Coverage",
     md_table(names(coverage_rows), coverage_rows),
     "",
-    "## Source Status",
+    "## Source status",
     md_table(names(status_rows), status_rows),
     "",
-    "## Key Plots",
+    "## Key plots",
     "![annual_eu_timeseries.png](plots/annual_eu_timeseries.png)",
-    "![annual_eu_timeseries_by_provider.png](plots/annual_eu_timeseries_by_provider.png)",
     "![annual_country_adjusted_scatter.png](plots/annual_country_adjusted_scatter.png)",
     "![annual_country_adjusted_diff_ranking.png](plots/annual_country_adjusted_diff_ranking.png)",
-    "![monthly_carbonmonitor_eu_timeseries.png](plots/monthly_carbonmonitor_eu_timeseries.png)"
+    "![monthly_carbonmonitor_eu_timeseries.png](plots/monthly_carbonmonitor_eu_timeseries.png)",
+    "",
+    "</details>"
   )
 
   writeLines(lines, file.path(comparison_dir, "summary.md"))
@@ -974,7 +1079,8 @@ run_compare <- function(opts) {
     eu_totals,
     country_totals,
     coverage,
-    source_status
+    source_status,
+    annual_pairs
   )
   validate_outputs(comparison_dir)
 

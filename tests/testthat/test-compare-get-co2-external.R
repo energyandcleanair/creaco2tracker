@@ -163,6 +163,26 @@ test_that("external comparison pairs external rows with both CREA variants", {
   )
 })
 
+test_that("external comparison trend agreement uses raw annual values", {
+  annual_pairs <- tibble(
+    source_id = rep("example", 8),
+    source_short = rep("Example", 8),
+    crea_variant = rep(c("raw", "adjusted"), each = 4),
+    iso2 = rep("EU", 8),
+    date = rep(as.Date(c("2021-01-01", "2022-01-01", "2023-01-01", "2024-01-01")), 2),
+    year = rep(2021:2024, 2),
+    external_value_mt = rep(c(100, 110, 108, 120), 2),
+    crea_value_mt = c(90, 95, 94, 96, 90, 80, 85, 70),
+    has_external = TRUE,
+    has_crea = TRUE
+  )
+
+  agreement <- trend_agreement(annual_pairs) %>%
+    filter(trend_compared)
+
+  expect_equal(agreement$trend_agrees, c(TRUE, TRUE, TRUE))
+})
+
 test_that("external comparison report writes expected fixture artifacts", {
   comparison_dir <- tempfile("external-comparison-")
   dir.create(comparison_dir)
@@ -189,12 +209,12 @@ test_that("external comparison report writes expected fixture artifacts", {
     unit = "Mt"
   )
   status <- tibble(
-    source_id = c("example", "carbon-monitor"),
-    source = c("Example", "Carbon Monitor"),
-    period = c("annual", "monthly"),
-    status = "ok",
-    message = "",
-    rows = c(2L, 2L)
+    source_id = c("example", "carbon-monitor", "example"),
+    source = c("Example", "Carbon Monitor", "Example"),
+    period = c("annual", "monthly", "monthly"),
+    status = c("ok", "ok", "skipped"),
+    message = c("", "", "Monthly comparison is only supported for Carbon Monitor in v1."),
+    rows = c(2L, 2L, 0L)
   )
 
   raw_path <- file.path(comparison_dir, "raw.csv")
@@ -230,6 +250,18 @@ test_that("external comparison report writes expected fixture artifacts", {
     comparison_dir,
     "plots",
     "annual_country_timeseries_example.png"
+  )))
+  summary_text <- readLines(file.path(comparison_dir, "summary.md"))
+  expect_true(any(summary_text == "## EU annual raw totals"))
+  expect_lt(
+    match("## EU annual raw totals", summary_text),
+    match("## EU annual adjusted totals", summary_text)
+  )
+  expect_true(any(summary_text == "<summary>Detailed comparison</summary>"))
+  expect_false(any(grepl(
+    "Monthly comparison is only supported for Carbon Monitor in v1.",
+    summary_text,
+    fixed = TRUE
   )))
 
   annual_pairs <- read_csv(file.path(comparison_dir, "annual_pairs.csv"), show_col_types = FALSE)
