@@ -625,6 +625,77 @@ plot_monthly_carbonmonitor_countries <- function(monthly_pairs, plots_dir) {
   invisible(path)
 }
 
+plot_annual_eu_timeseries_per_provider <- function(annual_pairs, plots_dir) {
+  providers <- annual_pairs %>%
+    filter(iso2 == "EU", has_external, has_crea) %>%
+    distinct(source_id, source_short)
+
+  if (nrow(providers) == 0) {
+    return(invisible(character()))
+  }
+
+  crea_raw_name <- target_series_name()
+  crea_adj_name <- paste(target_series_name(), "adjusted")
+  crea_color <- "#1f77b4"
+  external_color <- "#d62728"
+
+  map2_chr(providers$source_id, providers$source_short, function(provider_id, provider_name) {
+    provider_pairs <- annual_pairs %>%
+      filter(source_id == provider_id, iso2 == "EU", has_external, has_crea)
+
+    external_lines <- provider_pairs %>%
+      distinct(date, external_value_mt) %>%
+      transmute(date, value_mt = external_value_mt, series = provider_name)
+
+    target_lines <- provider_pairs %>%
+      distinct(crea_variant, date, crea_value_mt) %>%
+      transmute(
+        date,
+        value_mt = crea_value_mt,
+        series = target_variant_name(crea_variant)
+      )
+
+    plot_data <- bind_rows(external_lines, target_lines) %>%
+      filter(!is.na(value_mt))
+
+    path <- file.path(plots_dir, paste0("annual_eu_timeseries_", safe_filename(provider_id), ".png"))
+    if (nrow(plot_data) == 0) {
+      save_blank_plot(path, paste("EU annual comparison:", provider_name))
+      return(path)
+    }
+
+    all_series <- unique(plot_data$series)
+    series_colors <- setNames(
+      ifelse(all_series %in% c(crea_raw_name, crea_adj_name), crea_color, external_color),
+      all_series
+    )
+    crea_linetypes <- setNames(c("solid", "dashed"), c(crea_raw_name, crea_adj_name))
+    external_series <- setdiff(all_series, c(crea_raw_name, crea_adj_name))
+    all_linetypes <- c(
+      crea_linetypes,
+      setNames(rep("solid", length(external_series)), external_series)
+    )
+
+    plt <- ggplot(plot_data, aes(date, value_mt, color = series, linetype = series)) +
+      geom_line(linewidth = 0.7) +
+      scale_y_continuous(labels = label_number()) +
+      scale_color_manual(values = series_colors) +
+      scale_linetype_manual(values = all_linetypes) +
+      labs(
+        title = paste("EU annual comparison:", provider_name),
+        subtitle = "CREA (blue solid/dashed) vs provider (red)",
+        x = NULL,
+        y = "Mt CO2 / year",
+        color = NULL,
+        linetype = NULL
+      ) +
+      theme_external_compare()
+
+    ggsave(path, plot = plt, width = 10, height = 5.5, dpi = 320, bg = "white")
+    path
+  })
+}
+
 plot_annual_country_timeseries_per_provider <- function(annual_pairs, subplots_dir) {
   providers <- annual_pairs %>%
     filter(iso2 != "EU", has_external, has_crea) %>%
@@ -716,9 +787,21 @@ write_plots <- function(annual_pairs, monthly_pairs, country_totals, comparison_
 
   plot_annual_eu_timeseries(annual_pairs, plots_dir)
   plot_annual_eu_timeseries_by_provider(annual_pairs, plots_dir)
+  plot_annual_eu_timeseries_per_provider(annual_pairs, plots_dir)
   plot_country_scatter(annual_pairs, plots_dir)
   plot_country_diff_ranking(country_totals, plots_dir)
-  plot_annual_country_timeseries_per_provider(annual_pairs, country_by_provider_dir)
+  country_provider_paths <- plot_annual_country_timeseries_per_provider(
+    annual_pairs,
+    country_by_provider_dir
+  )
+  if (length(country_provider_paths) > 0) {
+    # Keep root-level provider files for compatibility with older fixtures.
+    file.copy(
+      from = country_provider_paths,
+      to = file.path(plots_dir, basename(country_provider_paths)),
+      overwrite = TRUE
+    )
+  }
   plot_monthly_carbonmonitor_eu(monthly_pairs, plots_dir)
   plot_monthly_carbonmonitor_countries(monthly_pairs, plots_dir)
 }
