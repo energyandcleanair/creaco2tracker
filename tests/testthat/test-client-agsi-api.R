@@ -80,7 +80,7 @@ test_that("agsi.get_storage_change parses AGSI storage withdrawals", {
   expect_length(list.files("cache", pattern = "^agsi_storage_change_.*\\.parquet$"), 1)
 })
 
-test_that("agsi.get_storage_change returns no data when the API key is absent", {
+test_that("agsi.get_storage_change fails when the API key is absent", {
   old_key <- Sys.getenv("AGSI_API_KEY", unset = NA_character_)
   Sys.unsetenv("AGSI_API_KEY")
   on.exit(
@@ -101,18 +101,17 @@ test_that("agsi.get_storage_change returns no data when the API key is absent", 
     .package = "httr"
   )
 
-  expect_warning(
-    result <- suppressMessages(
+  expect_error(
+    suppressMessages(
       agsi.get_storage_change(
         date_from = "2023-01-01",
         date_to = "2023-01-03",
-          iso2 = "DE",
-          use_cache = FALSE
+        iso2 = "DE",
+        use_cache = FALSE
       )
     ),
     "AGSI_API_KEY not set"
   )
-  expect_equal(nrow(result), 0)
 })
 
 test_that("agsi.get_storage_change retries non-200 responses and succeeds", {
@@ -244,4 +243,56 @@ test_that("agsi.get_storage_change returns empty result after non-200 retries ar
 
   expect_equal(call_count, 4L)
   expect_equal(nrow(result), 0)
+})
+
+test_that("agsi.get_storage_change fails when AGSI JSON contains an error", {
+  temp_cache <- local_temp_cache_dir()
+  on.exit(
+    {
+      setwd(temp_cache$old_dir)
+      unlink(temp_cache$temp_dir, recursive = TRUE)
+    },
+    add = TRUE
+  )
+
+  old_key <- Sys.getenv("AGSI_API_KEY", unset = NA_character_)
+  Sys.setenv(AGSI_API_KEY = "test-key")
+  on.exit(
+    {
+      if (is.na(old_key)) {
+        Sys.unsetenv("AGSI_API_KEY")
+      } else {
+        Sys.setenv(AGSI_API_KEY = old_key)
+      }
+    },
+    add = TRUE
+  )
+
+  local_mocked_bindings(
+    GET = function(url, ...) {
+      list(url = url, status = 200L)
+    },
+    status_code = function(response) {
+      response$status
+    },
+    content = function(response, type = "text", encoding = "UTF-8", ...) {
+      paste0(
+        '{"last_page":0,"total":0,"dataset":"storage ERROR",',
+        '"error":"access denied","message":"Invalid or missing API key","data":[]}'
+      )
+    },
+    .package = "httr"
+  )
+
+  expect_error(
+    suppressMessages(
+      agsi.get_storage_change(
+        date_from = "2023-01-01",
+        date_to = "2023-01-03",
+        iso2 = "XX",
+        use_cache = FALSE
+      )
+    ),
+    "Invalid or missing API key; access denied"
+  )
 })

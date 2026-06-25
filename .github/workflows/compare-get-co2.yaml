@@ -1,0 +1,208 @@
+name: compare-get-co2
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: Base branch or ref to compare against.
+        required: false
+        default: master
+      date_to:
+        description: Optional comparison end date (YYYY-MM-DD). Defaults to yesterday UTC.
+        required: false
+        default: ''
+  pull_request:
+    branches: [ master ]
+    paths:
+      - 'R/*.R'
+      - 'scripts/compare_get_co2'
+      - 'scripts/compare_get_co2.R'
+      - 'scripts/collect_get_co2.R'
+      - 'scripts/summarize_compare_get_co2.py'
+      - 'rr'
+      - 'rr.Dockerfile'
+      - 'DESCRIPTION'
+      - 'NAMESPACE'
+      - 'tests/testthat/*.R'
+      - '.github/workflows/compare-get-co2.yaml'
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  compare:
+    name: compare get_co2
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+      CREA_DB_PRODUCTION: ${{ secrets.CREA_DB_PRODUCTION }}
+      AGSI_API_KEY: ${{ secrets.AGSI_API_KEY }}
+      API_KEY: ${{ secrets.API_KEY }}
+      EMBER_KEY: ${{ secrets.EMBER_KEY }}
+      EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in CREA_DB_PRODUCTION AGSI_API_KEY API_KEY EMBER_KEY EIA_API_KEY GITHUB_PAT; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing required secret(s): %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Write .Renviron for comparison runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          {
+            printf 'CREA_DB_PRODUCTION=%s\n' "$CREA_DB_PRODUCTION"
+            printf 'AGSI_API_KEY=%s\n' "$AGSI_API_KEY"
+            printf 'API_KEY=%s\n' "$API_KEY"
+            printf 'EMBER_KEY=%s\n' "$EMBER_KEY"
+            printf 'EIA_API_KEY=%s\n' "$EIA_API_KEY"
+            printf 'GITHUB_PAT=%s\n' "$GITHUB_PAT"
+          } > .Renviron
+
+      - uses: iterative/setup-cml@959663fc0e5258fc9090894d1256920beab89d47
+
+      - name: Resolve comparison inputs
+        id: comparison-inputs
+        shell: bash
+        env:
+          INPUT_DATE_TO: ${{ inputs.date_to }}
+          INPUT_BASE_REF: ${{ inputs.base_ref }}
+          PR_BASE_REF: ${{ github.base_ref }}
+          TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          DATE_TO="${INPUT_DATE_TO:-}"
+          if [[ -z "$DATE_TO" ]]; then
+            DATE_TO=$(date -u -d '1 day ago' +%F)
+          fi
+          BASE_REF="${PR_BASE_REF:-${INPUT_BASE_REF:-master}}"
+          echo "date_to=${DATE_TO}" >> "$GITHUB_OUTPUT"
+          echo "base_ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
+          echo "target_sha=${TARGET_SHA}" >> "$GITHUB_OUTPUT"
+          echo "Using date_to=${DATE_TO}"
+          echo "Using base_ref=${BASE_REF}"
+          echo "Using target_sha=${TARGET_SHA}"
+
+      - name: Cache get_co2 reference runs
+        uses: actions/cache@v4
+        with:
+          path: .tmp/comparison/ref_runs
+          key: >-
+            ${{ runner.os }}-get-co2-ref-runs-${{ steps.comparison-inputs.outputs.date_to }}-${{
+            hashFiles('scripts/collect_get_co2.R')
+            }}
+          restore-keys: |
+            ${{ runner.os }}-get-co2-ref-runs-${{ steps.comparison-inputs.outputs.date_to }}-${{ hashFiles('scripts/collect_get_co2.R') }}-
+            ${{ runner.os }}-get-co2-ref-runs-${{ steps.comparison-inputs.outputs.date_to }}-
+
+      - name: Cache rr runtime image
+        uses: actions/cache@v4
+        with:
+          path: .tmp/rr-image/creaco2tracker-rr.tar
+          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION') }}
+
+      - name: Test podman installed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v podman >/dev/null 2>&1; then
+            echo "Podman is not available; stopping build."
+            exit 1
+          fi
+
+      - name: Load cached rr runtime image
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -s .tmp/rr-image/creaco2tracker-rr.tar ]]; then
+            podman load -i .tmp/rr-image/creaco2tracker-rr.tar
+          else
+            echo "No cached rr runtime image found."
+          fi
+
+      - name: Build rr runtime image
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./rr build
+
+      - name: Save rr runtime image for cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          project_name="$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-')"
+          image_name="localhost/${project_name}-rr:latest"
+          mkdir -p .tmp/rr-image
+          if podman image exists "$image_name"; then
+            rm -f .tmp/rr-image/creaco2tracker-rr.tar
+            podman save "$image_name" -o .tmp/rr-image/creaco2tracker-rr.tar
+          else
+            echo "rr runtime image not found: ${image_name}"
+          fi
+
+      - name: Run get_co2 comparison
+        id: compare
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "${{ steps.comparison-inputs.outputs.base_ref }}"
+          mkdir -p .tmp/comparison/outputs
+          comparison_dir_file=".tmp/comparison/outputs/comparison-dir.txt"
+          scripts/compare_get_co2 \
+            --date-to "${{ steps.comparison-inputs.outputs.date_to }}" \
+            --emit-comparison-dir "$comparison_dir_file" \
+            "origin/${{ steps.comparison-inputs.outputs.base_ref }}" \
+            HEAD
+          comparison_dir="$(head -n 1 "$comparison_dir_file" 2>/dev/null || true)"
+          summary_md="$comparison_dir/summary.md"
+          if [[ ! -f "$summary_md" ]]; then
+            echo "Comparison summary is missing: $summary_md" >&2
+            exit 1
+          fi
+          echo "summary_md=${summary_md}" >> "$GITHUB_OUTPUT"
+          echo "comparison_dir=${comparison_dir}" >> "$GITHUB_OUTPUT"
+
+      - name: Add GitHub Actions summary
+        if: always() && steps.compare.outputs.summary_md != ''
+        shell: bash
+        run: cat "${{ steps.compare.outputs.summary_md }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish persistent CML PR comment
+        if: >-
+          always() && github.event_name == 'pull_request' && steps.compare.outputs.summary_md != ''
+        env:
+          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          summary_md="${{ steps.compare.outputs.summary_md }}"
+          (
+            cd "$(dirname "$summary_md")"
+            cml comment create --publish --update "$(basename "$summary_md")"
+          )
+
+      - name: Upload comparison artifacts
+        if: always() && steps.compare.outputs.comparison_dir != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: get-co2-comparison-${{ steps.comparison-inputs.outputs.date_to }}-${{ steps.comparison-inputs.outputs.target_sha }}
+          path: ${{ steps.compare.outputs.comparison_dir }}
+          retention-days: 14

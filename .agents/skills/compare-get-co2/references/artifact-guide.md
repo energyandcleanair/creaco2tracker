@@ -7,23 +7,17 @@ The comparison wrapper stores generated artifacts under `.tmp/comparison/`.
 ```text
 .tmp/comparison/
   ref_runs/
-    <safe_ref>_<short_sha>_<run_hash>/
-      collect_get_co2.R
-      metadata.csv
+    <ref_run_hash_prefix>__commit_<short_sha>/
       raw.csv
       complete.ok
-    worktree_<head_short>_<worktree_hash>_<run_hash>/
-      collect_get_co2.R
-      metadata.csv
+    <ref_run_hash_prefix>__worktree_<head_short>_<worktree_hash>/
       raw.csv
       worktree_status.txt
       worktree_diff.patch
       untracked_files.txt
       complete.ok
   comparisons/
-    <safe_base>_<base_short>__<safe_target>_<target_short>/
-      compare_get_co2.R
-      metadata.csv
+    <comparison_hash_prefix>__<base_label>__<target_label>/
       comparison_totals_eu.csv
       comparison_totals_eu_component.csv
       comparison_totals_country.csv
@@ -32,67 +26,44 @@ The comparison wrapper stores generated artifacts under `.tmp/comparison/`.
       monthly_country_metrics.csv
       monthly_component_metrics.csv
       plots/
+      summary.md
       complete.ok
 ```
 
-`safe_ref` is a lower-case path-safe version of the user-supplied ref. Branch names with `/` are
-converted to `-`. The short SHA keeps moved refs from reusing the wrong directory.
+Committed refs use `commit_<short_sha>` labels and working-copy snapshots use
+`worktree_<head_short>_<worktree_hash>` labels. The full cache key is embedded at the front of
+the directory name and is the cache identity.
 
 ## Hashes
 
-- `args_hash`: Hash of effective collection arguments. The default `date_to` is resolved to a
-  concrete UTC date before hashing.
 - `collect_script_hash`: SHA-256 of the working-copy `scripts/collect_get_co2.R`.
-- `driver_script_hash`: SHA-256 of the working-copy `scripts/compare_get_co2` driver.
-- `run_hash`: Short hash combining `args_hash`, `collect_script_hash`, and
-  `driver_script_hash`.
+- `raw_cache_key`: Full hash of the raw-run cache key. Raw-run keys combine source identity
+  (commit SHA or working-copy hash), effective collection arguments, and `collect_script_hash`.
+- `ref_run_hash_prefix`: Leading 7 hex chars of `raw_cache_key`, used in ref-run directory names.
+- `run_hash`: Short hash of `raw_cache_key`, used in logging and summary context.
 - `compare_script_hash`: SHA-256 of the working-copy `scripts/compare_get_co2.R`.
-- `report_hash`: Short hash combining base/target resolved SHAs, base/target run hashes, and
-  `compare_script_hash` and `driver_script_hash`.
-- `runner`: Resolved R execution mode used for the artifact, either `rscript` or `rr`.
+- `report_cache_key`: Full hash of the comparison cache key. Comparison keys combine the base
+  raw-run key, target raw-run key, and `compare_script_hash`.
+- `comparison_hash_prefix`: Leading 7 hex chars of `report_cache_key`, used in comparison
+  directory names.
+- `report_hash`: Short hash of `report_cache_key`, used in logging and summary context.
+- `runner`: Resolved R execution mode used for the artifact run, either `rscript` or `rr`.
 - `worktree_hash`: Short hash combining `HEAD`, `git diff HEAD --binary`, and untracked
   unignored file paths and contents.
 
 Changing only the report script should reuse `ref_runs/` and regenerate the comparison report.
-Changing collection arguments, `collect_get_co2.R`, the driver script, or worktree source files
-should create new ref-run cache directories for affected sources.
+Changing collection arguments, `collect_get_co2.R`, the committed source SHA, or worktree source
+files should create new ref-run cache directories for affected sources. Changing only the wrapper
+driver should not invalidate raw runs.
 
-## Metadata
+## Explicit Inputs
 
-Every artifact directory has `metadata.csv` with `key,value` rows.
+The wrapper passes required values explicitly to downstream scripts.
 
-Ref-run metadata includes:
-
-- `artifact_type=ref_run`
-- `source_type=commit` for committed refs, or `source_type=worktree` for working-copy runs
-- `ref`, `sha`, `short_sha`
-- `date_to`
-- `args_hash`, `collect_script_hash`, `driver_script_hash`, `run_hash`
-- `raw_file=raw.csv`
-- `runner`
-
-Worktree ref-run metadata also includes:
-
-- `head_sha`
-- `worktree_hash`
-- `dirty_tracked`
-- `dirty_untracked_unignored`
-
-Comparison metadata includes:
-
-- `artifact_type=comparison`
-- `base_ref`, `target_ref`
-- `base_source_type`, `target_source_type`
-- `base_source_id`, `target_source_id`
-- `base_sha`, `target_sha`, `base_short_sha`, `target_short_sha`
-- `date_to`
-- `raw_base_file`, `raw_target_file`
-- `base_run_hash`, `target_run_hash`, `compare_script_hash`, `driver_script_hash`,
-  `report_hash`
-- `runner`
-- `target_worktree_hash` when the target is a working-copy snapshot
-
-`raw_base_file` and `raw_target_file` may be relative to the comparison directory or absolute.
+- `scripts/compare_get_co2.R` receives `--raw-base`, `--raw-target`,
+  `--base-short-sha`, and `--target-short-sha`.
+- `scripts/summarize_compare_get_co2.py` receives explicit summary context
+  (`--base-ref`, `--target-ref`, short SHAs, `--date-to`, `--runner`, and hash values).
 
 ## Working-Copy Mode
 
@@ -117,8 +88,12 @@ source directories, so the main checkout is not switched for either runner.
 
 ## Reuse Rules
 
-A cached directory is reusable only when `complete.ok` exists and metadata matches the expected
-hashes. A missing `complete.ok` means the artifact may be partial and should be regenerated.
+A cached directory is reusable only when the exact hash-derived path exists and `complete.ok`
+exists. The driver trusts successful producer layers and does not inspect every payload file.
+A missing `complete.ok` means the artifact may be partial and should be regenerated.
+
+For comparison artifacts, `summary.md` must also exist in the cached directory. If `complete.ok`
+exists but `summary.md` is missing, the driver fails hard and requires cache cleanup.
 
 The wrapper atomically builds into a temporary sibling directory and promotes it after success.
 If a run fails, the previous completed comparison directory should remain intact.
@@ -132,17 +107,39 @@ The wrapper accepts `--runner auto|rscript|rr` and `COMPARE_GET_CO2_RUNNER`.
 - `rr`: Run through the repository runtime image. This is best when launching from the host and
   uses the same isolated source directories as `rscript`.
 
-Runner mode is recorded in metadata but is not part of the cache key, so matching cached raw runs
-can be reused across runner modes.
+Runner mode is not part of the cache key, so matching cached raw runs can be reused across runner
+modes.
 
 ## Summary Helper
 
 Use:
 
 ```bash
-python3 .agents/skills/compare-get-co2/scripts/summarize_compare_get_co2.py \
-  .tmp/comparison/comparisons/<comparison-dir>
+python3 scripts/summarize_compare_get_co2.py \
+  .tmp/comparison/comparisons/<comparison-dir> \
+  --base-ref <base-ref> \
+  --target-ref <target-ref> \
+  --base-short-sha <base-short-sha> \
+  --target-short-sha <target-short-sha> \
+  --date-to <YYYY-MM-DD> \
+  --runner <rscript|rr> \
+  --report-hash <report-hash> \
+  --base-run-hash <base-run-hash> \
+  --target-run-hash <target-run-hash>
 ```
 
-The helper reads `metadata.csv` and any available comparison CSVs, then writes Markdown to stdout.
-It should tolerate missing optional CSVs and mention what was unavailable.
+The helper reads explicit run context arguments and available comparison CSVs, then writes
+Markdown to stdout. It should tolerate missing optional CSVs and mention what was unavailable.
+The wrapper writes
+`summary.md` on every successful comparison.
+
+The wrapper supports explicit machine handoff via:
+
+```bash
+scripts/compare_get_co2 --emit-comparison-dir <path/to/output-file> ...
+```
+
+On success, the wrapper writes one line containing the absolute comparison directory path.
+The GitHub Actions/CML workflow consumes that file, validates `complete.ok`, derives
+`summary.md` as `<comparison_dir>/summary.md`, and uses it for both persistent PR comments and
+step summary output.

@@ -71,10 +71,6 @@
 
     status <- httr::status_code(http_response)
     response_text <- httr::content(http_response, "text", encoding = "UTF-8")
-    log_debug(paste0(
-      "AGSI response for {iso2} from {date_from} to {date_to} ",
-      "returned HTTP {status}: {response_text}"
-    ))
 
     if (!identical(status, 200L)) {
       if (attempt == max_attempts) {
@@ -174,10 +170,13 @@ agsi.get_storage_change <- function(date_from, date_to, iso2, use_cache = TRUE, 
         # Add api key in header only for network calls.
         api_key <- Sys.getenv("AGSI_API_KEY")
         if (api_key == "") {
-          warning("AGSI_API_KEY not set. Returning empty table")
-          return(tibble())
+          stop(glue::glue(
+            "AGSI_API_KEY not set; cannot request AGSI storage data for ",
+            "{iso2} from {date_from} to {date_to}"
+          ), call. = FALSE)
         }
 
+        log_debug("AGSI_API_KEY is set; requesting AGSI response for {iso2}")
         .fetch_agsi_storage_change_with_retry(
           url = url,
           api_key = api_key,

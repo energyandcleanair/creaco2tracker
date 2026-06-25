@@ -17,11 +17,13 @@ CONTAINER_REPO_ROOT="/workspaces/${REPO_BASENAME}"
 usage() {
   cat <<'EOF'
 Usage:
+  rr build
   rr run <script-or-rscript-args...>
   rr shell
   rr clean [--all] [--purge-cache]
 
 Modes:
+  build  Build or refresh the project runtime image and exit.
   run    Execute Rscript inside the project runtime image.
   shell  Open an interactive shell in the same runtime context.
   clean  Remove project containers and optionally image/cache volumes.
@@ -149,6 +151,12 @@ ensure_image() {
   fi
 }
 
+ensure_current_image() {
+  local build_hash
+  build_hash="$(calc_build_hash)"
+  ensure_image "$build_hash"
+}
+
 common_run_args() {
   local work_dir="${1:-$CONTAINER_REPO_ROOT}"
   local container_work_dir="$work_dir"
@@ -170,6 +178,14 @@ common_run_args() {
   args+=(-e "PKG_CACHE_DIR=/cache/pak")
   args+=(-e "PKG_PACKAGE_CACHE_DIR=/cache/pak/packages")
   args+=(-e "PKG_METADATA_CACHE_DIR=/cache/pak/metadata")
+
+  local env_var
+  for env_var in CREA_DB_PRODUCTION AGSI_API_KEY API_KEY EMBER_KEY EIA_API_KEY GITHUB_PAT; do
+    if [[ -n "${!env_var:-}" ]]; then
+      args+=(-e "$env_var")
+    fi
+  done
+
   args+=(-w "${container_work_dir}")
 
   if [[ -t 0 && -t 1 ]]; then
@@ -263,16 +279,19 @@ main() {
   require_cmd podman
 
   case "$mode" in
+    build|run|shell)
+      ensure_current_image
+      ;;
+  esac
+
+  case "$mode" in
+    build)
+      echo "[rr] Runtime image ready: ${IMAGE_NAME}"
+      ;;
     run)
-      local build_hash
-      build_hash="$(calc_build_hash)"
-      ensure_image "$build_hash"
       run_mode "$@"
       ;;
     shell)
-      local build_hash
-      build_hash="$(calc_build_hash)"
-      ensure_image "$build_hash"
       shell_mode
       ;;
     clean)

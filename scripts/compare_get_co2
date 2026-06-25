@@ -1,1164 +1,953 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
+"""Compare get_co2() output across committed refs or the current worktree.
 
-set -euo pipefail
+The wrapper intentionally keeps caching simple:
 
-usage() {
-  cat <<'EOF'
-Usage:
-  scripts/compare_get_co2 [options] [base] [target]
+* raw collection artifacts are keyed by source identity, collection args, and
+    the collection R script hash;
+* comparison artifacts are keyed by the two raw-run keys and the comparison R
+    script hash.
+"""
 
-Defaults:
-  no args   compare master against HEAD, or working copy if source files changed
-  one arg   compare the provided base against HEAD, or working copy if source files changed
-  two args  compare base against target
+from __future__ import annotations
 
-Options:
-  --date-to YYYY-MM-DD  Pin get_co2(date_to). Defaults to today's UTC date.
-  --runner MODE         R execution mode. Defaults to auto, which uses Rscript
-                        inside the devcontainer and ./rr run otherwise. Both
-                        runners support committed refs and working-copy targets
-                        through isolated source directories.
-  --worktree            Compare against the current working copy.
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+import re
+import shlex
+import shutil
+import stat
+import subprocess
+import sys
+import tarfile
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Iterable, Sequence
 
-Targets:
-  worktree, working-tree, .  aliases for the current working copy.
 
-Artifacts:
-  .tmp/comparison/ref_runs/<safe_ref>_<short_sha>_<run_hash>/
-  .tmp/comparison/comparisons/<safe_base>_<base_short>__<safe_target>_<target_short>/
-EOF
-}
+CACHE_ROOT = Path(".tmp/comparison")
+RAW_CACHE_VERSION = 3
+REPORT_CACHE_VERSION = 3
+REF_RUN_DIR_HASH_LEN = 7
+COMPARISON_DIR_HASH_LEN = 7
+DEFAULT_BASE_REF = "master"
+WORKTREE_ALIASES = {"worktree", "working-tree", "."}
 
-die() {
-  echo "Error: $*" >&2
-  exit 1
-}
 
-csv_quote() {
-  local value="${1//\"/\"\"}"
-  printf '"%s"' "$value"
-}
+class CompareError(RuntimeError):
+    """Expected command-line failure."""
 
-hash_stream() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum | awk '{print $1}'
-  elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 | awk '{print $1}'
-  elif command -v openssl >/dev/null 2>&1; then
-    openssl dgst -sha256 | awk '{print $2}'
-  else
-    die "no supported SHA-256 tool found (sha256sum, shasum, openssl)"
-  fi
-}
 
-hash_file() {
-  local file="$1"
+@dataclass(frozen=True)
+class Paths:
+    repo_root: Path
+    cache_root: Path
+    ref_runs_root: Path
+    comparisons_root: Path
+    collect_src: Path
+    compare_src: Path
 
-  [[ -f "$file" ]] || die "cannot hash missing file: ${file}"
 
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$file" | awk '{print $1}'
-  elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$file" | awk '{print $1}'
-  elif command -v openssl >/dev/null 2>&1; then
-    openssl dgst -sha256 "$file" | awk '{print $2}'
-  else
-    die "no supported SHA-256 tool found (sha256sum, shasum, openssl)"
-  fi
-}
+@dataclass(frozen=True)
+class WorktreeState:
+    head_sha: str
+    head_short: str
+    worktree_key: str
+    worktree_hash: str
+    diff_bytes: bytes
+    untracked_paths: tuple[str, ...]
+    status_text: str
 
-hash_text() {
-  printf '%s' "$1" | hash_stream
-}
+    @property
+    def dirty_tracked(self) -> bool:
+        return bool(self.diff_bytes)
 
-short_hash() {
-  printf '%s' "$1" | cut -c 1-12
-}
+    @property
+    def dirty_untracked_unignored(self) -> bool:
+        return bool(self.untracked_paths)
 
-safe_path_label() {
-  local label="$1"
-  local safe
 
-  safe="$(printf '%s' "$label" |
-    tr '[:upper:]' '[:lower:]' |
-    sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//; s/-+/-/g')"
+@dataclass(frozen=True)
+class Source:
+    ref: str
+    source_type: str
+    sha: str
+    short_sha: str
+    source_id: str
+    dir_label: str
+    worktree: WorktreeState | None = None
 
-  if [[ -z "$safe" ]]; then
-    safe="ref"
-  fi
 
-  printf '%s' "$safe"
-}
+@dataclass(frozen=True)
+class RawRun:
+    source: Source
+    run_dir: Path
+    cache_key: str
+    run_hash: str
 
-resolve_commit() {
-  local ref="$1"
-  git rev-parse --verify "${ref}^{commit}" 2>/dev/null ||
-    die "could not resolve ref as a commit: ${ref}"
-}
 
-short_commit() {
-  local sha="$1"
-  git rev-parse --short=12 "$sha"
-}
+@dataclass(frozen=True)
+class ComparisonRun:
+    comparison_dir: Path
+    cache_key: str
+    report_hash: str
 
-is_worktree_alias() {
-  case "$1" in
-    worktree | working-tree | .)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
 
-has_tracked_changes() {
-  ! git diff --quiet HEAD --
-}
+@dataclass(frozen=True)
+class Runner:
+    name: str
 
-has_untracked_unignored_files() {
-  local first_file
+    @classmethod
+    def from_request(cls, requested_runner: str, repo_root: Path) -> "Runner":
+        if requested_runner not in {"auto", "rscript", "rr"}:
+            die("--runner must be one of: auto, rscript, rr")
+        if requested_runner != "auto":
+            return cls(requested_runner)
+        if is_devcontainer_environment(repo_root):
+            return cls("rscript")
+        return cls("rr")
 
-  IFS= read -r -d '' first_file < <(git ls-files --others --exclude-standard -z)
-}
+    def require(self, repo_root: Path) -> None:
+        if self.name == "rscript":
+            if shutil.which("Rscript") is None:
+                die("Rscript is required for --runner rscript")
+        elif self.name == "rr":
+            if not os.access(repo_root / "rr", os.X_OK):
+                die("missing executable rr script at repo root")
+        else:
+            die(f"unsupported resolved runner: {self.name}")
 
-has_working_copy_changes() {
-  has_tracked_changes || has_untracked_unignored_files
-}
+    def run(self, repo_root: Path, work_dir: Path, args: Sequence[str]) -> bool:
+        if self.name == "rscript":
+            return run_status(["Rscript", *args], cwd=work_dir) == 0
 
-write_untracked_unignored_files() {
-  local nul_file="$1"
-  local text_file="$2"
+        env = os.environ.copy()
+        env["RR_WORK_DIR"] = str(work_dir)
+        return run_status(["./rr", "run", *args], cwd=repo_root, env=env) == 0
 
-  git ls-files --others --exclude-standard -z | sort -z >"$nul_file"
-  tr '\0' '\n' <"$nul_file" >"$text_file"
-}
 
-compute_untracked_unignored_hash() {
-  local nul_file="$1"
-  local path
+@dataclass(frozen=True)
+class CollectionWorkspace:
+    source_dir: Path
+    sha_arg: str
+    cleanup_action: Callable[[], None]
 
-  if [[ ! -s "$nul_file" ]]; then
-    hash_text "no-untracked-unignored-files"
+    def cleanup(self) -> None:
+        self.cleanup_action()
+
+
+def log(message: str) -> None:
+    print(f"[compare_get_co2] {message}", flush=True)
+
+
+def die(message: str) -> None:
+    raise CompareError(message)
+
+
+def cmd_text(args: Sequence[str | os.PathLike[str]], cwd: Path | None = None) -> str:
+    result = subprocess.run(
+        [str(arg) for arg in args],
+        cwd=cwd,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if result.returncode != 0:
+        command = shlex.join(str(arg) for arg in args)
+        detail = result.stderr.strip() or result.stdout.strip()
+        die(f"command failed ({command}): {detail}")
+    return result.stdout
+
+
+def cmd_bytes(args: Sequence[str | os.PathLike[str]], cwd: Path | None = None) -> bytes:
+    result = subprocess.run(
+        [str(arg) for arg in args],
+        cwd=cwd,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        command = shlex.join(str(arg) for arg in args)
+        detail = result.stderr.decode("utf-8", "replace").strip()
+        die(f"command failed ({command}): {detail}")
+    return result.stdout
+
+
+def run_status(
+    args: Sequence[str | os.PathLike[str]],
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> int:
+    return subprocess.run([str(arg) for arg in args], cwd=cwd, env=env, check=False).returncode
+
+
+def run_checked(args: Sequence[str | os.PathLike[str]], cwd: Path | None = None) -> None:
+    status = run_status(args, cwd=cwd)
+    if status != 0:
+        die(f"command failed ({shlex.join(str(arg) for arg in args)}) with exit code {status}")
+
+
+def hash_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def hash_text(value: str) -> str:
+    return hash_bytes(value.encode("utf-8"))
+
+
+def hash_file(path: Path) -> str:
+    if not path.is_file():
+        die(f"cannot hash missing file: {path}")
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def stable_hash(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hash_bytes(encoded)
+
+
+def short_hash(value: str) -> str:
+    return value[:12]
+
+
+def utc_timestamp() -> str:
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def validate_date_to(value: str) -> str:
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        die(f"--date-to must use YYYY-MM-DD, got: {value}")
+    try:
+        parsed = dt.date.fromisoformat(value)
+    except ValueError as exc:
+        raise CompareError(f"--date-to is not a valid date: {value}") from exc
+    if parsed.isoformat() != value:
+        die(f"--date-to is not a valid date: {value}")
+    return value
+
+
+def is_worktree_alias(value: str) -> bool:
+    return value in WORKTREE_ALIASES
+
+
+def resolve_commit(ref: str, repo_root: Path) -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", f"{ref}^{{commit}}"],
+        cwd=repo_root,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    if result.returncode != 0:
+        die(f"could not resolve ref as a commit: {ref}")
+    return result.stdout.strip()
+
+
+def short_commit(sha: str, repo_root: Path) -> str:
+    return cmd_text(["git", "rev-parse", "--short=12", sha], cwd=repo_root).strip()
+
+
+def repo_root() -> Path:
+    root = cmd_text(["git", "rev-parse", "--show-toplevel"]).strip()
+    return Path(root).resolve()
+
+
+def has_tracked_changes(repo_root: Path) -> bool:
+    return run_status(["git", "diff", "--quiet", "HEAD", "--"], cwd=repo_root) != 0
+
+
+def untracked_unignored_paths(repo_root: Path) -> tuple[str, ...]:
+    raw = cmd_bytes(["git", "ls-files", "--others", "--exclude-standard", "-z"], cwd=repo_root)
+    paths = [os.fsdecode(part) for part in raw.split(b"\0") if part]
+    return tuple(sorted(paths, key=os.fsencode))
+
+
+def hash_untracked_files(paths: Iterable[str], repo_root: Path) -> str:
+    paths = tuple(paths)
+    if not paths:
+        return hash_text("no-untracked-unignored-files")
+
+    digest = hashlib.sha256()
+    for rel_path in paths:
+        digest.update(b"path\0")
+        digest.update(os.fsencode(rel_path))
+        digest.update(b"\0sha256\0")
+        digest.update(hash_file(repo_root / rel_path).encode("ascii"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def read_worktree_state(repo_root: Path, head_sha: str, head_short: str) -> WorktreeState:
+    diff_bytes = cmd_bytes(["git", "diff", "--binary", "HEAD", "--"], cwd=repo_root)
+    untracked = untracked_unignored_paths(repo_root)
+    status_text = cmd_text(
+        ["git", "status", "--short", "--untracked-files=all"],
+        cwd=repo_root,
+    )
+    worktree_key = stable_hash(
+        {
+            "cache_version": RAW_CACHE_VERSION,
+            "head_sha": head_sha,
+            "tracked_diff_hash": hash_bytes(diff_bytes),
+            "untracked_unignored_hash": hash_untracked_files(untracked, repo_root),
+        }
+    )
+    return WorktreeState(
+        head_sha=head_sha,
+        head_short=head_short,
+        worktree_key=worktree_key,
+        worktree_hash=short_hash(worktree_key),
+        diff_bytes=diff_bytes,
+        untracked_paths=untracked,
+        status_text=status_text,
+    )
+
+
+def is_devcontainer_environment(repo_root: Path) -> bool:
+    if os.environ.get("REMOTE_CONTAINERS") == "true":
+        return True
+    if os.environ.get("CODESPACES"):
+        return True
+    if os.environ.get("DEVCONTAINER"):
+        return True
+    if (repo_root / ".devcontainer").is_dir() and str(repo_root).startswith("/workspaces/"):
+        return os.environ.get("R_LIBS_USER") == str(repo_root / ".r-lib")
+    return False
+
+
+def chmod_public_dir(path: Path) -> None:
+    try:
+        path.chmod(path.stat().st_mode | stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+    except FileNotFoundError:
+        return
+
+
+def prepare_collection_source_dir(source_dir: Path) -> None:
+    artifact_dir = source_dir.parent
+    cache_dir = source_dir / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    chmod_public_dir(artifact_dir)
+    chmod_public_dir(cache_dir)
+    log(f"Source cache dir: {cache_dir}")
+
+
+def copy_repo_renviron(repo_root: Path, source_dir: Path) -> None:
+    renviron = repo_root / ".Renviron"
+    if renviron.is_file():
+        shutil.copy2(renviron, source_dir / ".Renviron")
+
+
+def remove_temp_git_worktree(repo_root: Path, source_dir: Path) -> None:
+    if not source_dir.exists():
+        return
+    status = run_status(
+        ["git", "worktree", "remove", "--force", str(source_dir)],
+        cwd=repo_root,
+    )
+    if status != 0:
+        shutil.rmtree(source_dir, ignore_errors=True)
+    run_status(["git", "worktree", "prune"], cwd=repo_root)
+
+
+def artifact_allows_reuse(path: Path) -> bool:
+    return path.is_dir() and (path / "complete.ok").is_file()
+
+
+def atomic_promote(tmp_dir: Path, final_dir: Path) -> None:
+    if final_dir.exists():
+        if final_dir.is_dir():
+            shutil.rmtree(final_dir)
+        else:
+            final_dir.unlink()
+    tmp_dir.rename(final_dir)
+
+
+def write_complete(path: Path) -> None:
+    (path / "complete.ok").write_text(f"completed_at_utc={utc_timestamp()}\n", encoding="utf-8")
+
+
+def parse_retry_count() -> int:
+    value = os.environ.get("COMPARE_GET_CO2_COLLECT_RETRIES", "3")
+    try:
+        retries = int(value)
+    except ValueError as exc:
+        raise CompareError(
+            f"COMPARE_GET_CO2_COLLECT_RETRIES must be an integer, got: {value}"
+        ) from exc
+    if retries < 1:
+        die("COMPARE_GET_CO2_COLLECT_RETRIES must be at least 1")
+    return retries
+
+
+def raw_cache_key(source: Source, date_to: str, collect_script_hash: str) -> str:
+    return stable_hash(
+        {
+            "artifact_type": "ref_run",
+            "cache_version": RAW_CACHE_VERSION,
+            "source_type": source.source_type,
+            "source_id": source.source_id,
+            "args": {"date_to": date_to},
+            "collect_script_hash": collect_script_hash,
+        }
+    )
+
+
+def make_raw_run(
+    source: Source,
+    paths: Paths,
+    date_to: str,
+    collect_script_hash: str,
+) -> RawRun:
+    cache_key = raw_cache_key(source, date_to, collect_script_hash)
+    run_hash = short_hash(cache_key)
+    # Keep full raw cache key for identity while shortening directory prefixes.
+    ref_run_dir_hash = cache_key[:REF_RUN_DIR_HASH_LEN]
+    dirname = f"{ref_run_dir_hash}__{source.dir_label}"
+    return RawRun(
+        source=source,
+        run_dir=paths.ref_runs_root / dirname,
+        cache_key=cache_key,
+        run_hash=run_hash,
+    )
+
+
+def comparison_cache_key(
+    base_run: RawRun,
+    target_run: RawRun,
+    compare_script_hash: str,
+) -> str:
+    return stable_hash(
+        {
+            "artifact_type": "comparison",
+            "cache_version": REPORT_CACHE_VERSION,
+            "base_run_key": base_run.cache_key,
+            "target_run_key": target_run.cache_key,
+            "compare_script_hash": compare_script_hash,
+        }
+    )
+
+
+def make_comparison_run(
+    base_run: RawRun,
+    target_run: RawRun,
+    paths: Paths,
+    compare_script_hash: str,
+) -> ComparisonRun:
+    cache_key = comparison_cache_key(base_run, target_run, compare_script_hash)
+    # Keep the full cache key for identity and comparisons, but use a shorter
+    # directory prefix to avoid very long artifact paths.
+    comparison_dir_hash = cache_key[:COMPARISON_DIR_HASH_LEN]
+    comparison_dir = paths.comparisons_root / (
+        f"{comparison_dir_hash}__{base_run.source.dir_label}__{target_run.source.dir_label}"
+    )
+    return ComparisonRun(
+        comparison_dir=comparison_dir,
+        cache_key=cache_key,
+        report_hash=short_hash(cache_key),
+    )
+
+
+def extract_git_archive(repo_root: Path, source_dir: Path) -> None:
+    source_dir.mkdir(parents=True, exist_ok=True)
+    process = subprocess.Popen(
+        ["git", "archive", "--format=tar", "HEAD"],
+        cwd=repo_root,
+        stdout=subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    try:
+        with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
+            archive.extractall(source_dir)
+    finally:
+        process.stdout.close()
+    status = process.wait()
+    if status != 0:
+        die(f"failed to archive HEAD into {source_dir}")
+
+
+def copy_untracked_files(repo_root: Path, source_dir: Path, paths: Sequence[str]) -> None:
+    for rel_path in paths:
+        source = repo_root / rel_path
+        target = source_dir / rel_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+
+def build_working_copy_snapshot(
+    repo_root: Path,
+    source_dir: Path,
+    diff_file: Path,
+    untracked_paths: Sequence[str],
+) -> None:
+    extract_git_archive(repo_root, source_dir)
+
+    if diff_file.stat().st_size > 0:
+        run_checked(["git", "-C", str(source_dir), "init", "-q"], cwd=repo_root)
+        run_checked(
+            ["git", "-C", str(source_dir), "apply", str(diff_file.resolve())],
+            cwd=repo_root,
+        )
+        shutil.rmtree(source_dir / ".git", ignore_errors=True)
+
+    copy_untracked_files(repo_root, source_dir, untracked_paths)
+
+
+@dataclass(frozen=True)
+class CommitSourceMaterializer:
+    source: Source
+
+    def materialize(self, paths: Paths, tmp_dir: Path) -> CollectionWorkspace:
+        source_dir = tmp_dir / "source"
+        if run_status(
+            ["git", "worktree", "add", "--detach", "--quiet", str(source_dir), self.source.sha],
+            cwd=paths.repo_root,
+        ) != 0:
+            remove_temp_git_worktree(paths.repo_root, source_dir)
+            die(
+                f"failed to create temporary worktree for "
+                f"{self.source.ref} ({self.source.short_sha})"
+            )
+
+        return CollectionWorkspace(
+            source_dir=source_dir,
+            sha_arg=self.source.sha,
+            cleanup_action=lambda: remove_temp_git_worktree(paths.repo_root, source_dir),
+        )
+
+
+@dataclass(frozen=True)
+class WorktreeSourceMaterializer:
+    source: Source
+
+    def materialize(self, paths: Paths, tmp_dir: Path) -> CollectionWorkspace:
+        worktree = self.source.worktree
+        if worktree is None:
+            die("internal error: worktree materializer used without worktree source")
+        assert worktree is not None
+
+        diff_file = tmp_dir / "worktree_diff.patch"
+        status_file = tmp_dir / "worktree_status.txt"
+        untracked_file = tmp_dir / "untracked_files.txt"
+        source_dir = tmp_dir / "source"
+
+        diff_file.write_bytes(worktree.diff_bytes)
+        status_file.write_text(worktree.status_text, encoding="utf-8")
+        untracked_file.write_text("\n".join(worktree.untracked_paths) + "\n", encoding="utf-8")
+        build_working_copy_snapshot(
+            paths.repo_root,
+            source_dir,
+            diff_file,
+            worktree.untracked_paths,
+        )
+
+        return CollectionWorkspace(
+            source_dir=source_dir,
+            sha_arg=f"{self.source.sha}+worktree:{worktree.worktree_hash}",
+            cleanup_action=lambda: shutil.rmtree(source_dir, ignore_errors=True),
+        )
+
+
+def collect_raw_run(
+    label: str,
+    raw_run: RawRun,
+    paths: Paths,
+    date_to: str,
+    runner: Runner,
+    materializer: CommitSourceMaterializer | WorktreeSourceMaterializer,
+) -> None:
+    if artifact_allows_reuse(raw_run.run_dir):
+        log(f"Reusing cached {label} run: {raw_run.run_dir}")
+        return
+
+    raw_run.run_dir.parent.mkdir(parents=True, exist_ok=True)
+    tmp_dir = raw_run.run_dir.with_name(f"{raw_run.run_dir.name}.tmp.{os.getpid()}")
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    tmp_dir.mkdir(parents=True)
+
+    collect_copy = tmp_dir / "collect_get_co2.R"
+    shutil.copy2(paths.collect_src, collect_copy)
+
+    source = raw_run.source
+    log(f"Collecting {label} {source.ref} ({source.short_sha}) into {raw_run.run_dir}...")
+
+    workspace = materializer.materialize(paths, tmp_dir)
+    copy_repo_renviron(paths.repo_root, workspace.source_dir)
+    prepare_collection_source_dir(workspace.source_dir)
+
+    max_attempts = parse_retry_count()
+    for attempt in range(1, max_attempts + 1):
+        (tmp_dir / "raw.csv").unlink(missing_ok=True)
+        ok = runner.run(
+            paths.repo_root,
+            workspace.source_dir,
+            [
+                "../collect_get_co2.R",
+                "--output",
+                "../raw.csv",
+                "--date-to",
+                date_to,
+                "--sha",
+                workspace.sha_arg,
+            ],
+        )
+        if ok:
+            collect_copy.unlink(missing_ok=True)
+            workspace.cleanup()
+            write_complete(tmp_dir)
+            atomic_promote(tmp_dir, raw_run.run_dir)
+            return
+
+        if attempt == max_attempts:
+            workspace.cleanup()
+            die(
+                f"failed to collect {label} {source.ref} ({source.short_sha}) "
+                f"after {max_attempts} attempt(s)"
+            )
+
+        log(f"{label} collection failed; retrying ({attempt}/{max_attempts})...")
+        time.sleep(attempt * 10)
+
+
+def build_comparison_report(
+    comparison: ComparisonRun,
+    base_run: RawRun,
+    target_run: RawRun,
+    paths: Paths,
+    date_to: str,
+    runner: Runner,
+) -> bool:
+    if artifact_allows_reuse(comparison.comparison_dir):
+        summary_file = comparison.comparison_dir / "summary.md"
+        if not summary_file.is_file() or summary_file.stat().st_size == 0:
+            die(
+                "cached comparison is incomplete (missing summary.md); "
+                "clean comparison cache and rerun"
+            )
+        log(f"Reusing cached comparison report: {comparison.comparison_dir}")
+        return True
+
+    comparison.comparison_dir.parent.mkdir(parents=True, exist_ok=True)
+    tmp_dir = comparison.comparison_dir.with_name(
+        f"{comparison.comparison_dir.name}.tmp.{os.getpid()}"
+    )
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    (tmp_dir / "plots").mkdir(parents=True)
+    chmod_public_dir(tmp_dir)
+    chmod_public_dir(tmp_dir / "plots")
+
+    compare_copy = tmp_dir / "compare_get_co2.R"
+    shutil.copy2(paths.compare_src, compare_copy)
+    # Use repo-relative raw paths so both local Rscript runs and rr container
+    # runs resolve the same files from their respective repo-root working dirs.
+    raw_base_file = os.path.relpath(base_run.run_dir / "raw.csv", start=paths.repo_root)
+    raw_target_file = os.path.relpath(target_run.run_dir / "raw.csv", start=paths.repo_root)
+
+    log(f"Building comparison report: {comparison.comparison_dir}")
+    ok = runner.run(
+        paths.repo_root,
+        paths.repo_root,
+        [
+            str(compare_copy),
+            "--comparison-dir",
+            str(tmp_dir),
+            "--raw-base",
+            raw_base_file,
+            "--raw-target",
+            raw_target_file,
+            "--base-short-sha",
+            base_run.source.short_sha,
+            "--target-short-sha",
+            target_run.source.short_sha,
+        ],
+    )
+    if not ok:
+        die(f"failed to build comparison report: {comparison.comparison_dir}")
+
+    generate_summary(
+        paths,
+        tmp_dir,
+        base_ref=base_run.source.ref,
+        target_ref=target_run.source.ref,
+        base_short_sha=base_run.source.short_sha,
+        target_short_sha=target_run.source.short_sha,
+        date_to=date_to,
+        runner=runner.name,
+        report_hash=comparison.report_hash,
+        base_run_hash=base_run.run_hash,
+        target_run_hash=target_run.run_hash,
+    )
+
+    compare_copy.unlink(missing_ok=True)
+    write_complete(tmp_dir)
+    atomic_promote(tmp_dir, comparison.comparison_dir)
+    return False
+
+
+def generate_summary(
+    paths: Paths,
+    comparison_dir: Path,
+    *,
+    base_ref: str,
+    target_ref: str,
+    base_short_sha: str,
+    target_short_sha: str,
+    date_to: str,
+    runner: str,
+    report_hash: str,
+    base_run_hash: str,
+    target_run_hash: str,
+) -> None:
+    summary_script = paths.repo_root / "scripts/summarize_compare_get_co2.py"
+    if not os.access(summary_script, os.X_OK):
+        die(f"missing executable summary script: {summary_script}")
+
+    with (comparison_dir / "summary.md").open("w", encoding="utf-8") as handle:
+        status = subprocess.run(
+            [
+                "python3",
+                str(summary_script),
+                str(comparison_dir),
+                "--base-ref",
+                base_ref,
+                "--target-ref",
+                target_ref,
+                "--base-short-sha",
+                base_short_sha,
+                "--target-short-sha",
+                target_short_sha,
+                "--date-to",
+                date_to,
+                "--runner",
+                runner,
+                "--report-hash",
+                report_hash,
+                "--base-run-hash",
+                base_run_hash,
+                "--target-run-hash",
+                target_run_hash,
+            ],
+            cwd=paths.repo_root,
+            check=False,
+            stdout=handle,
+        ).returncode
+    if status != 0:
+        die(f"failed to generate summary: {comparison_dir / 'summary.md'}")
+    log(f"Summary: {comparison_dir / 'summary.md'}")
+
+
+def parse_args(argv: Sequence[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Compare get_co2() outputs across refs or the current worktree.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Defaults:\n"
+            "  no args   compare master against HEAD, or the working copy if source files changed\n"
+            "  one arg   compare the provided base against HEAD, or the working copy if changed\n"
+            "  two args  compare base against target\n\n"
+            "Targets:\n"
+            "  worktree, working-tree, .  aliases for the current working copy\n\n"
+            "Artifacts:\n"
+            "  .tmp/comparison/ref_runs/<raw_cache_key>__<source_label>/\n"
+            "  .tmp/comparison/comparisons/<report_cache_key>__<base_label>__<target_label>/"
+        ),
+    )
+    parser.add_argument("refs", nargs="*", metavar="ref")
+    parser.add_argument("--date-to", dest="date_to", help="Pin get_co2(date_to).")
+    parser.add_argument(
+        "--emit-comparison-dir",
+        dest="emit_comparison_dir",
+        help="Write absolute comparison directory path to this file on success.",
+    )
+    parser.add_argument(
+        "--runner",
+        choices=("auto", "rscript", "rr"),
+        default=os.environ.get("COMPARE_GET_CO2_RUNNER", "auto"),
+        help="R execution mode. Defaults to auto.",
+    )
+    parser.add_argument("--worktree", action="store_true", help="Compare against the worktree.")
+    args = parser.parse_args(argv)
+    if len(args.refs) > 2:
+        parser.print_usage(sys.stderr)
+        die("expected at most two positional refs")
+    return args
+
+
+def emit_comparison_dir(path: str, comparison_dir: Path) -> None:
+    output = Path(path)
+    parent = output.parent
+    if not parent.is_dir():
+        die(f"--emit-comparison-dir parent directory does not exist: {parent}")
+
+    tmp_output = parent / f".{output.name}.tmp.{os.getpid()}"
+    payload = os.path.abspath(str(comparison_dir))
+    tmp_output.write_text(f"{payload}\n", encoding="utf-8")
+    tmp_output.replace(output)
+
+
+def choose_refs(
+    positional: Sequence[str],
+    force_worktree: bool,
+    working_copy_dirty: bool,
+) -> tuple[str, str, str]:
+    target_source_type = "commit"
+
+    if len(positional) == 0:
+        base_ref = DEFAULT_BASE_REF
+        if force_worktree or working_copy_dirty:
+            return base_ref, "worktree", "worktree"
+        return base_ref, "HEAD", target_source_type
+
+    if len(positional) == 1:
+        if force_worktree:
+            return positional[0], "worktree", "worktree"
+        if is_worktree_alias(positional[0]):
+            return DEFAULT_BASE_REF, "worktree", "worktree"
+        if working_copy_dirty:
+            return positional[0], "worktree", "worktree"
+        return positional[0], "HEAD", target_source_type
+
+    if force_worktree:
+        die("--worktree accepts at most one positional base ref")
+    base_ref, target_ref = positional
+    if is_worktree_alias(target_ref):
+        return base_ref, "worktree", "worktree"
+    return base_ref, target_ref, target_source_type
+
+
+def commit_source(ref: str, paths: Paths) -> Source:
+    sha = resolve_commit(ref, paths.repo_root)
+    short_sha = short_commit(sha, paths.repo_root)
+    return Source(
+        ref=ref,
+        source_type="commit",
+        sha=sha,
+        short_sha=short_sha,
+        source_id=sha,
+        dir_label=f"commit_{short_sha}",
+    )
+
+
+def worktree_source(paths: Paths) -> Source:
+    head_sha = resolve_commit("HEAD", paths.repo_root)
+    head_short = short_commit(head_sha, paths.repo_root)
+    state = read_worktree_state(paths.repo_root, head_sha, head_short)
+    return Source(
+        ref="worktree",
+        source_type="worktree",
+        sha=head_sha,
+        short_sha=head_short,
+        source_id=f"worktree:{head_sha}:{state.worktree_key}",
+        dir_label=f"worktree_{head_short}_{state.worktree_hash}",
+        worktree=state,
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    date_to = validate_date_to(
+        args.date_to or dt.datetime.now(dt.timezone.utc).date().isoformat()
+    )
+
+    root = repo_root()
+    os.chdir(root)
+
+    paths = Paths(
+        repo_root=root,
+        cache_root=CACHE_ROOT,
+        ref_runs_root=CACHE_ROOT / "ref_runs",
+        comparisons_root=CACHE_ROOT / "comparisons",
+        collect_src=root / "scripts/collect_get_co2.R",
+        compare_src=root / "scripts/compare_get_co2.R",
+    )
+    if not paths.collect_src.is_file():
+        die(f"missing R collect script: {paths.collect_src}")
+    if not paths.compare_src.is_file():
+        die(f"missing R compare script: {paths.compare_src}")
+
+    runner = Runner.from_request(args.runner, root)
+    runner.require(root)
+
+    tracked_dirty = has_tracked_changes(root)
+    untracked_dirty = bool(untracked_unignored_paths(root))
+    working_copy_dirty = tracked_dirty or untracked_dirty
+
+    base_ref, target_ref, target_source_type = choose_refs(
+        args.refs,
+        args.worktree,
+        working_copy_dirty,
+    )
+    if is_worktree_alias(base_ref):
+        die("base ref cannot be the working tree")
+
+    base_source = commit_source(base_ref, paths)
+    target_source = (
+        worktree_source(paths)
+        if target_source_type == "worktree"
+        else commit_source(target_ref, paths)
+    )
+
+    if base_source.source_id == target_source.source_id:
+        die(f"base and target resolve to the same source: {base_source.short_sha}")
+
+    paths.ref_runs_root.mkdir(parents=True, exist_ok=True)
+    paths.comparisons_root.mkdir(parents=True, exist_ok=True)
+
+    collect_script_hash = hash_file(paths.collect_src)
+    compare_script_hash = hash_file(paths.compare_src)
+
+    base_run = make_raw_run(base_source, paths, date_to, collect_script_hash)
+    target_run = make_raw_run(target_source, paths, date_to, collect_script_hash)
+    comparison = make_comparison_run(base_run, target_run, paths, compare_script_hash)
+
+    log(f"Cache root: {paths.cache_root}")
+    log(f"Pinned date_to: {date_to}")
+    log(f"R runner: {runner.name}")
+    log(f"Base source: {base_source.ref} ({base_source.short_sha})")
+    log(f"Target source: {target_source.ref} ({target_source.source_type})")
+    if target_source.worktree is not None:
+        log(f"Worktree hash: {target_source.worktree.worktree_hash}")
+    log(f"Base run hash: {base_run.run_hash}")
+    log(f"Target run hash: {target_run.run_hash}")
+    log(f"Report hash: {comparison.report_hash}")
+
+    target_materializer = (
+        WorktreeSourceMaterializer(target_source)
+        if target_source.source_type == "worktree"
+        else CommitSourceMaterializer(target_source)
+    )
+    collect_raw_run("target", target_run, paths, date_to, runner, target_materializer)
+
+    collect_raw_run(
+        "base",
+        base_run,
+        paths,
+        date_to,
+        runner,
+        CommitSourceMaterializer(base_source),
+    )
+    build_comparison_report(comparison, base_run, target_run, paths, date_to, runner)
+
+    if args.emit_comparison_dir:
+        emit_comparison_dir(args.emit_comparison_dir, comparison.comparison_dir)
+
+    log(f"Done: {comparison.comparison_dir}")
     return 0
-  fi
 
-  while IFS= read -r -d '' path; do
-    printf 'path\0%s\0sha256\0%s\0' "$path" "$(hash_file "$path")"
-  done <"$nul_file" | hash_stream
-}
 
-compute_worktree_hash() {
-  local head_sha="$1"
-  local untracked_nul_file="${2:-}"
-  local diff_hash untracked_hash temp_untracked_nul
-
-  diff_hash="$(git diff --binary HEAD -- | hash_stream)"
-
-  if [[ -n "$untracked_nul_file" ]]; then
-    untracked_hash="$(compute_untracked_unignored_hash "$untracked_nul_file")"
-  else
-    temp_untracked_nul="$(mktemp)"
-    write_untracked_unignored_files "$temp_untracked_nul" /dev/null
-    untracked_hash="$(compute_untracked_unignored_hash "$temp_untracked_nul")"
-    rm -f "$temp_untracked_nul"
-  fi
-
-  hash_text "$(printf '%s\n' \
-    "worktree_hash_version=2" \
-    "head_sha=${head_sha}" \
-    "tracked_diff_hash=${diff_hash}" \
-    "untracked_unignored_hash=${untracked_hash}")"
-}
-
-copy_untracked_unignored_files() {
-  local source_dir="$1"
-  local nul_file="$2"
-  local path
-
-  if [[ ! -s "$nul_file" ]]; then
-    return 0
-  fi
-
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -a --from0 --files-from="$nul_file" ./ "${source_dir}/"
-    return 0
-  fi
-
-  while IFS= read -r -d '' path; do
-    mkdir -p "${source_dir}/$(dirname "$path")"
-    cp -p "$path" "${source_dir}/${path}"
-  done <"$nul_file"
-}
-
-build_working_copy_snapshot() {
-  local source_dir="$1"
-  local diff_file="$2"
-  local untracked_nul_file="$3"
-
-  mkdir -p "$source_dir"
-  git archive --format=tar HEAD | tar -x -C "$source_dir"
-
-  if [[ -s "$diff_file" ]]; then
-    git -C "$source_dir" init -q
-    git -C "$source_dir" apply "$diff_file"
-    rm -rf "${source_dir}/.git"
-  fi
-
-  copy_untracked_unignored_files "$source_dir" "$untracked_nul_file"
-}
-
-copy_repo_renviron() {
-  local source_dir="$1"
-  local repo_renviron="$PWD/.Renviron"
-
-  if [[ -f "$repo_renviron" ]]; then
-    cp -p "$repo_renviron" "${source_dir}/.Renviron"
-  fi
-}
-
-validate_date_to() {
-  local value="$1"
-
-  if [[ ! "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-    die "--date-to must use YYYY-MM-DD, got: ${value}"
-  fi
-
-  if [[ "$(date -u -d "$value" +%F 2>/dev/null || true)" != "$value" ]]; then
-    die "--date-to is not a valid date: ${value}"
-  fi
-}
-
-validate_runner() {
-  case "$1" in
-    auto | rscript | rr)
-      ;;
-    *)
-      die "--runner must be one of: auto, rscript, rr"
-      ;;
-  esac
-}
-
-is_devcontainer_environment() {
-  local repo_root="$1"
-
-  [[ "${REMOTE_CONTAINERS:-}" == "true" ]] && return 0
-  [[ -n "${CODESPACES:-}" ]] && return 0
-  [[ -n "${DEVCONTAINER:-}" ]] && return 0
-
-  if [[ -d "${repo_root}/.devcontainer" && "$repo_root" == /workspaces/* ]]; then
-    [[ "${R_LIBS_USER:-}" == "${repo_root}/.r-lib" ]] && return 0
-  fi
-
-  return 1
-}
-
-resolve_runner() {
-  local requested_runner="$1"
-  local repo_root="$2"
-
-  if [[ "$requested_runner" != "auto" ]]; then
-    printf '%s' "$requested_runner"
-    return 0
-  fi
-
-  if is_devcontainer_environment "$repo_root"; then
-    printf 'rscript'
-  else
-    printf 'rr'
-  fi
-}
-
-require_runner() {
-  local runner="$1"
-
-  case "$runner" in
-    rscript)
-      command -v Rscript >/dev/null 2>&1 || die "Rscript is required for --runner rscript"
-      ;;
-    rr)
-      [[ -x "./rr" ]] || die "missing executable rr script at repo root"
-      ;;
-  esac
-}
-
-run_rscript() {
-  local runner="$1"
-  local source_dir="$2"
-  shift
-  shift
-
-  case "$runner" in
-    rscript)
-      (cd "$source_dir" && Rscript "$@")
-      ;;
-    rr)
-      RR_WORK_DIR="$source_dir" ./rr run "$@"
-      ;;
-    *)
-      die "unsupported resolved runner: ${runner}"
-      ;;
-  esac
-}
-
-require_clean_tracked_tree() {
-  if ! git diff --quiet --ignore-submodules --; then
-    die "tracked files have unstaged changes; commit or stash them before comparing commits"
-  fi
-
-  if ! git diff --cached --quiet --ignore-submodules --; then
-    die "tracked files have staged changes; commit or stash them before comparing commits"
-  fi
-}
-
-write_metadata_entry() {
-  local key="$1"
-  local value="$2"
-
-  printf '%s,' "$key"
-  csv_quote "$value"
-  printf '\n'
-}
-
-metadata_value() {
-  local metadata_file="$1"
-  local key="$2"
-
-  awk -F, -v key="$key" '
-    $1 == key {
-      value = $2
-      gsub(/^"/, "", value)
-      gsub(/"$/, "", value)
-      gsub(/""/, "\"", value)
-      print value
-      exit
-    }
-  ' "$metadata_file"
-}
-
-metadata_matches() {
-  local metadata_file="$1"
-  local key="$2"
-  local expected="$3"
-
-  [[ -f "$metadata_file" ]] || return 1
-  [[ "$(metadata_value "$metadata_file" "$key")" == "$expected" ]]
-}
-
-write_ref_metadata() {
-  local metadata_file="$1"
-  local run_dir="$2"
-  local ref="$3"
-  local sha="$4"
-  local short_sha="$5"
-  local date_to="$6"
-  local args_hash="$7"
-  local collect_script_hash="$8"
-  local driver_script_hash="$9"
-  local run_hash="${10}"
-  local invocation="${11}"
-  local runner="${12}"
-
-  {
-    echo "key,value"
-    write_metadata_entry "layout_version" "2"
-    write_metadata_entry "artifact_type" "ref_run"
-    write_metadata_entry "source_type" "commit"
-    write_metadata_entry "ref" "$ref"
-    write_metadata_entry "sha" "$sha"
-    write_metadata_entry "short_sha" "$short_sha"
-    write_metadata_entry "date_to" "$date_to"
-    write_metadata_entry "args_hash" "$args_hash"
-    write_metadata_entry "collect_script_hash" "$collect_script_hash"
-    write_metadata_entry "driver_script_hash" "$driver_script_hash"
-    write_metadata_entry "run_hash" "$run_hash"
-    write_metadata_entry "raw_file" "raw.csv"
-    write_metadata_entry "run_dir" "$run_dir"
-    write_metadata_entry "runner" "$runner"
-    write_metadata_entry "generated_at_utc" "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-    write_metadata_entry "invocation" "$invocation"
-  } >"$metadata_file"
-}
-
-write_worktree_metadata() {
-  local metadata_file="$1"
-  local run_dir="$2"
-  local head_sha="$3"
-  local head_short="$4"
-  local worktree_hash="$5"
-  local dirty_tracked="$6"
-  local dirty_untracked_unignored="$7"
-  local date_to="$8"
-  local args_hash="$9"
-  local collect_script_hash="${10}"
-  local driver_script_hash="${11}"
-  local run_hash="${12}"
-  local invocation="${13}"
-  local runner="${14}"
-
-  {
-    echo "key,value"
-    write_metadata_entry "layout_version" "2"
-    write_metadata_entry "artifact_type" "ref_run"
-    write_metadata_entry "source_type" "worktree"
-    write_metadata_entry "ref" "worktree"
-    write_metadata_entry "sha" "$head_sha"
-    write_metadata_entry "head_sha" "$head_sha"
-    write_metadata_entry "short_sha" "$head_short"
-    write_metadata_entry "worktree_hash" "$worktree_hash"
-    write_metadata_entry "dirty_tracked" "$dirty_tracked"
-    write_metadata_entry "dirty_untracked_unignored" "$dirty_untracked_unignored"
-    write_metadata_entry "date_to" "$date_to"
-    write_metadata_entry "args_hash" "$args_hash"
-    write_metadata_entry "collect_script_hash" "$collect_script_hash"
-    write_metadata_entry "driver_script_hash" "$driver_script_hash"
-    write_metadata_entry "run_hash" "$run_hash"
-    write_metadata_entry "raw_file" "raw.csv"
-    write_metadata_entry "run_dir" "$run_dir"
-    write_metadata_entry "runner" "$runner"
-    write_metadata_entry "generated_at_utc" "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-    write_metadata_entry "invocation" "$invocation"
-  } >"$metadata_file"
-}
-
-write_comparison_metadata() {
-  local metadata_file="$1"
-  local comparison_dir="$2"
-  local base_ref="$3"
-  local target_ref="$4"
-  local base_sha="$5"
-  local target_sha="$6"
-  local base_short="$7"
-  local target_short="$8"
-  local date_to="$9"
-  local raw_base_file="${10}"
-  local raw_target_file="${11}"
-  local base_run_dir="${12}"
-  local target_run_dir="${13}"
-  local base_run_hash="${14}"
-  local target_run_hash="${15}"
-  local compare_script_hash="${16}"
-  local driver_script_hash="${17}"
-  local report_hash="${18}"
-  local invocation="${19}"
-  local runner="${20}"
-  local base_source_type="${21}"
-  local target_source_type="${22}"
-  local base_source_id="${23}"
-  local target_source_id="${24}"
-  local target_worktree_hash="${25:-}"
-
-  {
-    echo "key,value"
-    write_metadata_entry "layout_version" "2"
-    write_metadata_entry "artifact_type" "comparison"
-    write_metadata_entry "base_ref" "$base_ref"
-    write_metadata_entry "target_ref" "$target_ref"
-    write_metadata_entry "base_source_type" "$base_source_type"
-    write_metadata_entry "target_source_type" "$target_source_type"
-    write_metadata_entry "base_source_id" "$base_source_id"
-    write_metadata_entry "target_source_id" "$target_source_id"
-    write_metadata_entry "base_sha" "$base_sha"
-    write_metadata_entry "target_sha" "$target_sha"
-    write_metadata_entry "base_short_sha" "$base_short"
-    write_metadata_entry "target_short_sha" "$target_short"
-    write_metadata_entry "date_to" "$date_to"
-    write_metadata_entry "raw_base_file" "$raw_base_file"
-    write_metadata_entry "raw_target_file" "$raw_target_file"
-    write_metadata_entry "base_run_dir" "$base_run_dir"
-    write_metadata_entry "target_run_dir" "$target_run_dir"
-    write_metadata_entry "base_run_hash" "$base_run_hash"
-    write_metadata_entry "target_run_hash" "$target_run_hash"
-    write_metadata_entry "compare_script_hash" "$compare_script_hash"
-    write_metadata_entry "driver_script_hash" "$driver_script_hash"
-    write_metadata_entry "report_hash" "$report_hash"
-    write_metadata_entry "comparison_dir" "$comparison_dir"
-    write_metadata_entry "runner" "$runner"
-    if [[ -n "$target_worktree_hash" ]]; then
-      write_metadata_entry "target_worktree_hash" "$target_worktree_hash"
-    fi
-    write_metadata_entry "generated_at_utc" "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-    write_metadata_entry "invocation" "$invocation"
-  } >"$metadata_file"
-}
-
-build_invocation() {
-  local invocation="$1"
-  shift || true
-
-  local arg
-  for arg in "$@"; do
-    invocation+=" $(printf '%q' "$arg")"
-  done
-
-  printf '%s' "$invocation"
-}
-
-compute_args_hash() {
-  local date_to="$1"
-
-  hash_text "$(printf 'args_version=1\ndate_to=%s\n' "$date_to")"
-}
-
-compute_run_hash() {
-  local args_hash="$1"
-  local collect_script_hash="$2"
-  local driver_script_hash="$3"
-
-  hash_text "$(printf \
-    'run_hash_version=2\nargs_hash=%s\ncollect_script_hash=%s\ndriver_script_hash=%s\n' \
-    "$args_hash" \
-    "$collect_script_hash" \
-    "$driver_script_hash")"
-}
-
-compute_report_hash() {
-  local base_source_id="$1"
-  local target_source_id="$2"
-  local base_run_hash="$3"
-  local target_run_hash="$4"
-  local compare_script_hash="$5"
-  local driver_script_hash="$6"
-
-  hash_text "$(printf '%s\n' \
-    "report_hash_version=2" \
-    "base_source_id=${base_source_id}" \
-    "target_source_id=${target_source_id}" \
-    "base_run_hash=${base_run_hash}" \
-    "target_run_hash=${target_run_hash}" \
-    "compare_script_hash=${compare_script_hash}" \
-    "driver_script_hash=${driver_script_hash}")"
-}
-
-ref_run_allows_reuse() {
-  local run_dir="$1"
-  local sha="$2"
-  local date_to="$3"
-  local run_hash="$4"
-  local collect_script_hash="$5"
-  local driver_script_hash="$6"
-  local metadata_file="${run_dir}/metadata.csv"
-
-  [[ -f "${run_dir}/complete.ok" ]] || return 1
-  [[ -s "${run_dir}/raw.csv" ]] || return 1
-  [[ -f "${run_dir}/collect_get_co2.R" ]] || return 1
-  [[ "$(hash_file "${run_dir}/collect_get_co2.R")" == "$collect_script_hash" ]] || return 1
-  metadata_matches "$metadata_file" "artifact_type" "ref_run" || return 1
-  metadata_matches "$metadata_file" "sha" "$sha" || return 1
-  metadata_matches "$metadata_file" "date_to" "$date_to" || return 1
-  metadata_matches "$metadata_file" "collect_script_hash" "$collect_script_hash" || return 1
-  metadata_matches "$metadata_file" "driver_script_hash" "$driver_script_hash" || return 1
-  metadata_matches "$metadata_file" "run_hash" "$run_hash" || return 1
-}
-
-worktree_run_allows_reuse() {
-  local run_dir="$1"
-  local head_sha="$2"
-  local worktree_hash="$3"
-  local date_to="$4"
-  local run_hash="$5"
-  local collect_script_hash="$6"
-  local driver_script_hash="$7"
-  local metadata_file="${run_dir}/metadata.csv"
-
-  [[ -f "${run_dir}/complete.ok" ]] || return 1
-  [[ -s "${run_dir}/raw.csv" ]] || return 1
-  [[ -f "${run_dir}/collect_get_co2.R" ]] || return 1
-  [[ "$(hash_file "${run_dir}/collect_get_co2.R")" == "$collect_script_hash" ]] || return 1
-  metadata_matches "$metadata_file" "artifact_type" "ref_run" || return 1
-  metadata_matches "$metadata_file" "source_type" "worktree" || return 1
-  metadata_matches "$metadata_file" "head_sha" "$head_sha" || return 1
-  metadata_matches "$metadata_file" "worktree_hash" "$worktree_hash" || return 1
-  metadata_matches "$metadata_file" "date_to" "$date_to" || return 1
-  metadata_matches "$metadata_file" "collect_script_hash" "$collect_script_hash" || return 1
-  metadata_matches "$metadata_file" "driver_script_hash" "$driver_script_hash" || return 1
-  metadata_matches "$metadata_file" "run_hash" "$run_hash" || return 1
-}
-
-comparison_allows_reuse() {
-  local comparison_dir="$1"
-  local report_hash="$2"
-  local compare_script_hash="$3"
-  local driver_script_hash="$4"
-  local metadata_file="${comparison_dir}/metadata.csv"
-
-  [[ -f "${comparison_dir}/complete.ok" ]] || return 1
-  [[ -f "${comparison_dir}/compare_get_co2.R" ]] || return 1
-  [[ "$(hash_file "${comparison_dir}/compare_get_co2.R")" == "$compare_script_hash" ]] || return 1
-  metadata_matches "$metadata_file" "artifact_type" "comparison" || return 1
-  metadata_matches "$metadata_file" "compare_script_hash" "$compare_script_hash" || return 1
-  metadata_matches "$metadata_file" "driver_script_hash" "$driver_script_hash" || return 1
-  metadata_matches "$metadata_file" "report_hash" "$report_hash" || return 1
-}
-
-remove_temp_git_worktree() {
-  local source_dir="$1"
-
-  if [[ -n "$source_dir" && -d "$source_dir" ]]; then
-    git worktree remove --force "$source_dir" >/dev/null 2>&1 || rm -rf "$source_dir"
-    git worktree prune >/dev/null 2>&1 || true
-  fi
-}
-
-collect_ref_run() {
-  local label="$1"
-  local ref="$2"
-  local sha="$3"
-  local short_sha="$4"
-  local run_dir="$5"
-  local collect_src="$6"
-  local date_to="$7"
-  local args_hash="$8"
-  local collect_script_hash="$9"
-  local driver_script_hash="${10}"
-  local run_hash="${11}"
-  local invocation="${12}"
-  local runner="${13}"
-  local max_attempts="${COMPARE_GET_CO2_COLLECT_RETRIES:-3}"
-  local run_dir_abs run_parent tmp_dir collect_copy metadata_file
-  local collect_script_arg raw_file source_dir temp_git_worktree
-
-  if ref_run_allows_reuse \
-    "$run_dir" \
-    "$sha" \
-    "$date_to" \
-    "$run_hash" \
-    "$collect_script_hash" \
-    "$driver_script_hash"; then
-    echo "[compare_get_co2] Reusing cached ${label} run: ${run_dir}"
-    return 0
-  fi
-
-  run_parent="$(mkdir -p "$(dirname "$run_dir")" && cd "$(dirname "$run_dir")" && pwd)"
-  run_dir_abs="${run_parent}/$(basename "$run_dir")"
-  tmp_dir="${run_dir}.tmp.$$"
-  rm -rf "$tmp_dir"
-  mkdir -p "$tmp_dir"
-
-  collect_copy="${tmp_dir}/collect_get_co2.R"
-  collect_script_arg="../collect_get_co2.R"
-  raw_file="../raw.csv"
-  metadata_file="${tmp_dir}/metadata.csv"
-  cp "$collect_src" "$collect_copy"
-
-  source_dir="${tmp_dir}/source"
-  temp_git_worktree="$source_dir"
-
-  write_ref_metadata \
-    "$metadata_file" \
-    "$run_dir_abs" \
-    "$ref" \
-    "$sha" \
-    "$short_sha" \
-    "$date_to" \
-    "$args_hash" \
-    "$collect_script_hash" \
-    "$driver_script_hash" \
-    "$run_hash" \
-    "$invocation" \
-    "$runner"
-
-  echo "[compare_get_co2] Collecting ${label} ${ref} (${short_sha}) into ${run_dir}..."
-
-  if ! git worktree add --detach --quiet "$source_dir" "$sha"; then
-    remove_temp_git_worktree "$temp_git_worktree"
-    die "failed to create temporary worktree for ${label} ${ref} (${short_sha})"
-  fi
-  copy_repo_renviron "$source_dir"
-
-  local attempt
-  for attempt in $(seq 1 "$max_attempts"); do
-    rm -f "$raw_file"
-
-    if run_rscript "$runner" "$source_dir" "$collect_script_arg" \
-      --output "$raw_file" \
-      --date-to "$date_to" \
-      --sha "$sha"; then
-      printf 'completed_at_utc=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >"${tmp_dir}/complete.ok"
-      remove_temp_git_worktree "$temp_git_worktree"
-      rm -rf "$run_dir"
-      mv "$tmp_dir" "$run_dir"
-      return 0
-    fi
-
-    if [[ "$attempt" -eq "$max_attempts" ]]; then
-      remove_temp_git_worktree "$temp_git_worktree"
-      die "failed to collect ${label} ${ref} (${short_sha}) after ${max_attempts} attempt(s)"
-    fi
-
-    echo "[compare_get_co2] ${label} collection failed; retrying (${attempt}/${max_attempts})..."
-    sleep $((attempt * 10))
-  done
-}
-
-collect_worktree_run() {
-  local head_sha="$1"
-  local head_short="$2"
-  local worktree_hash="$3"
-  local dirty_tracked="$4"
-  local dirty_untracked_unignored="$5"
-  local run_dir="$6"
-  local collect_src="$7"
-  local date_to="$8"
-  local args_hash="$9"
-  local collect_script_hash="${10}"
-  local driver_script_hash="${11}"
-  local run_hash="${12}"
-  local invocation="${13}"
-  local runner="${14}"
-  local max_attempts="${COMPARE_GET_CO2_COLLECT_RETRIES:-3}"
-  local run_dir_abs run_parent tmp_dir tmp_dir_abs collect_copy metadata_file
-  local collect_script_arg raw_file source_dir diff_file status_file untracked_nul_file untracked_file
-
-  if worktree_run_allows_reuse \
-    "$run_dir" \
-    "$head_sha" \
-    "$worktree_hash" \
-    "$date_to" \
-    "$run_hash" \
-    "$collect_script_hash" \
-    "$driver_script_hash"; then
-    echo "[compare_get_co2] Reusing cached worktree run: ${run_dir}"
-    return 0
-  fi
-
-  run_parent="$(mkdir -p "$(dirname "$run_dir")" && cd "$(dirname "$run_dir")" && pwd)"
-  run_dir_abs="${run_parent}/$(basename "$run_dir")"
-  tmp_dir="${run_dir}.tmp.$$"
-  rm -rf "$tmp_dir"
-  mkdir -p "$tmp_dir"
-  tmp_dir_abs="$(cd "$tmp_dir" && pwd)"
-
-  collect_copy="${tmp_dir_abs}/collect_get_co2.R"
-  collect_script_arg="../collect_get_co2.R"
-  raw_file="../raw.csv"
-  metadata_file="${tmp_dir_abs}/metadata.csv"
-  diff_file="${tmp_dir_abs}/worktree_diff.patch"
-  status_file="${tmp_dir_abs}/worktree_status.txt"
-  untracked_nul_file="${tmp_dir_abs}/untracked_files.nul"
-  untracked_file="${tmp_dir_abs}/untracked_files.txt"
-  source_dir="${tmp_dir_abs}/source"
-
-  cp "$collect_src" "$collect_copy"
-  git status --short --untracked-files=all >"$status_file"
-  git diff --binary HEAD -- >"$diff_file"
-  write_untracked_unignored_files "$untracked_nul_file" "$untracked_file"
-
-  write_worktree_metadata \
-    "$metadata_file" \
-    "$run_dir_abs" \
-    "$head_sha" \
-    "$head_short" \
-    "$worktree_hash" \
-    "$dirty_tracked" \
-    "$dirty_untracked_unignored" \
-    "$date_to" \
-    "$args_hash" \
-    "$collect_script_hash" \
-    "$driver_script_hash" \
-    "$run_hash" \
-    "$invocation" \
-    "$runner"
-
-  echo "[compare_get_co2] Collecting working copy (${worktree_hash}) into ${run_dir}..."
-  build_working_copy_snapshot "$source_dir" "$diff_file" "$untracked_nul_file"
-  copy_repo_renviron "$source_dir"
-  rm -f "$untracked_nul_file"
-
-  local attempt
-  for attempt in $(seq 1 "$max_attempts"); do
-    rm -f "$raw_file"
-
-    if run_rscript "$runner" "$source_dir" "$collect_script_arg" \
-      --output "$raw_file" \
-      --date-to "$date_to" \
-      --sha "${head_sha}+worktree:${worktree_hash}"; then
-      rm -rf "$source_dir"
-      printf 'completed_at_utc=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >"${tmp_dir}/complete.ok"
-      rm -rf "$run_dir"
-      mv "$tmp_dir" "$run_dir"
-      return 0
-    fi
-
-    if [[ "$attempt" -eq "$max_attempts" ]]; then
-      rm -rf "$source_dir"
-      die "failed to collect working copy (${worktree_hash}) after ${max_attempts} attempt(s)"
-    fi
-
-    echo "[compare_get_co2] worktree collection failed; retrying (${attempt}/${max_attempts})..."
-    sleep $((attempt * 10))
-  done
-}
-
-build_comparison_report() {
-  local comparison_dir="$1"
-  local compare_src="$2"
-  local base_ref="$3"
-  local target_ref="$4"
-  local base_sha="$5"
-  local target_sha="$6"
-  local base_short="$7"
-  local target_short="$8"
-  local date_to="$9"
-  local base_run_dir="${10}"
-  local target_run_dir="${11}"
-  local base_run_hash="${12}"
-  local target_run_hash="${13}"
-  local compare_script_hash="${14}"
-  local driver_script_hash="${15}"
-  local report_hash="${16}"
-  local invocation="${17}"
-  local runner="${18}"
-  local base_source_type="${19}"
-  local target_source_type="${20}"
-  local base_source_id="${21}"
-  local target_source_id="${22}"
-  local target_worktree_hash="${23:-}"
-  local comparison_dir_abs comparison_parent tmp_dir metadata_file compare_copy
-  local raw_base_file raw_target_file
-
-  if comparison_allows_reuse \
-    "$comparison_dir" \
-    "$report_hash" \
-    "$compare_script_hash" \
-    "$driver_script_hash"; then
-    echo "[compare_get_co2] Reusing cached comparison report: ${comparison_dir}"
-    return 0
-  fi
-
-  comparison_parent="$(
-    mkdir -p "$(dirname "$comparison_dir")" && cd "$(dirname "$comparison_dir")" && pwd
-  )"
-  comparison_dir_abs="${comparison_parent}/$(basename "$comparison_dir")"
-  tmp_dir="${comparison_dir}.tmp.$$"
-  rm -rf "$tmp_dir"
-  mkdir -p "${tmp_dir}/plots"
-
-  metadata_file="${tmp_dir}/metadata.csv"
-  compare_copy="${tmp_dir}/compare_get_co2.R"
-  raw_base_file="../../ref_runs/$(basename "$base_run_dir")/raw.csv"
-  raw_target_file="../../ref_runs/$(basename "$target_run_dir")/raw.csv"
-
-  cp "$compare_src" "$compare_copy"
-
-  write_comparison_metadata \
-    "$metadata_file" \
-    "$comparison_dir_abs" \
-    "$base_ref" \
-    "$target_ref" \
-    "$base_sha" \
-    "$target_sha" \
-    "$base_short" \
-    "$target_short" \
-    "$date_to" \
-    "$raw_base_file" \
-    "$raw_target_file" \
-    "$base_run_dir" \
-    "$target_run_dir" \
-    "$base_run_hash" \
-    "$target_run_hash" \
-    "$compare_script_hash" \
-    "$driver_script_hash" \
-    "$report_hash" \
-    "$invocation" \
-    "$runner" \
-    "$base_source_type" \
-    "$target_source_type" \
-    "$base_source_id" \
-    "$target_source_id" \
-    "$target_worktree_hash"
-
-  echo "[compare_get_co2] Building comparison report: ${comparison_dir}"
-  run_rscript "$runner" "." "$compare_copy" --comparison-dir "$tmp_dir"
-
-  printf 'completed_at_utc=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >"${tmp_dir}/complete.ok"
-  rm -rf "$comparison_dir"
-  mv "$tmp_dir" "$comparison_dir"
-}
-
-main() {
-  local original_args=("$@")
-  local date_to=""
-  local requested_runner="${COMPARE_GET_CO2_RUNNER:-auto}"
-  local force_worktree=0
-  local positional=()
-
-  while [[ "$#" -gt 0 ]]; do
-    case "$1" in
-      -h | --help)
-        usage
-        exit 0
-        ;;
-      --date-to)
-        [[ "$#" -ge 2 ]] || die "missing value for --date-to"
-        date_to="$2"
-        shift 2
-        ;;
-      --date-to=*)
-        date_to="${1#--date-to=}"
-        shift
-        ;;
-      --runner)
-        [[ "$#" -ge 2 ]] || die "missing value for --runner"
-        requested_runner="$2"
-        shift 2
-        ;;
-      --runner=*)
-        requested_runner="${1#--runner=}"
-        shift
-        ;;
-      --worktree)
-        force_worktree=1
-        shift
-        ;;
-      --*)
-        die "unknown option: $1"
-        ;;
-      *)
-        positional+=("$1")
-        shift
-        ;;
-    esac
-  done
-
-  if [[ "${#positional[@]}" -gt 2 ]]; then
-    usage >&2
-    exit 1
-  fi
-
-  if [[ -z "$date_to" ]]; then
-    date_to="$(date -u +%F)"
-  fi
-  validate_date_to "$date_to"
-  validate_runner "$requested_runner"
-
-  local repo_root
-  repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" ||
-    die "not inside a git repository"
-  cd "$repo_root"
-
-  local collect_src compare_src
-  collect_src="${repo_root}/scripts/collect_get_co2.R"
-  compare_src="${repo_root}/scripts/compare_get_co2.R"
-  [[ -f "$collect_src" ]] || die "missing R collect script: ${collect_src}"
-  [[ -f "$compare_src" ]] || die "missing R compare script: ${compare_src}"
-
-  local runner
-  runner="$(resolve_runner "$requested_runner" "$repo_root")"
-  require_runner "$runner"
-
-  local tracked_dirty=0
-  local untracked_dirty=0
-  local working_copy_dirty=0
-  if has_tracked_changes; then
-    tracked_dirty=1
-  fi
-  if has_untracked_unignored_files; then
-    untracked_dirty=1
-  fi
-  if [[ "$tracked_dirty" == "1" || "$untracked_dirty" == "1" ]]; then
-    working_copy_dirty=1
-  fi
-
-  local base_ref target_ref target_source_type
-  target_source_type="commit"
-  case "${#positional[@]}" in
-    0)
-      base_ref="master"
-      if [[ "$force_worktree" == "1" || "$working_copy_dirty" == "1" ]]; then
-        target_ref="worktree"
-        target_source_type="worktree"
-      else
-        target_ref="HEAD"
-      fi
-      ;;
-    1)
-      if [[ "$force_worktree" == "1" ]]; then
-        base_ref="${positional[0]}"
-        target_ref="worktree"
-        target_source_type="worktree"
-      elif is_worktree_alias "${positional[0]}"; then
-        base_ref="master"
-        target_ref="worktree"
-        target_source_type="worktree"
-      else
-        base_ref="${positional[0]}"
-        if [[ "$working_copy_dirty" == "1" ]]; then
-          target_ref="worktree"
-          target_source_type="worktree"
-        else
-          target_ref="HEAD"
-        fi
-      fi
-      ;;
-    2)
-      if [[ "$force_worktree" == "1" ]]; then
-        die "--worktree accepts at most one positional base ref"
-      fi
-      base_ref="${positional[0]}"
-      target_ref="${positional[1]}"
-      if is_worktree_alias "$target_ref"; then
-        target_ref="worktree"
-        target_source_type="worktree"
-      fi
-      ;;
-  esac
-
-  if is_worktree_alias "$base_ref"; then
-    die "base ref cannot be the working tree"
-  fi
-
-  local base_sha target_sha base_short target_short
-  local head_sha head_short worktree_hash target_worktree_hash
-  local base_source_type target_source_id base_source_id
-  base_source_type="commit"
-  target_worktree_hash=""
-
-  base_sha="$(resolve_commit "$base_ref")"
-  base_short="$(short_commit "$base_sha")"
-  base_source_id="$base_sha"
-
-  if [[ "$target_source_type" == "worktree" ]]; then
-    head_sha="$(resolve_commit "HEAD")"
-    head_short="$(short_commit "$head_sha")"
-    worktree_hash="$(short_hash "$(compute_worktree_hash "$head_sha")")"
-    target_worktree_hash="$worktree_hash"
-    target_sha="$head_sha"
-    target_short="$head_short"
-    target_source_id="worktree:${head_sha}:${worktree_hash}"
-  else
-    target_sha="$(resolve_commit "$target_ref")"
-    target_short="$(short_commit "$target_sha")"
-    target_source_id="$target_sha"
-  fi
-
-  if [[ "$base_source_id" == "$target_source_id" ]]; then
-    die "base and target resolve to the same source: ${base_short}"
-  fi
-
-  local cache_root ref_runs_root comparisons_root
-  cache_root=".tmp/comparison"
-  ref_runs_root="${cache_root}/ref_runs"
-  comparisons_root="${cache_root}/comparisons"
-  mkdir -p "$ref_runs_root" "$comparisons_root"
-
-  local invocation collect_script_hash compare_script_hash driver_script_hash args_hash run_hash report_hash
-  invocation="$(build_invocation "$0" "${original_args[@]}")"
-  collect_script_hash="$(hash_file "$collect_src")"
-  compare_script_hash="$(hash_file "$compare_src")"
-  driver_script_hash="$(hash_file "${repo_root}/scripts/compare_get_co2")"
-  args_hash="$(compute_args_hash "$date_to")"
-  run_hash="$(short_hash "$(compute_run_hash \
-    "$args_hash" \
-    "$collect_script_hash" \
-    "$driver_script_hash")")"
-
-  local base_label target_label target_dir_label base_run_dir target_run_dir comparison_dir
-  base_label="$(safe_path_label "$base_ref")"
-  target_label="$(safe_path_label "$target_ref")"
-  target_dir_label="$target_label"
-  base_run_dir="${ref_runs_root}/${base_label}_${base_short}_${run_hash}"
-  if [[ "$target_source_type" == "worktree" ]]; then
-    target_dir_label="worktree_${target_short}_${target_worktree_hash}"
-    target_run_dir="${ref_runs_root}/${target_dir_label}_${run_hash}"
-  else
-    target_run_dir="${ref_runs_root}/${target_label}_${target_short}_${run_hash}"
-  fi
-
-  report_hash="$(short_hash "$(compute_report_hash \
-    "$base_source_id" \
-    "$target_source_id" \
-    "$run_hash" \
-    "$run_hash" \
-    "$compare_script_hash" \
-    "$driver_script_hash")")"
-  comparison_dir="${comparisons_root}/${base_label}_${base_short}__${target_dir_label}"
-
-  echo "[compare_get_co2] Cache root: ${cache_root}"
-  echo "[compare_get_co2] Pinned date_to: ${date_to}"
-  echo "[compare_get_co2] R runner: ${runner}"
-  echo "[compare_get_co2] Base source: ${base_ref} (${base_short})"
-  echo "[compare_get_co2] Target source: ${target_ref} (${target_source_type})"
-  if [[ "$target_source_type" == "worktree" ]]; then
-    echo "[compare_get_co2] Worktree hash: ${target_worktree_hash}"
-  fi
-  echo "[compare_get_co2] Collection run hash: ${run_hash}"
-  echo "[compare_get_co2] Report hash: ${report_hash}"
-
-  collect_ref_run \
-    "base" \
-    "$base_ref" \
-    "$base_sha" \
-    "$base_short" \
-    "$base_run_dir" \
-    "$collect_src" \
-    "$date_to" \
-    "$args_hash" \
-    "$collect_script_hash" \
-    "$driver_script_hash" \
-    "$run_hash" \
-    "$invocation" \
-    "$runner"
-
-  if [[ "$target_source_type" == "worktree" ]]; then
-    collect_worktree_run \
-      "$target_sha" \
-      "$target_short" \
-      "$target_worktree_hash" \
-      "$tracked_dirty" \
-      "$untracked_dirty" \
-      "$target_run_dir" \
-      "$collect_src" \
-      "$date_to" \
-      "$args_hash" \
-      "$collect_script_hash" \
-      "$driver_script_hash" \
-      "$run_hash" \
-      "$invocation" \
-      "$runner"
-  else
-    collect_ref_run \
-      "target" \
-      "$target_ref" \
-      "$target_sha" \
-      "$target_short" \
-      "$target_run_dir" \
-      "$collect_src" \
-      "$date_to" \
-      "$args_hash" \
-      "$collect_script_hash" \
-      "$driver_script_hash" \
-      "$run_hash" \
-      "$invocation" \
-      "$runner"
-  fi
-
-  build_comparison_report \
-    "$comparison_dir" \
-    "$compare_src" \
-    "$base_ref" \
-    "$target_ref" \
-    "$base_sha" \
-    "$target_sha" \
-    "$base_short" \
-    "$target_short" \
-    "$date_to" \
-    "$base_run_dir" \
-    "$target_run_dir" \
-    "$run_hash" \
-    "$run_hash" \
-    "$compare_script_hash" \
-    "$driver_script_hash" \
-    "$report_hash" \
-    "$invocation" \
-    "$runner" \
-    "$base_source_type" \
-    "$target_source_type" \
-    "$base_source_id" \
-    "$target_source_id" \
-    "$target_worktree_hash"
-
-  echo "[compare_get_co2] Done: ${comparison_dir}"
-}
-
-main "$@"
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except CompareError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
