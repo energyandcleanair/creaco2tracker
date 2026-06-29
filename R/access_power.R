@@ -21,9 +21,10 @@ power_data_access_get_sources <- function(
   date_from <- as.Date(date_from)
   date_to <- as.Date(date_to)
 
-  # For tier calculation, power reconciliation needs data since 2020.
-  tier_calc_start <- as.Date("2020-01-01")
-  fetch_from <- min(date_from, tier_calc_start)
+  # The chained scaling model needs enough history for monthly ETS ratios even
+  # when the caller asks for a narrower output window.
+  ets_history_start <- as.Date("2018-01-01")
+  fetch_from <- min(date_from, ets_history_start)
 
   log_info("Fetching ENTSOE daily data...")
   entsoe_daily <- entsoe.get_power_generation(
