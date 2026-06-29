@@ -105,9 +105,9 @@ Before running a slow full workflow, confirm:
 For branch comparisons, preserve known-good base artifacts when inputs and collection settings are unchanged. Recollect only the target branch when validating a target-branch fix, then rerun the comparison against the preserved base. If source data, cache settings, credentials, or collection logic changed, rerun both sides.
 
 When validating an uncommitted fix, use the comparison wrapper's working-copy mode instead of
-committing only for diagnostics. `scripts/compare_get_co2` automatically compares against the
-working copy when tracked files or untracked unignored source files are dirty; `--worktree` or
-target `worktree` can force this mode. Ignored derived files remain excluded.
+committing only for diagnostics. `scripts/compare version` automatically compares against the
+working copy when tracked files or untracked unignored source files are dirty; target `worktree`
+can force this mode. Ignored derived files remain excluded.
 
 ## Temporary tests and diagnostics
 

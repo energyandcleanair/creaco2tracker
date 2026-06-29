@@ -13,19 +13,19 @@ description: >-
 
 ## Overview
 
-Use this skill for the repository's `scripts/compare_get_co2` workflow. The workflow collects
-`get_co2()` output for two sources, caches each raw run, then builds comparison tables and plots
-from those cached runs.
+Use this skill for the repository's `scripts/compare` workflow. The workflow collects
+`get_co2()` output and external validation sources into cached artifacts, then builds version
+and external comparison tables, plots, and summaries from those cached runs.
 
 ## Workflow
 
 1. Inspect the working tree before running comparisons. With tracked changes or untracked
    unignored files, the wrapper compares against a working-copy snapshot by default. Ignored files
    are excluded.
-2. Run the wrapper from the repo root:
+2. For a local version comparison, run the comparison command from the repo root:
 
 ```bash
-scripts/compare_get_co2 [options] [base] [target]
+scripts/compare version [base] [target] --date-to <YYYY-MM-DD>
 ```
 
 3. Prefer pinning `--date-to` when comparing repeatedly across days. If omitted, the wrapper uses
@@ -33,17 +33,19 @@ scripts/compare_get_co2 [options] [base] [target]
 4. Leave `--runner auto` unless there is a specific reason to override it. Auto uses direct
   `Rscript` inside the devcontainer and `./rr run` outside it. Both runners collect from isolated
   source directories, so committed refs and working-copy targets follow the same source-selection
-  rules. Use `COMPARE_GET_CO2_RUNNER` for non-interactive overrides.
-5. Use `--worktree`, target `worktree`, target `working-tree`, or target `.` to force a
-   working-copy target.
+  rules. Use `COMPARE_RUNNER` or `COMPARE_GET_CO2_RUNNER` for non-interactive overrides.
+5. Use target `worktree`, `working-tree`, or `.` to force a working-copy comparison. For
+   `collect target` and `collect external`, use `--ref worktree`.
 6. Read `references/artifact-guide.md` when you need the exact cache layout, metadata fields, or
    reuse rules.
-7. Summarize a completed comparison with:
+7. Compare against external sources with:
 
 ```bash
-python3 scripts/summarize_compare_get_co2.py \
-  .tmp/comparison/comparisons/<comparison-dir>
+scripts/compare external [target] --date-to <YYYY-MM-DD>
 ```
+
+8. Use `scripts/compare collect base|target|external ...` only for CI split runs or advanced
+   artifact debugging. Normal local comparisons do not need explicit collection commands.
 
 ## Interpretation
 
@@ -65,6 +67,7 @@ python3 scripts/summarize_compare_get_co2.py \
 - Expect worktree comparisons to include tracked changes and untracked files that are not ignored
   by git. Ignored derived outputs remain excluded.
 - Remember that cache identity is embedded in the artifact path. Raw-run identity is defined by
-  the source, collection arguments, and `collect_get_co2.R`; comparison identity is defined by
-  the two raw runs and `compare_get_co2.R`.
+  the source, collection arguments, and `scripts/compare_lib/collect_get_co2.R`; comparison
+  identity is defined by the input runs and the matching report script under
+  `scripts/compare_lib/`.
 - Keep credentials and generated `.tmp/comparison` outputs out of commits.
