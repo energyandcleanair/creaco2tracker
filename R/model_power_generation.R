@@ -1,70 +1,112 @@
-#' Get Power Generation Data Combining ENTSOE and EMBER
+# Power generation: chained ENTSOE -> EMBER-monthly -> EMBER-yearly scaling.
+#
+# Pipeline (per iso2 x Ember source):
+#   1. Aggregate ENTSOE daily -> monthly (drop phantom NA-only sources, flag full
+#      months where every day has an observation).
+#   2. Compute monthly ratio r_m = ember_monthly / entsoe_monthly.
+#   3. Flag outliers (>5 MAD from per-series median); replace with NA.
+#   4. ETS-forecast the ratio forward to cover `date_to` (na.interp fills gaps).
+#   5. Multiply ENTSOE daily by the monthly ratio.
+#   6. Compute yearly ratio r_y = ember_yearly / sum(ember_monthly_for_year).
+#   7. MAD + ETS on the yearly ratio (frequency = 1).
+#   8. Multiply every day in year Y by the uniform scalar r_y(Y).
+#
+# Ember-only series (where ENTSOE has too few overlapping observations to
+# compute a stable ratio) fall back to uniform daily distribution of the Ember
+# monthly value.
+
+# Mapping: ENTSOE source name -> Ember source name.
+# Sources omitted from this mapping are dropped (e.g. Hydro Pumped Storage,
+# ENTSOE "Other").
+ENTSOE_TO_EMBER <- c(
+  "Wind"                            = "Wind",
+  "Wind Onshore"                    = "Wind",
+  "Wind Offshore"                   = "Wind",
+  "Solar"                           = "Solar",
+  "Fossil Gas"                      = "Gas",
+  "Fossil Hard coal"                = "Coal",
+  "Fossil Brown coal/Lignite"       = "Coal",
+  "Fossil Coal-derived gas"         = "Coal",
+  "Fossil Peat"                     = "Coal",
+  "Nuclear"                         = "Nuclear",
+  "Hydro Run-of-river and poundage" = "Hydro",
+  "Hydro Water Reservoir"           = "Hydro",
+  "Biomass"                         = "Bioenergy",
+  "Fossil Oil"                      = "Other Fossil",
+  "Fossil Oil shale"                = "Other Fossil",
+  "Geothermal"                      = "Other Renewables",
+  "Marine"                          = "Other Renewables",
+  "Other renewable"                 = "Other Renewables",
+  "Waste"                           = "Other Renewables"
+)
+
+# Downstream code (downscale.R, eurostat_gas.R) filters on legacy ENTSOE names.
+# Remap Ember names back to legacy on output.
+EMBER_TO_OUTPUT <- c(
+  "Wind"             = "Wind",
+  "Solar"            = "Solar",
+  "Gas"              = "Fossil Gas",
+  "Coal"             = "Coal",
+  "Nuclear"          = "Nuclear",
+  "Hydro"            = "Hydro",
+  "Bioenergy"        = "Bioenergy",
+  "Other Fossil"     = "Other Fossil",
+  "Other Renewables" = "Other"
+)
+
+# Minimum monthly observations needed to fit ETS. Below this, the monthly
+# ratio falls back to last-value carry-forward.
+MIN_OBS_ETS_MONTHLY <- 12L
+
+MAD_THRESHOLD <- 5
+
+#' Get power generation data with ENTSOE -> EMBER monthly -> EMBER yearly scaling
 #'
-#' Retrieves daily power generation data by combining ENTSOE (daily granularity)
-#' with EMBER (monthly, more accurate) using a two-tier approach:
-#' - Tier 1 (ratio 0.7-1.3): Scale ENTSOE daily data by monthly EMBER/ENTSOE ratio
-#' - Tier 2 (ratio <0.7 or >1.3): Use EMBER monthly data, distributed across days
-#'   using ENTSOE's daily pattern as a proxy
+#' Daily generation from ENTSOE is corrected in two chained steps so that:
+#'   * each calendar month sums to the EMBER monthly value, and
+#'   * each calendar year sums to the EMBER yearly value.
 #'
-#' @param iso2s Character vector of ISO2 country codes. Default is "EU" which
-#'   fetches all EU countries.
-#' @param date_from Start date for data retrieval. Default is "2015-01-01".
-#' @param date_to End date for data retrieval. Default is today.
-#' @param corrected_sources Character vector of power sources to correct using
-#'   EMBER data. Uses ENTSOE naming: "Wind", "Solar", "Fossil Gas", "Hydro".
-#'   Default is c("Wind", "Solar", "Fossil Gas", "Hydro"). Other sources from
-#'   ENTSOE are passed through unchanged.
-#' @param use_cache Whether to use cached data. Default is TRUE.
-#' @param tier_threshold Numeric vector of length 2 defining the ratio bounds
-#'   for Tier 1 vs Tier 2. Default is c(0.7, 1.3).
-#' @param replace_entsoe_others_with_ember Whether to replace ENTSOE "Other"
-#'   category with EMBER-only sources (Bioenergy, Other renewables, Other fossil).
-#'   When TRUE, removes ENTSOE "Other" and adds these EMBER sources distributed
-#'   to daily assuming constant production within each month. Default is TRUE.
-#' @param diagnostics_folder Folder path for diagnostics outputs. Set to NULL
-#'   to disable diagnostics. Default is "diagnostics/power_generation".
+#' Per (iso2, Ember source), the monthly ratio (ember/entsoe) is filtered for
+#' outliers using MAD and projected forward with ETS so months beyond the last
+#' EMBER report still get a robust correction. The yearly ratio
+#' (ember_yearly / sum(ember_monthly)) is applied as a uniform per-year scalar.
+#'
+#' Series with too little ENTSOE overlap for a stable ratio (typically Ember-
+#' only sources like Bioenergy in some countries) fall back to uniform daily
+#' distribution of the Ember monthly value.
+#'
+#' @param iso2s ISO2 codes. Default: EU27 + "EU" aggregate.
+#' @param date_from First date to return (still pulls earlier history for ETS).
+#' @param date_to Last date.
+#' @param use_cache Use the on-disk cache.
+#' @param mad_threshold Multiplier on MAD for outlier flagging (default 5).
+#'   Applied to both the monthly and yearly ratio.
+#' @param monthly_extend How to extend the monthly ratio beyond observed Ember
+#'   coverage: "ets" (default) fits an ETS forecast, "last" carries forward the
+#'   last observed value. The yearly correction always uses "last" (it is
+#'   near-constant, so carrying the last observed value forward is robust).
+#' @param diagnostics_folder Where to write diagnostic plots/CSVs. NULL disables.
 #' @param data_masking One of `DATA_MASKING_NONE` or
 #'   `DATA_MASKING_HISTORICAL_DEFAULTS`, or a named masking config list in the
 #'   same structure as `get_data_masking_config()`.
 #'
-#' @return Tibble with columns:
-#'   - iso2: Country code
-#'   - date: Date (daily)
-#'   - source: Power source (Wind, Solar, Gas)
-#'   - value_mwh: Generation in MWh (corrected)
-#'   - value_mwh_raw: Original ENTSOE value
-#'   - correction_tier: Which correction method was applied (1 or 2)
-#'   - correction_ratio: The ENTSOE/EMBER ratio used for correction
-#'   - data_source: "entsoe_ember_combined"
-#'
-#' @details
-#' The function addresses known discrepancies between ENTSOE and EMBER data:
-#' - ENTSOE provides daily data but has reporting gaps/errors in some countries
-
-#' - EMBER provides monthly data that is more thoroughly validated
-#'
-#' For Tier 1 countries (reasonable alignment), daily ENTSOE values are scaled
-#' so monthly totals match EMBER. For Tier 2 countries (poor alignment), EMBER
-#' monthly totals are distributed across days using ENTSOE's relative daily
-#' pattern within each month.
-#'
-#' For dates beyond the last available EMBER month, the most recent month's
-#' ratio is used for Tier 1, and ENTSOE pattern with last ratio for Tier 2.
+#' @return Tibble with columns `iso2, country, region, date, source, value_mw,
+#'   value_mwh`. Source uses legacy ENTSOE names (e.g. "Fossil Gas", "Other").
 #'
 #' @export
 get_power_generation <- function(
   iso2s = get_eu_iso2s(include_eu = TRUE),
   date_from = "2015-01-01",
   date_to = Sys.Date(),
-  corrected_sources = c("Wind", "Solar", "Fossil Gas", "Hydro"),
   use_cache = TRUE,
-  tier_threshold = c(0.7, 1.3),
-  replace_entsoe_others_with_ember = TRUE,
+  mad_threshold = MAD_THRESHOLD,
+  monthly_extend = c("ets", "last"),
   diagnostics_folder = "diagnostics/power_generation",
   data_masking = DATA_MASKING_NONE
 ) {
   date_from <- as.Date(date_from)
   date_to <- as.Date(date_to)
+  monthly_extend <- match.arg(monthly_extend)
   data_masking <- .resolve_data_masking_config(
     data_masking = data_masking,
     reference_date = date_to
@@ -77,1031 +119,901 @@ get_power_generation <- function(
     use_cache = use_cache,
     data_masking = data_masking
   )
-
-  entsoe_daily_full <- source_data$entsoe_daily
-  ember_monthly_raw <- source_data$ember_monthly
+  entsoe_daily <- source_data$entsoe_daily
+  ember_monthly <- source_data$ember_monthly
   ember_yearly <- source_data$ember_yearly
 
-  # Fill gaps in monthly data using yearly data
-  ember_monthly <- .fill_ember_monthly_from_yearly(
-    ember_monthly = ember_monthly_raw,
-    ember_yearly = ember_yearly,
-    entsoe_daily = entsoe_daily_full
-  )
-
-  # Use full data for tier calculation, but filter for output
-  entsoe_daily <- entsoe_daily_full
-
-  # Map ENTSOE source names to EMBER equivalents for comparison
-  source_mapping <- tibble::tribble(
-    ~entsoe_source,   ~ember_source,
-    "Wind",           "Wind",
-    "Wind Onshore",   "Wind",
-    "Wind Offshore",  "Wind",
-    "Solar",          "Solar",
-    "Fossil Gas",     "Gas",
-    "Hydro",          "Hydro"
-  )
-
-  # EMBER-only sources (not in ENTSOE or replacing ENTSOE "Other")
-  ember_only_sources <- c("Bioenergy", "Other renewables", "Other fossil")
-
-  # ENTSOE source to exclude when replacing with EMBER
-  entsoe_others_to_replace <- "Other"
-
-  # Determine which EMBER sources we need
-  ember_sources_needed <- source_mapping %>%
-    filter(entsoe_source %in% corrected_sources) %>%
-    pull(ember_source) %>%
-    unique()
-
-  # Split ENTSOE data into corrected vs pass-through sources
-  entsoe_to_correct <- entsoe_daily %>%
-    filter(source %in% corrected_sources | source %in% c("Wind Onshore", "Wind Offshore")) %>%
-    mutate(
-      source_std = case_when(
-        source %in% c("Wind Onshore", "Wind Offshore", "Wind") ~ "Wind",
-        source == "Fossil Gas" ~ "Gas",
-        TRUE ~ source
-      )
-    )
-
-  entsoe_passthrough <- entsoe_daily %>%
-    filter(!(source %in% corrected_sources | source %in% c("Wind Onshore", "Wind Offshore"))) %>%
-    filter(source != "Total") # Don't pass through Total, we'll recalculate
-
-  # If replacing ENTSOE others with EMBER, filter them out from passthrough
-  if (replace_entsoe_others_with_ember) {
-    entsoe_passthrough <- entsoe_passthrough %>%
-      filter(!(source %in% entsoe_others_to_replace))
-  }
-
-  # Prepare EMBER monthly for corrected sources
-  ember_monthly_for_correction <- ember_monthly %>%
-    filter(source %in% ember_sources_needed) %>%
-    rename(source_std = source)
-
-  # Calculate monthly scaling factors (using data to be corrected)
-  scaling_factors <- .calculate_monthly_scaling_factors(
-    entsoe_daily = entsoe_to_correct,
-    ember_monthly = ember_monthly_for_correction,
-    tier_threshold = tier_threshold
-  )
-
-  # Apply corrections to sources that need correction
-  result_corrected <- .apply_power_corrections(
-    entsoe_daily = entsoe_to_correct,
-    ember_monthly = ember_monthly_for_correction,
-    scaling_factors = scaling_factors,
-    date_from = date_from,
-    date_to = date_to
-  )
-
-  # Prepare passthrough sources (no correction, just format matching)
-  result_passthrough <- entsoe_passthrough %>%
-    filter(date >= date_from) %>%
-    mutate(
-      value_mw_raw = value_mw,
-      value_mwh_raw = value_mwh,
-      correction_tier = NA_integer_,
-      correction_ratio = NA_real_,
-      data_source = "entsoe" # Keep original data_source for passthrough
-    ) %>%
-    select(
-      date, source, data_source, iso2, region, country,
-      value_mw, value_mwh, frequency,
-      value_mw_raw, value_mwh_raw, correction_tier, correction_ratio
-    )
-
-  # Add EMBER-only sources if replacing ENTSOE others
-  result_ember_only <- NULL
-  if (replace_entsoe_others_with_ember) {
-    result_ember_only <- .distribute_ember_to_daily(
-      ember_monthly = ember_monthly,
-      ember_only_sources = ember_only_sources,
-      date_from = date_from,
-      date_to = date_to,
-      iso2s = iso2s,
-      entsoe_daily = entsoe_daily_full # For getting region/country info
-    )
-  }
-
-  # Combine corrected, passthrough, and EMBER-only results
-  result <- bind_rows(result_corrected, result_passthrough, result_ember_only) %>%
-    arrange(iso2, date, source)
-
-  # Recalculate Total if it was in ENTSOE originally
-  if (any(entsoe_daily_full$source == "Total", na.rm = TRUE)) {
-    total_recalculated <- result %>%
-      filter(source != "Total") %>% # Exclude any existing Total
-      group_by(iso2, region, country, date) %>%
-      summarise(
-        value_mw = sum(value_mw, na.rm = TRUE),
-        value_mwh = sum(value_mwh, na.rm = TRUE),
-        value_mw_raw = sum(value_mw_raw, na.rm = TRUE),
-        value_mwh_raw = sum(value_mwh_raw, na.rm = TRUE),
-        .groups = "drop"
-      ) %>%
-      mutate(
-        source = "Total",
-        data_source = "entsoe_ember_combined",
-        correction_tier = NA_integer_,
-        correction_ratio = NA_real_
-      ) %>%
-      select(
-        date, source, data_source, iso2, region, country,
-        value_mw, value_mwh,
-        value_mw_raw, value_mwh_raw, correction_tier, correction_ratio
-      )
-
-    result <- bind_rows(result, total_recalculated) %>%
-      arrange(iso2, date, source)
-  }
-
-  # Generate diagnostics
-  if (!is.null(diagnostics_folder)) {
-    .generate_power_diagnostics(
-      entsoe_daily = entsoe_to_correct,
-      ember_monthly = ember_monthly_for_correction,
-      scaling_factors = scaling_factors,
-      result = result, # Pass all results for complete diagnostics
-      diagnostics_folder = diagnostics_folder
-    )
-  }
-
-  # Only select useful columns
-  result <- result %>%
-    select(iso2, country, region, date, source, value_mw, value_mwh)
-
-
-  # Check that iso2-fuel-date is unique
-  if (any(duplicated(result %>% select(iso2, source, date)))) {
-    stop("Duplicate iso2-source-date combinations found in the result")
-  }
-
-  return(result)
-}
-
-
-#' Calculate monthly scaling factors from ENTSOE and EMBER comparison
-#' @keywords internal
-.calculate_monthly_scaling_factors <- function(
-  entsoe_daily,
-  ember_monthly,
-  tier_threshold
-) {
-  # Aggregate ENTSOE to monthly
-  entsoe_monthly <- entsoe_daily %>%
-    mutate(
-      year = year(date),
-      month = month(date)
-    ) %>%
-    group_by(iso2, year, month, source_std) %>%
-    summarise(
-      entsoe_mwh = sum(value_mwh, na.rm = TRUE),
-      n_days = n(),
-      .groups = "drop"
-    )
-
-  # Prepare EMBER monthly
-  ember_monthly_prep <- ember_monthly %>%
-    mutate(
-      year = year(date),
-      month = month(date)
-    ) %>%
-    select(iso2, year, month, source_std, ember_mwh = value_mwh)
-
-
-  # Only include complete months for ratio calculation
-  # This avoids issues with partial months at the end of the date range
-  monthly_comparison <- entsoe_monthly %>%
-    filter(n_days == lubridate::days_in_month(glue("{year}-{month}-01"))) %>%
-    inner_join(ember_monthly_prep, by = c("iso2", "year", "month", "source_std")) %>%
-    mutate(
-      ratio = entsoe_mwh / ember_mwh,
-      ratio = if_else(is.finite(ratio) & ember_mwh > 0, ratio, NA_real_)
-    )
-
-  # Determine tier based on median ratio per country/source
-  # Use only recent years (2020+) to avoid legacy data quality issues
-  tier_assignment <- monthly_comparison %>%
-    filter(!is.na(ratio), year >= 2020) %>%
-    group_by(iso2, source_std) %>%
-    summarise(
-      median_ratio = median(ratio, na.rm = TRUE),
-      .groups = "drop"
-    ) %>%
-    mutate(
-      tier = if_else(
-        median_ratio >= tier_threshold[1] & median_ratio <= tier_threshold[2],
-        1L, 2L
-      )
-    )
-
-  # Add tier and calculate scaling factor
-  scaling_factors <- monthly_comparison %>%
-    left_join(tier_assignment %>% select(iso2, source_std, tier),
-      by = c("iso2", "source_std")
-    ) %>%
-    mutate(
-      # For Tier 1: scale_factor to multiply ENTSOE by
-      # For Tier 2: we'll use EMBER directly, but still track ratio
-      scale_factor = if_else(!is.na(ratio) & ratio > 0, 1 / ratio, NA_real_)
-    )
-
-  return(scaling_factors)
-}
-
-
-#' Apply power generation corrections based on tier
-#' @keywords internal
-.apply_power_corrections <- function(
-  entsoe_daily,
-  ember_monthly,
-  scaling_factors,
-  date_from,
-  date_to
-) {
-  # Get tier assignment for each country/source
-  tier_assignment <- scaling_factors %>%
-    select(iso2, source_std, tier) %>%
-    distinct()
-
-  # Get latest available EMBER month
-
-  last_ember_month <- max(ember_monthly$date, na.rm = TRUE)
-  last_ember_year <- year(last_ember_month)
-  last_ember_month_num <- month(last_ember_month)
-
-  # Add year/month to daily data
-  entsoe_daily <- entsoe_daily %>%
-    mutate(
-      year = year(date),
-      month = month(date)
-    )
-
-  # Join with scaling factors
-  daily_with_factors <- entsoe_daily %>%
-    left_join(
-      scaling_factors %>%
-        select(iso2, year, month, source_std, ratio, scale_factor, tier, ember_mwh = ember_mwh),
-      by = c("iso2", "year", "month", "source_std")
-    )
-
-  # For months beyond EMBER coverage, use last available ratio
-  last_ratios <- scaling_factors %>%
-    filter(year == last_ember_year, month == last_ember_month_num) %>%
-    select(iso2, source_std, last_ratio = ratio, last_scale_factor = scale_factor, tier)
-
-  daily_with_factors <- daily_with_factors %>%
-    left_join(
-      last_ratios %>% select(-tier),
-      by = c("iso2", "source_std")
-    ) %>%
-    mutate(
-      # Use last ratio for future months
-      ratio = coalesce(ratio, last_ratio),
-      scale_factor = coalesce(scale_factor, last_scale_factor)
-    ) %>%
-    select(-last_ratio, -last_scale_factor)
-
-  # Apply Tier 1: Scale ENTSOE by monthly factor
-  # Apply Tier 2: Distribute EMBER monthly using ENTSOE daily pattern
-
-  # First, calculate daily share within each month for Tier 2
-  # Also track if ENTSOE has valid (non-NA) data for the month
-  daily_shares <- entsoe_daily %>%
-    group_by(iso2, source_std, year, month) %>%
-    mutate(
-      monthly_total = sum(value_mwh, na.rm = TRUE),
-      n_valid_days = sum(!is.na(value_mwh)),
-      # If ENTSOE has valid data, use its pattern; otherwise use equal distribution
-      daily_share = case_when(
-        monthly_total > 0 & !is.na(value_mwh) ~ value_mwh / monthly_total,
-        n_valid_days == 0 ~ 1 / n(), # All NA: use equal distribution
-        TRUE ~ 0 # This day is NA but others aren't - give it 0 share
-      ),
-      entsoe_all_na = (n_valid_days == 0)
-    ) %>%
-    ungroup() %>%
-    select(iso2, date, source_std, daily_share, monthly_total, entsoe_all_na)
-
-  # Join daily shares
-  daily_with_factors <- daily_with_factors %>%
-    left_join(
-      daily_shares %>% select(iso2, date, source_std, daily_share, entsoe_all_na),
-      by = c("iso2", "date", "source_std")
-    )
-
-  # Apply corrections
-
-  result <- daily_with_factors %>%
-    mutate(
-      # Store raw values before correction
-      value_mwh_raw = value_mwh,
-      value_mw_raw = value_mw,
-      # Calculate days in month for constant distribution fallback
-      days_in_month = lubridate::days_in_month(date),
-      # Apply corrections
-      value_mwh = case_when(
-        # Tier 1: Scale ENTSOE by monthly factor (only if ENTSOE has data)
-        tier == 1 & !is.na(scale_factor) & !is.na(value_mwh_raw) & !entsoe_all_na ~ value_mwh_raw *
-          scale_factor,
-        # Tier 1 but ENTSOE is all NA for month: use EMBER with constant distribution
-        tier == 1 & !is.na(ember_mwh) & entsoe_all_na ~ ember_mwh / days_in_month,
-        # Tier 2: Distribute EMBER monthly by daily share
-        tier == 2 & !is.na(ember_mwh) & !is.na(daily_share) & !entsoe_all_na ~ ember_mwh *
-          daily_share,
-        # Tier 2 but ENTSOE is all NA for month: use EMBER with constant distribution
-        tier == 2 & !is.na(ember_mwh) & entsoe_all_na ~ ember_mwh / days_in_month,
-        # Fallback: use raw ENTSOE if no correction available
-        TRUE ~ value_mwh_raw
-      ),
-      # Calculate corrected value_mw (assuming 24 hours per day)
-      value_mw = value_mwh / 24,
-      # Map source back to ENTSOE naming
-      source = case_when(
-        source_std == "Gas" ~ "Fossil Gas",
-        TRUE ~ source_std
-      ),
-      data_source = "entsoe_ember_combined",
-      correction_tier = tier,
-      correction_ratio = ratio
-    ) %>%
-    # Match ENTSOE output format with additional correction columns
-    select(
-      date,
-      source,
-      data_source,
-      iso2,
-      region,
-      country,
-      value_mw,
-      value_mwh,
-      frequency,
-      # Additional columns for transparency
-      value_mw_raw,
-      value_mwh_raw,
-      correction_tier,
-      correction_ratio
-    ) %>%
-    # Filter to requested date range
-    filter(date >= date_from, date <= date_to)
-
-  return(result)
-}
-
-
-#' Fill gaps in EMBER monthly data using yearly data
-#'
-#' For countries/sources where monthly data is incomplete or starts later than
-#' yearly data, this function distributes yearly totals across months using
-#' ENTSOE daily patterns as a proxy.
-#'
-#' @param ember_monthly EMBER monthly data
-#' @param ember_yearly EMBER yearly data
-#' @param entsoe_daily ENTSOE daily data (used for distribution pattern)
-#'
-#' @return EMBER monthly data with gaps filled from yearly
-#' @keywords internal
-.fill_ember_monthly_from_yearly <- function(ember_monthly, ember_yearly, entsoe_daily) {
-  # Identify which year/country/source combinations have monthly data
-  monthly_coverage <- ember_monthly %>%
-    mutate(year = year(date)) %>%
-    group_by(iso2, source, year) %>%
-    summarise(
-      n_months = n(),
-      monthly_mwh = sum(value_mwh, na.rm = TRUE),
-      .groups = "drop"
-    )
-
-  # Prepare yearly data
-  yearly_data <- ember_yearly %>%
-    mutate(year = year(date)) %>%
-    select(iso2, source, year, yearly_mwh = value_mwh)
-
-  # Identify gaps: years with yearly data but incomplete/missing monthly data
-  gaps <- yearly_data %>%
-    left_join(monthly_coverage, by = c("iso2", "source", "year")) %>%
-    mutate(
-      n_months = coalesce(n_months, 0L),
-      monthly_mwh = coalesce(monthly_mwh, 0)
-    ) %>%
-    # Only fill if monthly data is missing or significantly incomplete
-    # Consider incomplete if <10 months or monthly sum is <80% of yearly
-    filter(
-      n_months < 10 |
-        (yearly_mwh > 0 & monthly_mwh / yearly_mwh < 0.8)
-    )
-
-  if (nrow(gaps) == 0) {
-    log_debug("No gaps in EMBER monthly data to fill from yearly")
-    return(ember_monthly)
-  }
-
-  log_info(
-    sprintf(
-      "Filling %d year/country/source gaps in EMBER monthly from yearly data",
-      nrow(gaps)
-    )
-  )
-
-  # Prepare ENTSOE monthly patterns for distribution
-  entsoe_monthly_pattern <- entsoe_daily %>%
-    mutate(
-      year = year(date),
-      month = month(date),
-      source_std = case_when(
-        source %in% c("Wind Onshore", "Wind Offshore", "Wind") ~ "Wind",
-        source == "Fossil Gas" ~ "Gas",
-        TRUE ~ source
-      )
-    ) %>%
-    group_by(iso2, source_std, year, month) %>%
-    summarise(entsoe_mwh = sum(value_mwh, na.rm = TRUE), .groups = "drop") %>%
-    # Calculate monthly share within each year
-    group_by(iso2, source_std, year) %>%
-    mutate(
-      yearly_total = sum(entsoe_mwh, na.rm = TRUE),
-      monthly_share = if_else(yearly_total > 0, entsoe_mwh / yearly_total, 1 / 12)
-    ) %>%
-    ungroup() %>%
-    select(iso2, source_std, year, month, monthly_share)
-
-  # Generate filled monthly data for gaps
-  filled_monthly <- gaps %>%
-    # Cross join with months 1-12
-    crossing(month = 1:12) %>%
-    # Join with ENTSOE pattern
-    left_join(
-      entsoe_monthly_pattern,
-      by = c("iso2", "source" = "source_std", "year", "month")
-    ) %>%
-    # If no ENTSOE pattern available, use equal distribution
-    mutate(monthly_share = coalesce(monthly_share, 1 / 12)) %>%
-    # Calculate monthly value from yearly
-    mutate(
-      value_mwh = yearly_mwh * monthly_share,
-      date = ymd(paste(year, month, "01", sep = "-")),
-      filled_from_yearly = TRUE
-    ) %>%
-    select(iso2, source, date, value_mwh, filled_from_yearly)
-
-  # Remove existing monthly data for gaps (will be replaced)
-  gap_keys <- gaps %>%
-    select(iso2, source, year)
-
-  ember_monthly_cleaned <- ember_monthly %>%
-    mutate(year = year(date)) %>%
-    anti_join(gap_keys, by = c("iso2", "source", "year")) %>%
-    select(-year) %>%
-    mutate(filled_from_yearly = FALSE)
-
-  # Combine original (cleaned) with filled data
-  result <- bind_rows(ember_monthly_cleaned, filled_monthly) %>%
-    arrange(iso2, source, date)
-
-  n_filled <- sum(result$filled_from_yearly, na.rm = TRUE)
-  log_info(sprintf("Filled %d monthly observations from yearly data", n_filled))
-
-  return(result)
-}
-
-
-#' Distribute EMBER monthly data to daily for EMBER-only sources
-#'
-#' For sources that only exist in EMBER (Bioenergy, Other renewables, Other fossil),
-#' distribute monthly values to daily assuming constant production within each month.
-#' For months beyond EMBER coverage, the last available monthly value is carried forward.
-#'
-#' @param ember_monthly EMBER monthly data
-#' @param ember_only_sources Character vector of EMBER source names to distribute
-#' @param date_from Start date
-#' @param date_to End date
-#' @param iso2s Country codes to include
-#' @param entsoe_daily ENTSOE daily data (for getting region/country metadata)
-#'
-#' @return Daily data in the same format as result_corrected/result_passthrough
-#' @keywords internal
-.distribute_ember_to_daily <- function(
-  ember_monthly,
-  ember_only_sources,
-  date_from,
-  date_to,
-  iso2s,
-  entsoe_daily
-) {
-  # Filter EMBER to only the sources we want
-  ember_subset <- ember_monthly %>%
-    filter(source %in% ember_only_sources, iso2 %in% iso2s)
-
-  if (nrow(ember_subset) == 0) {
-    log_debug("No EMBER-only sources found for the requested countries")
-    return(NULL)
-  }
-
-  # Get region/country mapping from ENTSOE
+  # Country / region metadata to re-attach to the scaled output.
   country_info <- entsoe_daily %>%
     select(iso2, region, country) %>%
     distinct()
 
-  # Extend EMBER data forward to date_to by carrying forward last monthly value
-  # Get the last available month for each iso2/source
-  last_ember_values <- ember_subset %>%
-    group_by(iso2, source) %>%
-    filter(date == max(date)) %>%
-    ungroup() %>%
-    select(iso2, source, last_value_mwh = value_mwh, last_date = date)
+  # ---- Step 1: ENTSOE daily -> monthly ----
+  entsoe_monthly <- .aggregate_entsoe_monthly(entsoe_daily)
 
-  # Generate months to fill (from last EMBER month + 1 to date_to)
-  months_to_fill <- last_ember_values %>%
-    group_by(iso2, source) %>%
-    group_modify(function(df, keys) {
-      need_new_months <- lubridate::ceiling_date(df$last_date, "month") <= as.Date(date_to)
-      missing_months <- if (need_new_months) {
-        seq.Date(
-          from = lubridate::ceiling_date(df$last_date, "month"),
-          to = lubridate::floor_date(as.Date(date_to), "month"),
-          by = "month"
-        )
-      } else {
-        df$last_date
-      }
-      tibble(
-        last_value_mwh = df$last_value_mwh,
-        last_date = df$last_date,
-        date = missing_months
-      )
-    }) %>%
-    filter(date <= date_to) %>%
-    rename(value_mwh = last_value_mwh)
+  # ---- Step 2: monthly ratio with MAD outlier flagging, extended (ETS or last) ----
+  ratio_monthly_raw <- .compute_ratio_monthly(entsoe_monthly, ember_monthly)
+  ratio_monthly_raw <- .flag_outliers_mad(ratio_monthly_raw, threshold = mad_threshold)
+  ratio_monthly_full <- .extend_ratio(
+    ratio_monthly_raw,
+    target_date = lubridate::floor_date(date_to, "month"),
+    frequency   = 12,
+    min_obs     = MIN_OBS_ETS_MONTHLY,
+    method      = monthly_extend
+  )
 
-  # Combine original EMBER data with extended data
-  ember_extended <- bind_rows(
-    ember_subset %>% select(iso2, source, date, value_mwh),
-    months_to_fill
-  ) %>%
-    distinct(iso2, source, date, .keep_all = TRUE)
+  # ---- Step 3: apply monthly scaling to ENTSOE daily ----
+  scaled_step1 <- .apply_monthly_scaling(entsoe_daily, ratio_monthly_full)
 
-  # Generate daily dates for each month
-  # For each monthly value, distribute evenly across days in that month
-  daily_data <- ember_extended %>%
-    mutate(
-      year = year(date),
-      month = month(date),
-      days_in_month = lubridate::days_in_month(date)
-    ) %>%
-    # Create daily value (constant within month)
-    mutate(
-      daily_mwh = value_mwh / days_in_month,
-      daily_mw = daily_mwh / 24
-    ) %>%
-    # Expand to daily rows
-    group_by(iso2, source, year, month) %>%
-    reframe(
-      date = seq.Date(
-        from = lubridate::floor_date(date, "month"),
-        to = lubridate::ceiling_date(date, "month") - days(1),
-        by = "day"
-      ),
-      value_mwh = daily_mwh,
-      value_mw = daily_mw
-    ) %>%
-    ungroup() %>%
-    # Filter to requested date range
-    filter(date >= date_from, date <= date_to) %>%
-    # Add metadata
+  # ---- Step 4: Ember-only fallback. Triggered when ENTSOE has no meaningful
+  # data for an (iso2, source) but Ember does (CY/MT absent from ENTSOE; SI/SK
+  # Wind where ENTSOE reports zero but Ember has real generation). Done BEFORE
+  # yearly scaling so the yearly correction applies uniformly.
+  ember_only_iso2_src <- .find_ember_only_series(
+    ember_monthly = ember_monthly,
+    scaled_final  = scaled_step1,
+    iso2s         = iso2s
+  )
+  if (nrow(ember_only_iso2_src) > 0) {
+    # Drop the all-zero rows for these (iso2, source) pairs to avoid duplicates
+    scaled_step1 <- scaled_step1 %>%
+      anti_join(ember_only_iso2_src, by = c("iso2", "source"))
+    fallback <- .distribute_ember_monthly_to_daily(
+      ember_monthly = ember_monthly,
+      keys          = ember_only_iso2_src,
+      date_from     = date_from,
+      date_to       = date_to,
+      country_info  = country_info
+    )
+    scaled_step1 <- bind_rows(scaled_step1, fallback)
+  }
+
+  # ---- Step 5: yearly ratio (EMBER monthly -> EMBER yearly).
+  # MAD outlier flagging applies; extension is always last-value carry-forward.
+  ratio_yearly_raw <- .compute_ratio_yearly(ember_monthly, ember_yearly)
+  ratio_yearly_raw <- .flag_outliers_mad(ratio_yearly_raw, threshold = mad_threshold)
+  ratio_yearly_full <- .extend_ratio(
+    ratio_yearly_raw,
+    target_date = as.Date(paste0(year(date_to), "-01-01")),
+    frequency   = 1,
+    method      = "last"
+  )
+
+  # ---- Step 6: apply yearly scaling to everything (ENTSOE-derived AND fallback) ----
+  scaled_final <- .apply_yearly_scaling(scaled_step1, ratio_yearly_full)
+
+  # ---- Step 7: re-attach country metadata, remap source names, finalise ----
+  result <- scaled_final %>%
     left_join(country_info, by = "iso2") %>%
     mutate(
-      value_mw_raw = value_mw,
-      value_mwh_raw = value_mwh,
-      correction_tier = NA_integer_,
-      correction_ratio = NA_real_,
-      data_source = "ember",
-      frequency = "daily"
+      source   = recode(source, !!!EMBER_TO_OUTPUT),
+      value_mw = value_mwh / 24
     ) %>%
-    select(
-      date, source, data_source, iso2, region, country,
-      value_mw, value_mwh, frequency,
-      value_mw_raw, value_mwh_raw, correction_tier, correction_ratio
-    )
+    filter(date >= date_from, date <= date_to) %>%
+    select(iso2, country, region, date, source, value_mw, value_mwh) %>%
+    arrange(iso2, source, date)
 
-  log_info(
-    sprintf(
-      "Added %d daily observations from EMBER-only sources (%s)",
-      nrow(daily_data),
-      paste(ember_only_sources, collapse = ", ")
-    )
-  )
-
-  return(daily_data)
-}
-
-
-#' Get the tier assignment for each country/source combination
-#'
-#' Utility function to see which countries/sources are in Tier 1 vs Tier 2
-#'
-#' @param tier_threshold Numeric vector of length 2 defining ratio bounds
-#' @param use_cache Whether to use cached data
-#'
-#' @return Tibble with tier assignments and median ratios
-#'
-#' @export
-get_power_generation_tiers <- function(
-  tier_threshold = c(0.7, 1.3),
-  use_cache = TRUE,
-  tier_calc_start = "2020-01-01"
-) {
-  iso2s <- get_eu_iso2s(include_eu = FALSE)
-
-  source_data <- power_data_access_get_sources(
-    date_from = tier_calc_start,
-    date_to = Sys.Date(),
-    iso2s = iso2s,
-    use_cache = use_cache,
-    data_masking = NULL
-  )
-
-  entsoe_daily <- source_data$entsoe_daily
-  ember_monthly <- source_data$ember_monthly
-
-  # Standardize
-  entsoe_daily <- entsoe_daily %>%
-    mutate(
-      source_std = case_when(
-        source %in% c("Wind Onshore", "Wind Offshore", "Wind") ~ "Wind",
-        source == "Fossil Gas" ~ "Gas",
-        TRUE ~ source
-      )
-    ) %>%
-    filter(source_std %in% c("Wind", "Solar", "Gas"))
-
-  ember_monthly <- ember_monthly %>%
-    filter(source %in% c("Wind", "Solar", "Gas")) %>%
-    rename(source_std = source)
-
-  # Calculate factors
-  factors <- .calculate_monthly_scaling_factors(
-    entsoe_daily = entsoe_daily,
-    ember_monthly = ember_monthly,
-    tier_threshold = tier_threshold
-  )
-
-  # Summarize by country/source
-  tier_summary <- factors %>%
-    group_by(iso2, source_std, tier) %>%
+  # Recompute Total
+  total <- result %>%
+    group_by(iso2, country, region, date) %>%
     summarise(
-      median_ratio = median(ratio, na.rm = TRUE),
-      mean_ratio = mean(ratio, na.rm = TRUE),
-      sd_ratio = sd(ratio, na.rm = TRUE),
-      n_months = n(),
-      .groups = "drop"
+      value_mw  = sum(value_mw, na.rm = TRUE),
+      value_mwh = sum(value_mwh, na.rm = TRUE),
+      .groups   = "drop"
     ) %>%
-    arrange(source_std, tier, iso2)
+    mutate(source = "Total")
+  result <- bind_rows(result, total) %>% arrange(iso2, source, date)
 
-  return(tier_summary)
-}
-
-
-#' Generate diagnostic plots for power generation correction
-#' @keywords internal
-.generate_power_diagnostics <- function(
-  entsoe_daily,
-  ember_monthly,
-  scaling_factors,
-  result,
-  diagnostics_folder
-) {
-  log_info("Generating power generation diagnostics...")
-  create_dir(diagnostics_folder)
-
-  # Prepare data for plots
-  # Aggregate ENTSOE to monthly for comparison
-  entsoe_monthly <- entsoe_daily %>%
-    mutate(year = year(date), month = month(date)) %>%
-    group_by(iso2, year, month, source_std) %>%
-    summarise(entsoe_mwh = sum(value_mwh, na.rm = TRUE), .groups = "drop") %>%
-    mutate(date = ymd(paste(year, month, "01", sep = "-")))
-
-  # Prepare EMBER
-  ember_monthly_prep <- ember_monthly %>%
-    mutate(year = year(date), month = month(date)) %>%
-    select(iso2, year, month, source_std, ember_mwh = value_mwh) %>%
-    mutate(date = ymd(paste(year, month, "01", sep = "-")))
-
-  # Corrected
-  result_monthly <- result %>%
-    group_by(iso2, year = year(date), month = month(date), source_std = case_when(
-      source %in% c("Wind Onshore", "Wind Offshore", "Wind") ~ "Wind",
-      source == "Fossil Gas" ~ "Gas",
-      TRUE ~ source
-    )) %>%
-    summarise(result_mwh = sum(value_mwh, na.rm = TRUE), .groups = "drop") %>%
-    mutate(date = ymd(paste(year, month, "01", sep = "-")))
-
-  # Monthly comparison
-  monthly_comparison <- entsoe_monthly %>%
-    inner_join(ember_monthly_prep, by = c("iso2", "year", "month", "source_std", "date")) %>%
-    mutate(
-      ratio = entsoe_mwh / ember_mwh,
-      ratio = if_else(is.finite(ratio) & ember_mwh > 0, ratio, NA_real_)
-    )
-
-  # Yearly comparison
-  yearly_comparison <- monthly_comparison %>%
-    group_by(iso2, year, source_std) %>%
-    summarise(
-      entsoe_mwh = sum(entsoe_mwh, na.rm = TRUE),
-      ember_mwh = sum(ember_mwh, na.rm = TRUE),
-      .groups = "drop"
-    ) %>%
-    mutate(
-      ratio = entsoe_mwh / ember_mwh,
-      ratio = if_else(is.finite(ratio) & ember_mwh > 0, ratio, NA_real_)
-    )
-
-  # Get tier assignments
-  tier_assignment <- scaling_factors %>%
-    select(iso2, source_std, tier) %>%
-    distinct()
-
-  # Color palette
-  source_colors <- c("Wind" = "#377EB8", "Solar" = "#FF7F00", "Gas" = "#4DAF4A")
-  datasource_colors <- c("ENTSOE" = "#E41A1C", "EMBER" = "#377EB8")
-
-  # ============================================================================
-  # 1. Yearly ratio chart - all countries
-  # ============================================================================
-  p_yearly_ratio <- yearly_comparison %>%
-    ggplot(aes(x = year, y = ratio, color = source_std)) +
-    geom_line(linewidth = 0.6) +
-    geom_point(size = 1) +
-    geom_hline(yintercept = 1, linetype = "dashed", color = "gray50", linewidth = 0.3) +
-    facet_wrap(~iso2, ncol = 5) +
-    scale_y_continuous(limits = c(0, 1.5), expand = c(0, 0)) +
-    scale_color_manual(values = source_colors) +
-    labs(
-      title = "ENTSOE/EMBER Ratio by Country Over Time",
-      subtitle = "Horizontal line = perfect agreement (ratio = 1)",
-      x = "Year",
-      y = "ENTSOE / EMBER Ratio",
-      color = "Source"
-    ) +
-    theme_minimal() +
-    theme(
-      legend.position = "bottom",
-      strip.text = element_text(size = 8, face = "bold"),
-      axis.text.x = element_text(angle = 45, hjust = 1, size = 6)
-    )
-
-  ggsave(file.path(diagnostics_folder, "yearly_ratio_all_countries.png"),
-    p_yearly_ratio,
-    width = 16, height = 16
-  )
-
-  # ============================================================================
-  # 2. Monthly ratio chart - all countries (recent years)
-  # ============================================================================
-  p_monthly_ratio <- monthly_comparison %>%
-    filter(date >= "2020-01-01") %>%
-    ggplot(aes(x = date, y = ratio, color = source_std)) +
-    geom_line(linewidth = 0.4, alpha = 0.7) +
-    geom_hline(yintercept = 1, linetype = "dashed", color = "gray50", linewidth = 0.3) +
-    facet_wrap(~iso2, ncol = 5) +
-    scale_y_continuous(limits = c(0, 1.5), expand = c(0, 0)) +
-    scale_color_manual(values = source_colors) +
-    labs(
-      title = "ENTSOE/EMBER Monthly Ratio by Country (2020+)",
-      subtitle = "Horizontal line = perfect agreement (ratio = 1)",
-      x = "Date",
-      y = "ENTSOE / EMBER Ratio",
-      color = "Source"
-    ) +
-    theme_minimal() +
-    theme(
-      legend.position = "bottom",
-      strip.text = element_text(size = 8, face = "bold"),
-      axis.text.x = element_text(angle = 45, hjust = 1, size = 6)
-    )
-
-  ggsave(file.path(diagnostics_folder, "monthly_ratio_all_countries.png"),
-    p_monthly_ratio,
-    width = 16, height = 16
-  )
-
-  # ============================================================================
-  # 3. Yearly comparison by source - ENTSOE vs EMBER
-  # ============================================================================
-  yearly_plot_data <- yearly_comparison %>%
-    select(iso2, year, source_std, entsoe_mwh, ember_mwh) %>%
-    pivot_longer(
-      cols = c(entsoe_mwh, ember_mwh),
-      names_to = "data_source",
-      values_to = "value_mwh"
-    ) %>%
-    mutate(
-      data_source = recode(data_source, "entsoe_mwh" = "ENTSOE", "ember_mwh" = "EMBER"),
-      value_twh = value_mwh / 1e6
-    )
-
-  for (src in c("Wind", "Solar", "Gas", "Hydro")) {
-    p_yearly_src <- yearly_plot_data %>%
-      filter(source_std == src) %>%
-      ggplot(aes(x = year, y = value_twh, color = data_source, linetype = data_source)) +
-      geom_line(linewidth = 0.8) +
-      geom_point(size = 1.5) +
-      facet_wrap(~iso2, scales = "free_y", ncol = 5) +
-      scale_color_manual(values = datasource_colors) +
-      labs(
-        title = paste0(src, " Generation: ENTSOE vs EMBER by Country (Yearly)"),
-        x = "Year",
-        y = "Generation (TWh)",
-        color = "Data Source",
-        linetype = "Data Source"
-      ) +
-      theme_minimal() +
-      theme(
-        legend.position = "bottom",
-        strip.text = element_text(size = 9, face = "bold"),
-        axis.text.x = element_text(angle = 45, hjust = 1, size = 7)
-      )
-
-    ggsave(file.path(diagnostics_folder, paste0("yearly_", tolower(src), "_all_countries.png")),
-      p_yearly_src,
-      width = 16, height = 14
+  # ---- Diagnostics ----
+  if (!is.null(diagnostics_folder)) {
+    .generate_power_diagnostics(
+      entsoe_monthly      = entsoe_monthly,
+      ember_monthly       = ember_monthly,
+      ember_yearly        = ember_yearly,
+      ratio_monthly_full  = ratio_monthly_full,
+      ratio_yearly_full   = ratio_yearly_full,
+      scaled_final        = scaled_final,
+      diagnostics_folder  = diagnostics_folder
     )
   }
 
-  # ============================================================================
-  # 4. Monthly comparison by source - ENTSOE vs EMBER (recent years)
-  # ============================================================================
-  monthly_plot_data <- monthly_comparison %>%
-    select(iso2, date, year, month, source_std, entsoe_mwh, ember_mwh) %>%
-    pivot_longer(
-      cols = c(entsoe_mwh, ember_mwh),
-      names_to = "data_source",
-      values_to = "value_mwh"
-    ) %>%
-    mutate(
-      data_source = recode(data_source, "entsoe_mwh" = "ENTSOE", "ember_mwh" = "EMBER"),
-      value_twh = value_mwh / 1e6
-    )
+  if (any(duplicated(result %>% select(iso2, source, date)))) {
+    stop("Duplicate iso2-source-date combinations in get_power_generation() output")
+  }
 
-  for (src in c("Wind", "Solar", "Gas", "Hydro")) {
-    p_monthly_src <- monthly_plot_data %>%
-      filter(source_std == src, date >= "2020-01-01") %>%
-      ggplot(aes(x = date, y = value_twh, color = data_source)) +
-      geom_line(linewidth = 0.5) +
-      facet_wrap(~iso2, scales = "free_y", ncol = 5) +
-      scale_color_manual(values = datasource_colors) +
-      labs(
-        title = paste0(src, " Generation: ENTSOE vs EMBER by Country (Monthly, 2020+)"),
-        x = "Date",
-        y = "Generation (TWh)",
-        color = "Data Source"
+  return(result)
+}
+
+
+# ============================================================================
+# Aggregation
+# ============================================================================
+
+#' @keywords internal
+.aggregate_entsoe_monthly <- function(entsoe_daily) {
+  entsoe_daily %>%
+    filter(source %in% names(ENTSOE_TO_EMBER)) %>%
+    mutate(year = year(date), month = month(date)) %>%
+    # Completeness per ORIGINAL source (Wind Onshore separate from Wind Offshore)
+    group_by(iso2, source, year, month) %>%
+    summarise(
+      mwh_orig   = sum(value_mwh, na.rm = TRUE),
+      n_days     = sum(!is.na(value_mwh)),
+      expected   = lubridate::days_in_month(first(date)),
+      full_month = (n_days == expected),
+      .groups    = "drop"
+    ) %>%
+    # Drop phantom rows: entsoe.get_power_generation() complete()s every
+    # source x country x date triple even when the source is absent.
+    filter(n_days > 0) %>%
+    mutate(
+      source = recode(source, !!!ENTSOE_TO_EMBER),
+      date   = lubridate::make_date(year, month, 1)
+    ) %>%
+    # Combine sub-sources (Wind Onshore + Wind Offshore -> Wind, etc.)
+    group_by(iso2, source, year, month, date) %>%
+    summarise(
+      entsoe_mwh = sum(mwh_orig, na.rm = TRUE),
+      full_month = all(full_month),
+      .groups    = "drop"
+    )
+}
+
+
+# ============================================================================
+# Ratio computation, outlier flagging, ETS extension
+# ============================================================================
+
+#' @keywords internal
+.compute_ratio_monthly <- function(entsoe_monthly, ember_monthly) {
+  ember_prep <- ember_monthly %>%
+    select(iso2, source, date, ember_mwh = value_mwh)
+
+  # Allow ember_mwh = 0 (yields ratio = 0 -> scaled = 0, which matches the
+  # Ember-reported absence of generation, e.g. SI/SK Wind). Require
+  # entsoe_mwh > 0 to avoid division by zero (those cases go through the
+  # Ember-only fallback instead).
+  entsoe_monthly %>%
+    filter(full_month) %>%
+    inner_join(ember_prep, by = c("iso2", "source", "date")) %>%
+    filter(entsoe_mwh > 0, !is.na(ember_mwh)) %>%
+    mutate(ratio = ember_mwh / entsoe_mwh) %>%
+    filter(is.finite(ratio)) %>%
+    select(iso2, source, date, year, month, entsoe_mwh, ember_mwh, ratio) %>%
+    arrange(iso2, source, date)
+}
+
+
+#' @keywords internal
+.compute_ratio_yearly <- function(ember_monthly, ember_yearly) {
+  monthly_year_sum <- ember_monthly %>%
+    mutate(year = year(date)) %>%
+    group_by(iso2, source, year) %>%
+    summarise(
+      monthly_sum = sum(value_mwh, na.rm = TRUE),
+      n_months    = n(),
+      .groups     = "drop"
+    ) %>%
+    # Only use years with all 12 months of monthly data for the ratio
+    filter(n_months == 12)
+
+  ember_yearly %>%
+    mutate(year = year(date)) %>%
+    select(iso2, source, year, yearly_mwh = value_mwh) %>%
+    inner_join(monthly_year_sum, by = c("iso2", "source", "year")) %>%
+    filter(monthly_sum > 0, yearly_mwh > 0) %>%
+    mutate(
+      ratio = yearly_mwh / monthly_sum,
+      date  = lubridate::make_date(year, 1, 1)
+    ) %>%
+    filter(is.finite(ratio)) %>%
+    select(iso2, source, date, year, monthly_sum, yearly_mwh, ratio) %>%
+    arrange(iso2, source, year)
+}
+
+
+#' @keywords internal
+.flag_outliers_mad <- function(df, threshold = 5) {
+  df %>%
+    group_by(iso2, source) %>%
+    mutate(
+      .med       = median(ratio, na.rm = TRUE),
+      .mad       = mad(ratio, na.rm = TRUE),
+      is_outlier = !is.na(.mad) & .mad > 0 & abs(ratio - .med) > threshold * .mad
+    ) %>%
+    select(-.med, -.mad) %>%
+    ungroup()
+}
+
+
+#' Build a fully-populated ratio series per (iso2, source) from min observed
+#' date to `target_date`. Returns a tibble with `date, ratio_obs, ratio_used,
+#' type in {observed, interpolated, forecast}, is_outlier`.
+#'
+#' @param method "ets" fits ETS with na.interp for outliers; "last" uses
+#'   last-observation-carried-forward (locf) everywhere. "ets" silently falls
+#'   back to "last" when there are fewer than `min_obs` non-outlier
+#'   observations.
+#' @keywords internal
+.extend_ratio <- function(df, target_date, frequency = 12L, min_obs = 12L,
+                          method = c("ets", "last")) {
+  method <- match.arg(method)
+  if (nrow(df) == 0) {
+    return(tibble(
+      iso2       = character(0),
+      source     = character(0),
+      date       = as.Date(character(0)),
+      ratio_obs  = double(0),
+      ratio_used = double(0),
+      is_outlier = logical(0),
+      type       = character(0)
+    ))
+  }
+
+  groups <- df %>%
+    group_by(iso2, source) %>%
+    group_split()
+
+  step <- if (frequency == 12L) "month" else "year"
+
+  res <- pbapply::pblapply(groups, function(g) {
+    g <- arrange(g, date)
+    iso2_v <- g$iso2[[1]]
+    source_v <- g$source[[1]]
+    n_obs <- sum(!g$is_outlier, na.rm = TRUE)
+    start_dt <- min(g$date)
+    last_dt <- max(g$date)
+    target <- max(target_date, last_dt)
+
+    # Full date grid from start to target
+    grid <- tibble(date = seq.Date(start_dt, target, by = step))
+    full <- grid %>%
+      left_join(g %>% select(date, ratio_obs = ratio, is_outlier), by = "date") %>%
+      mutate(
+        is_outlier = coalesce(is_outlier, FALSE),
+        ratio_in   = if_else(is_outlier, NA_real_, ratio_obs)
+      )
+
+    # ETS needs enough history; otherwise (and when method == "last") use locf
+    use_ets <- method == "ets" && n_obs >= min_obs && any(!is.na(full$ratio_in))
+
+    if (!use_ets) {
+      # locf: forward-fill, then back-fill leading NAs, default to 1 if all NA
+      x <- full$ratio_in
+      x <- if (all(is.na(x))) {
+        rep(1, length(x))
+      } else {
+        as.numeric(zoo::na.locf(zoo::na.locf(x, na.rm = FALSE), fromLast = TRUE))
+      }
+      full <- full %>%
+        mutate(
+          ratio_used = x,
+          type = case_when(
+            !is.na(ratio_obs) & !is_outlier ~ "observed",
+            date > last_dt ~ "forecast",
+            TRUE ~ "interpolated"
+          )
+        )
+    } else {
+      # Observed-range only: interpolate outlier-NAs with STL/linear via na.interp
+      obs_mask <- full$date <= last_dt
+      ratio_obs_range <- full$ratio_in[obs_mask]
+      ts_in <- ts(ratio_obs_range,
+        start = c(
+          year(start_dt),
+          if (frequency == 12L) month(start_dt) else 1
+        ),
+        frequency = frequency
+      )
+      ts_interp <- tryCatch(forecast::na.interp(ts_in), error = function(e) NULL)
+      if (is.null(ts_interp)) {
+        # Interpolation failed: keep raw and last-value-carry-forward
+        last_val <- tail(ratio_obs_range[!is.na(ratio_obs_range)], 1)
+        if (length(last_val) == 0) last_val <- 1
+        full$ratio_used <- if_else(is.na(full$ratio_in), last_val, full$ratio_in)
+      } else {
+        interpolated_vals <- as.numeric(ts_interp)
+        h <- sum(!obs_mask)
+        forecast_vals <- numeric(0)
+        if (h > 0) {
+          fit <- tryCatch(forecast::ets(ts_interp), error = function(e) NULL)
+          if (!is.null(fit)) {
+            fcast <- forecast::forecast(fit, h = h)
+            forecast_vals <- as.numeric(fcast$mean)
+          } else {
+            # ETS failed: carry forward last interpolated value
+            forecast_vals <- rep(interpolated_vals[length(interpolated_vals)], h)
+          }
+        }
+        full$ratio_used <- c(interpolated_vals, forecast_vals)
+      }
+      full <- full %>%
+        mutate(type = case_when(
+          !is.na(ratio_obs) & !is_outlier ~ "observed",
+          date > last_dt ~ "forecast",
+          TRUE ~ "interpolated"
+        ))
+    }
+
+    full %>%
+      mutate(iso2 = iso2_v, source = source_v) %>%
+      select(iso2, source, date, ratio_obs, ratio_used, is_outlier, type)
+  }) %>%
+    bind_rows()
+
+  res
+}
+
+
+# ============================================================================
+# Apply scaling
+# ============================================================================
+
+#' @keywords internal
+.apply_monthly_scaling <- function(entsoe_daily, ratio_monthly_full) {
+  # Map ENTSOE daily to Ember source, sum sub-sources per (iso2, ember_source, date)
+  daily_mapped <- entsoe_daily %>%
+    filter(source %in% names(ENTSOE_TO_EMBER)) %>%
+    mutate(source = recode(source, !!!ENTSOE_TO_EMBER)) %>%
+    group_by(iso2, source, date) %>%
+    summarise(value_mwh = sum(value_mwh, na.rm = TRUE), .groups = "drop") %>%
+    mutate(month_date = lubridate::make_date(year(date), month(date), 1))
+
+  # Prefer the observed ratio (exact Ember monthly match) when available;
+  # fall back to the ETS/interpolated value only for months without an Ember
+  # observation. The MAD filter is for stabilising the ETS *forecast*, not for
+  # overriding real observed Ember monthly values.
+  ratio_for_scaling <- ratio_monthly_full %>%
+    mutate(ratio_m = coalesce(ratio_obs, ratio_used)) %>%
+    select(iso2, source, month_date = date, ratio_m)
+
+  daily_mapped %>%
+    left_join(ratio_for_scaling, by = c("iso2", "source", "month_date")) %>%
+    # Where the ratio is missing entirely (series too short for ETS),
+    # pass through ENTSOE unscaled
+    mutate(
+      ratio_m   = coalesce(ratio_m, 1),
+      value_mwh = value_mwh * ratio_m
+    ) %>%
+    select(iso2, source, date, value_mwh)
+}
+
+
+#' @keywords internal
+.apply_yearly_scaling <- function(scaled_daily, ratio_yearly_full) {
+  # Same logic as monthly: prefer observed yearly ratio over the ETS-smoothed
+  # value. ratio_used falls back to ETS only when Ember yearly isn't published
+  # yet for that year.
+  ratio_for_yearly <- ratio_yearly_full %>%
+    mutate(ratio_y = coalesce(ratio_obs, ratio_used)) %>%
+    select(iso2, source, year_date = date, ratio_y)
+
+  scaled_daily %>%
+    mutate(year_date = lubridate::make_date(year(date), 1, 1)) %>%
+    left_join(ratio_for_yearly, by = c("iso2", "source", "year_date")) %>%
+    mutate(
+      ratio_y   = coalesce(ratio_y, 1),
+      value_mwh = value_mwh * ratio_y
+    ) %>%
+    select(iso2, source, date, value_mwh)
+}
+
+
+# ============================================================================
+# Ember-only fallback (sources absent or too sparse in ENTSOE)
+# ============================================================================
+
+#' Identify (iso2, source) pairs that need the Ember-only fallback because either
+#'   (a) the pair is entirely absent from the ENTSOE-scaled output (e.g. CY/MT
+#'       missing from ENTSOE, or Bioenergy in countries without Biomass reporting), or
+#'   (b) the pair exists in the scaled output but sums to ~0 across the whole
+#'       date range while Ember reports meaningful generation (e.g. SI/SK Wind
+#'       where ENTSOE reports zero but real wind exists).
+#' @keywords internal
+.find_ember_only_series <- function(ember_monthly, scaled_final, iso2s) {
+  ember_keys <- ember_monthly %>%
+    filter(
+      iso2 %in% iso2s,
+      source %in% names(EMBER_TO_OUTPUT)
+    ) %>%
+    group_by(iso2, source) %>%
+    summarise(ember_total = sum(value_mwh, na.rm = TRUE), .groups = "drop") %>%
+    filter(ember_total > 0) %>%
+    select(iso2, source)
+
+  scaled_keys_meaningful <- scaled_final %>%
+    group_by(iso2, source) %>%
+    summarise(scaled_total = sum(value_mwh, na.rm = TRUE), .groups = "drop") %>%
+    filter(scaled_total > 0) %>%
+    select(iso2, source)
+
+  anti_join(ember_keys, scaled_keys_meaningful, by = c("iso2", "source"))
+}
+
+
+#' For (iso2, source) pairs without ENTSOE coverage, distribute Ember monthly
+#' uniformly across days. Last available monthly value is carried forward to
+#' `date_to`.
+#' @keywords internal
+.distribute_ember_monthly_to_daily <- function(ember_monthly, keys, date_from, date_to, country_info) {
+  if (nrow(keys) == 0) {
+    return(NULL)
+  }
+
+  ember_subset <- ember_monthly %>%
+    inner_join(keys, by = c("iso2", "source"))
+
+  if (nrow(ember_subset) == 0) {
+    return(NULL)
+  }
+
+  # Carry last value forward to date_to
+  last_values <- ember_subset %>%
+    group_by(iso2, source) %>%
+    filter(date == max(date)) %>%
+    ungroup() %>%
+    select(iso2, source, last_value = value_mwh, last_date = date)
+
+  end_month <- lubridate::floor_date(as.Date(date_to), "month")
+  extension <- last_values %>%
+    group_by(iso2, source) %>%
+    group_modify(function(df, .) {
+      if (df$last_date >= end_month) {
+        return(tibble())
+      }
+      months <- seq.Date(lubridate::ceiling_date(df$last_date, "month"), end_month, by = "month")
+      tibble(date = months, value_mwh = df$last_value)
+    }) %>%
+    ungroup()
+
+  ember_extended <- bind_rows(
+    ember_subset %>% select(iso2, source, date, value_mwh),
+    extension
+  ) %>%
+    distinct(iso2, source, date, .keep_all = TRUE)
+
+  # Distribute monthly value uniformly across days in that month
+  ember_extended %>%
+    rename(month_start = date) %>%
+    mutate(
+      month_end     = lubridate::ceiling_date(month_start, "month") - days(1),
+      days_in_month = as.integer(month_end - month_start) + 1L,
+      daily_mwh     = value_mwh / days_in_month
+    ) %>%
+    rowwise() %>%
+    reframe(
+      iso2      = iso2,
+      source    = source,
+      date      = seq.Date(month_start, month_end, by = "day"),
+      value_mwh = daily_mwh
+    ) %>%
+    ungroup() %>%
+    filter(date >= as.Date(date_from), date <= as.Date(date_to)) %>%
+    select(iso2, source, date, value_mwh)
+}
+
+
+# ============================================================================
+# Diagnostics
+# ============================================================================
+
+#' @keywords internal
+.generate_power_diagnostics <- function(entsoe_monthly,
+                                        ember_monthly,
+                                        ember_yearly,
+                                        ratio_monthly_full,
+                                        ratio_yearly_full,
+                                        scaled_final,
+                                        diagnostics_folder) {
+  message("Generating power generation diagnostics...")
+  create_dir(diagnostics_folder)
+
+  sources <- unique(ratio_monthly_full$source)
+
+  source_colors <- c(
+    "Wind" = "#377EB8", "Solar" = "#FF7F00", "Gas" = "#4DAF4A",
+    "Coal" = "#984EA3", "Nuclear" = "#E41A1C", "Hydro" = "#00BFC4"
+  )
+
+  # Helper: prepend the last non-forecast point to the forecast segment so the
+  # forecast line is visible even when there's only a single forecast period.
+  build_forecast_with_anchor <- function(df) {
+    df %>%
+      group_by(iso2, source) %>%
+      group_modify(function(g, .) {
+        fcst <- g %>% filter(type == "forecast")
+        if (nrow(fcst) == 0) {
+          return(tibble())
+        }
+        anchor_pool <- g %>% filter(type %in% c("observed", "interpolated"))
+        if (nrow(anchor_pool) == 0) {
+          return(fcst)
+        }
+        anchor <- anchor_pool %>% filter(date == max(date))
+        bind_rows(anchor, fcst) %>% arrange(date)
+      }) %>%
+      ungroup()
+  }
+
+  # ---- 1. Monthly ratio time series with outliers + forecast ----
+  for (src in sources) {
+    df_src <- ratio_monthly_full %>% filter(source == src)
+    if (nrow(df_src) == 0) next
+
+    fcst_segment <- build_forecast_with_anchor(df_src)
+
+    p <- df_src %>%
+      ggplot(aes(x = date)) +
+      geom_hline(yintercept = 1, linetype = "dashed", color = "gray60", linewidth = 0.3) +
+      # Continuous observed + interpolated line (single stroke, no breaks)
+      geom_line(
+        data = filter(df_src, type %in% c("observed", "interpolated")),
+        aes(y = ratio_used), color = "#2166AC", linewidth = 0.5
       ) +
-      theme_minimal() +
+      # Forecast segment with anchor point
+      geom_line(
+        data = fcst_segment,
+        aes(y = ratio_used), color = "#D6604D", linewidth = 0.7
+      ) +
+      # Mark interpolated months
+      geom_point(
+        data = filter(df_src, type == "interpolated"),
+        aes(y = ratio_used), color = "#FDB863", size = 0.9
+      ) +
+      # Mark forecast months
+      geom_point(
+        data = filter(df_src, type == "forecast"),
+        aes(y = ratio_used), color = "#D6604D", size = 0.9
+      ) +
+      # Outliers (x on the original observed ratio)
+      geom_point(
+        data = filter(df_src, is_outlier),
+        aes(y = ratio_obs), color = "#D6604D", shape = 4, size = 2, stroke = 0.8
+      ) +
+      facet_wrap(~iso2, scales = "free_y", ncol = 7) +
+      labs(
+        title = glue("Monthly ratio (EMBER / ENTSOE) - {src}"),
+        subtitle = "Blue = observed + interpolated. Red = forecast. Orange dots = interpolated. Red x = outlier.",
+        x = NULL, y = "Ember / ENTSOE"
+      ) +
+      theme_minimal(base_size = 9) +
+      theme(
+        strip.text = element_text(size = 8, face = "bold"),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 6)
+      )
+
+    n_countries <- n_distinct(df_src$iso2)
+    ggsave(file.path(diagnostics_folder, paste0("monthly_ratio_", tolower(src), ".png")),
+      p,
+      width = 20, height = 11.25
+    )
+  }
+
+  # ---- 2. Monthly ratio diagnostics CSV ----
+  monthly_summary <- ratio_monthly_full %>%
+    group_by(iso2, source) %>%
+    summarise(
+      n_obs = sum(type == "observed"),
+      n_outliers = sum(is_outlier),
+      pct_outliers = 100 * n_outliers / pmax(1, n_obs + n_outliers),
+      median_ratio = median(ratio_obs, na.rm = TRUE),
+      last_obs_month = if (any(type == "observed")) as.character(max(date[type == "observed"])) else NA_character_,
+      n_forecast = sum(type == "forecast"),
+      .groups = "drop"
+    )
+  write_csv(monthly_summary, file.path(diagnostics_folder, "monthly_ratio_diagnostics.csv"))
+
+  # ---- 3. Post-monthly residual ----
+  # Compared against the TRUE target: Ember_monthly * yearly_correction. Near 0
+  # means the pipeline is doing what it should; non-zero only where Ember-only
+  # fallback fires, ratios are missing, or ETS extrapolation is in use.
+  scaled_monthly <- scaled_final %>%
+    mutate(
+      year = year(date), month = month(date),
+      date_m = lubridate::make_date(year, month, 1)
+    ) %>%
+    group_by(iso2, source, date_m) %>%
+    summarise(scaled_month_mwh = sum(value_mwh, na.rm = TRUE), .groups = "drop") %>%
+    rename(date = date_m)
+
+  yearly_correction_for_residual <- ratio_yearly_full %>%
+    mutate(
+      ratio_y = coalesce(ratio_obs, ratio_used),
+      year = year(date)
+    ) %>%
+    select(iso2, source, year, ratio_y)
+
+  post_monthly <- scaled_monthly %>%
+    inner_join(ember_monthly %>% select(iso2, source, date, ember_mwh = value_mwh),
+      by = c("iso2", "source", "date")
+    ) %>%
+    mutate(year = year(date)) %>%
+    left_join(yearly_correction_for_residual, by = c("iso2", "source", "year")) %>%
+    mutate(
+      ratio_y = coalesce(ratio_y, 1),
+      target_mwh = ember_mwh * ratio_y
+    ) %>%
+    filter(target_mwh > 0) %>%
+    mutate(residual_pct = 100 * (scaled_month_mwh - target_mwh) / target_mwh)
+
+  for (src in sources) {
+    df_src <- post_monthly %>% filter(source == src)
+    if (nrow(df_src) == 0) next
+    p <- df_src %>%
+      ggplot(aes(x = date, y = residual_pct)) +
+      geom_hline(yintercept = 0, linetype = "dashed", color = "gray50", linewidth = 0.3) +
+      geom_line(color = "#2166AC", linewidth = 0.4) +
+      facet_wrap(~iso2, ncol = 7) +
+      coord_cartesian(ylim = c(-100, 100)) +
+      labs(
+        title = glue("Post-monthly residual - {src}"),
+        subtitle = paste0(
+          "100 * (scaled_monthly_sum - target) / target, ",
+          "where target = Ember_monthly * yearly_correction. ",
+          "Should be ~0; axis clipped at +/-100%."
+        ),
+        x = NULL, y = "Residual (%)"
+      ) +
+      theme_minimal(base_size = 9) +
+      theme(
+        strip.text = element_text(size = 8, face = "bold"),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 6)
+      )
+    n_countries <- n_distinct(df_src$iso2)
+    ggsave(file.path(diagnostics_folder, paste0("post_monthly_residual_", tolower(src), ".png")),
+      p,
+      width = 20, height = 11.25
+    )
+  }
+
+  # ---- 4. Yearly ratio with outliers + forecast ----
+  for (src in sources) {
+    df_src <- ratio_yearly_full %>% filter(source == src)
+    if (nrow(df_src) == 0) next
+
+    fcst_segment <- build_forecast_with_anchor(df_src)
+
+    p <- df_src %>%
+      ggplot(aes(x = date)) +
+      geom_hline(yintercept = 1, linetype = "dashed", color = "gray60", linewidth = 0.3) +
+      geom_line(
+        data = filter(df_src, type %in% c("observed", "interpolated")),
+        aes(y = ratio_used), color = "#2166AC", linewidth = 0.5
+      ) +
+      geom_line(
+        data = fcst_segment,
+        aes(y = ratio_used), color = "#D6604D", linewidth = 0.7
+      ) +
+      geom_point(
+        data = filter(df_src, type == "interpolated"),
+        aes(y = ratio_used), color = "#FDB863", size = 1.2
+      ) +
+      geom_point(
+        data = filter(df_src, type == "forecast"),
+        aes(y = ratio_used), color = "#D6604D", size = 1.2
+      ) +
+      geom_point(
+        data = filter(df_src, is_outlier),
+        aes(y = ratio_obs), color = "#D6604D", shape = 4, size = 2.5, stroke = 1
+      ) +
+      facet_wrap(~iso2, scales = "free_y", ncol = 7) +
+      labs(
+        title = glue("Yearly ratio (EMBER_yearly / sum(EMBER_monthly)) - {src}"),
+        subtitle = "Blue = observed + interpolated. Red = forecast. Orange dots = interpolated. Red x = outlier.",
+        x = NULL, y = "Ratio"
+      ) +
+      theme_minimal(base_size = 9) +
+      theme(strip.text = element_text(size = 8, face = "bold"))
+    n_countries <- n_distinct(df_src$iso2)
+    ggsave(file.path(diagnostics_folder, paste0("yearly_ratio_", tolower(src), ".png")),
+      p,
+      width = 20, height = 11.25
+    )
+  }
+
+  yearly_summary <- ratio_yearly_full %>%
+    group_by(iso2, source) %>%
+    summarise(
+      n_obs = sum(type == "observed"),
+      n_outliers = sum(is_outlier),
+      mean_ratio = mean(ratio_obs, na.rm = TRUE),
+      last_obs_yr = if (any(type == "observed")) year(max(date[type == "observed"])) else NA_integer_,
+      n_forecast = sum(type == "forecast"),
+      .groups = "drop"
+    )
+  write_csv(yearly_summary, file.path(diagnostics_folder, "yearly_ratio_diagnostics.csv"))
+
+  # ---- 5. Post-yearly residual ----
+  scaled_yearly <- scaled_final %>%
+    mutate(year = year(date)) %>%
+    group_by(iso2, source, year) %>%
+    summarise(scaled_year_mwh = sum(value_mwh, na.rm = TRUE), .groups = "drop")
+
+  ember_yearly_prep <- ember_yearly %>%
+    mutate(year = year(date)) %>%
+    select(iso2, source, year, ember_yearly_mwh = value_mwh)
+
+  post_yearly <- scaled_yearly %>%
+    inner_join(ember_yearly_prep, by = c("iso2", "source", "year")) %>%
+    filter(ember_yearly_mwh > 0) %>%
+    mutate(residual_pct = 100 * (scaled_year_mwh - ember_yearly_mwh) / ember_yearly_mwh)
+
+  for (src in sources) {
+    df_src <- post_yearly %>% filter(source == src)
+    if (nrow(df_src) == 0) next
+    p <- df_src %>%
+      ggplot(aes(x = year, y = residual_pct)) +
+      geom_hline(yintercept = 0, linetype = "dashed", color = "gray50", linewidth = 0.3) +
+      geom_line(color = "#4DAF4A", linewidth = 0.5) +
+      geom_point(color = "#4DAF4A", size = 1) +
+      facet_wrap(~iso2, ncol = 7) +
+      coord_cartesian(ylim = c(-100, 100)) +
+      labs(
+        title = glue("Post-yearly residual - {src}"),
+        subtitle = paste0(
+          "100 * (scaled_year_sum - Ember_yearly) / Ember_yearly. ",
+          "Should be near 0; axis clipped at +/-100%."
+        ),
+        x = NULL, y = "Residual (%)"
+      ) +
+      theme_minimal(base_size = 9) +
+      theme(strip.text = element_text(size = 8, face = "bold"))
+    n_countries <- n_distinct(df_src$iso2)
+    ggsave(file.path(diagnostics_folder, paste0("post_yearly_residual_", tolower(src), ".png")),
+      p,
+      width = 20, height = 11.25
+    )
+  }
+
+  # ---- 6. Final combined scale-factor heatmap (latest fully-observed year) ----
+  observed_yearly_dates <- ratio_yearly_full$date[ratio_yearly_full$type == "observed"]
+  latest_year <- if (length(observed_yearly_dates) > 0) max(observed_yearly_dates) else NA
+  if (!is.na(latest_year)) {
+    combined_factor <- ratio_monthly_full %>%
+      filter(
+        type == "observed",
+        lubridate::floor_date(date, "year") == latest_year
+      ) %>%
+      group_by(iso2, source) %>%
+      summarise(monthly_factor = exp(mean(log(ratio_used), na.rm = TRUE)), .groups = "drop") %>%
+      inner_join(
+        ratio_yearly_full %>% filter(date == latest_year) %>%
+          select(iso2, source, yearly_factor = ratio_used),
+        by = c("iso2", "source")
+      ) %>%
+      mutate(combined = monthly_factor * yearly_factor)
+
+    if (nrow(combined_factor) > 0) {
+      p_heat <- combined_factor %>%
+        ggplot(aes(x = source, y = reorder(iso2, -combined), fill = combined)) +
+        geom_tile() +
+        geom_text(aes(label = round(combined, 2)), size = 3) +
+        scale_fill_gradient2(
+          low = "blue", mid = "white", high = "red",
+          midpoint = 1, limits = c(0.5, 2), oob = scales::squish,
+          name = "Combined\nscale factor"
+        ) +
+        labs(
+          title = glue("Combined ENTSOE -> Ember scale factor ({year(latest_year)})"),
+          subtitle = "Geometric-mean monthly factor x yearly factor",
+          x = "Source", y = "Country"
+        ) +
+        theme_minimal() +
+        theme(axis.text.y = element_text(size = 8))
+      ggsave(file.path(diagnostics_folder, "final_scale_heatmap.png"),
+        p_heat,
+        width = 8, height = 12
+      )
+    }
+  }
+
+  # ---- 7. End-to-end comparison per source ----
+  # Restrict to the ENTSOE-covered range so the axis doesn't stretch back to
+  # Ember's pre-2015 history.
+  plot_start <- min(entsoe_monthly$date, na.rm = TRUE)
+  entsoe_for_plot <- entsoe_monthly %>%
+    select(iso2, source, date, entsoe_mwh) %>%
+    filter(date >= plot_start)
+  ember_for_plot <- ember_monthly %>%
+    select(iso2, source, date, ember_mwh = value_mwh) %>%
+    filter(date >= plot_start)
+
+  # Build "Ember monthly scaled to yearly" target = ember_monthly * r_y(year)
+  yearly_correction <- ratio_yearly_full %>%
+    mutate(
+      ratio_y = coalesce(ratio_obs, ratio_used),
+      year = year(date)
+    ) %>%
+    select(iso2, source, year, ratio_y)
+
+  ember_target_for_plot <- ember_for_plot %>%
+    mutate(year = year(date)) %>%
+    left_join(yearly_correction, by = c("iso2", "source", "year")) %>%
+    mutate(
+      ratio_y = coalesce(ratio_y, 1),
+      ember_target_mwh = ember_mwh * ratio_y
+    ) %>%
+    select(iso2, source, date, ember_target_mwh)
+
+  for (src in sources) {
+    df <- entsoe_for_plot %>%
+      filter(source == src) %>%
+      full_join(ember_for_plot %>% filter(source == src), by = c("iso2", "source", "date")) %>%
+      full_join(ember_target_for_plot %>% filter(source == src), by = c("iso2", "source", "date")) %>%
+      full_join(
+        scaled_monthly %>% filter(source == src) %>%
+          rename(scaled_mwh = scaled_month_mwh),
+        by = c("iso2", "source", "date")
+      ) %>%
+      pivot_longer(c(entsoe_mwh, ember_mwh, ember_target_mwh, scaled_mwh),
+        names_to = "series", values_to = "value_mwh"
+      ) %>%
+      mutate(
+        series = recode(series,
+          "entsoe_mwh"       = "ENTSOE (raw)",
+          "ember_mwh"        = "Ember monthly",
+          "ember_target_mwh" = "Ember * yearly correction (target)",
+          "scaled_mwh"       = "Scaled (output)"
+        ),
+        value_twh = value_mwh / 1e6
+      )
+
+    if (nrow(df) == 0) next
+
+    series_levels <- c(
+      "ENTSOE (raw)", "Ember monthly",
+      "Ember * yearly correction (target)", "Scaled (output)"
+    )
+    df$series <- factor(df$series, levels = series_levels)
+
+    p <- ggplot(df, aes(
+      x = date, y = value_twh, color = series,
+      linetype = series, linewidth = series
+    )) +
+      # Draw bottom-to-top so target & output are visible and ENTSOE dashed on top
+      geom_line(data = filter(df, series == "Scaled (output)")) +
+      geom_line(data = filter(df, series == "Ember * yearly correction (target)")) +
+      geom_line(data = filter(df, series == "Ember monthly")) +
+      geom_line(data = filter(df, series == "ENTSOE (raw)")) +
+      facet_wrap(~iso2, scales = "free_y", ncol = 7) +
+      scale_color_manual(values = c(
+        "ENTSOE (raw)"                       = "#444444",
+        "Ember monthly"                      = "#2CA02C",
+        "Ember * yearly correction (target)" = "#2166AC",
+        "Scaled (output)"                    = "#D6604D"
+      )) +
+      scale_linetype_manual(values = c(
+        "ENTSOE (raw)"                       = "dashed",
+        "Ember monthly"                      = "dashed",
+        "Ember * yearly correction (target)" = "solid",
+        "Scaled (output)"                    = "solid"
+      )) +
+      scale_linewidth_manual(values = c(
+        "ENTSOE (raw)"                       = 0.4,
+        "Ember monthly"                      = 0.4,
+        "Ember * yearly correction (target)" = 0.6,
+        "Scaled (output)"                    = 0.5
+      )) +
+      labs(
+        title = glue("Monthly generation: ENTSOE vs Ember vs scaled - {src}"),
+        subtitle = paste(
+          "Gray dashed = ENTSOE raw. Green dashed = Ember monthly.",
+          "Blue solid = Ember * yearly correction (true target). Red = scaled output (should track blue solid)."
+        ),
+        x = NULL, y = "TWh", color = NULL, linetype = NULL, linewidth = NULL
+      ) +
+      theme_minimal(base_size = 9) +
       theme(
         legend.position = "bottom",
         strip.text = element_text(size = 8, face = "bold"),
         axis.text.x = element_text(angle = 45, hjust = 1, size = 6)
       )
-
-    ggsave(file.path(diagnostics_folder, paste0("monthly_", tolower(src), "_all_countries.png")),
-      p_monthly_src,
-      width = 16, height = 16
+    n_countries <- n_distinct(df$iso2)
+    ggsave(file.path(diagnostics_folder, paste0("overall_", tolower(src), ".png")),
+      p,
+      width = 20, height = 11.25
     )
   }
 
-  # ============================================================================
-  # 5. Scaling factors heatmap
-  # ============================================================================
-  # Get most recent year's ratios
-  most_recent_year <- max(yearly_comparison$year[!is.na(yearly_comparison$ratio)])
-
-  heatmap_data <- yearly_comparison %>%
-    filter(year == most_recent_year) %>%
-    mutate(
-      scale_factor = 1 / ratio,
-      category = case_when(
-        is.na(ratio) ~ "no_data",
-        ratio >= 0.95 & ratio <= 1.05 ~ "excellent",
-        ratio >= 0.90 & ratio <= 1.10 ~ "good",
-        ratio >= 0.70 & ratio <= 1.30 ~ "moderate",
-        TRUE ~ "problematic"
-      )
-    )
-
-  p_heatmap <- heatmap_data %>%
-    ggplot(aes(x = source_std, y = reorder(iso2, -scale_factor), fill = scale_factor)) +
-    geom_tile() +
-    geom_text(aes(label = round(scale_factor, 2)), size = 3) +
-    scale_fill_gradient2(
-      low = "blue", mid = "white", high = "red",
-      midpoint = 1, limits = c(0.5, 2),
-      oob = scales::squish,
-      name = "Scale Factor"
-    ) +
-    labs(
-      title = paste0("ENTSOE Scaling Factors to Match EMBER (", most_recent_year, ")"),
-      subtitle = "Values >1 mean ENTSOE under-reports; <1 means over-reports",
-      x = "Source",
-      y = "Country"
-    ) +
-    theme_minimal() +
-    theme(axis.text.y = element_text(size = 8))
-
-  ggsave(file.path(diagnostics_folder, "scaling_factors_heatmap.png"),
-    p_heatmap,
-    width = 8, height = 12
-  )
-
-  # ============================================================================
-  # 6. Tier assignment summary
-  # ============================================================================
-  tier_summary <- heatmap_data %>%
-    left_join(tier_assignment, by = c("iso2", "source_std")) %>%
-    select(iso2, source = source_std, ratio, scale_factor, category, tier) %>%
-    arrange(source, tier, iso2)
-
-  write_csv(tier_summary, file.path(diagnostics_folder, "tier_assignments.csv"))
-
-  # ============================================================================
-  # 7. Distribution of ratios
-  # ============================================================================
-  p_ratio_dist <- monthly_comparison %>%
-    filter(!is.na(ratio)) %>%
-    ggplot(aes(x = ratio, fill = source_std)) +
-    geom_histogram(bins = 50, alpha = 0.7) +
-    facet_wrap(~source_std, scales = "free_y") +
-    geom_vline(xintercept = 1, linetype = "dashed", color = "red") +
-    scale_fill_manual(values = source_colors) +
-    labs(
-      title = "Distribution of ENTSOE/EMBER Monthly Ratios",
-      x = "Ratio (ENTSOE / EMBER)",
-      y = "Count"
-    ) +
-    theme_minimal() +
-    xlim(0.5, 1.5)
-
-  ggsave(file.path(diagnostics_folder, "ratio_distribution_monthly.png"),
-    p_ratio_dist,
-    width = 10, height = 5
-  )
-
-  # ============================================================================
-  # 8. Summary statistics
-  # ============================================================================
-  summary_stats <- yearly_comparison %>%
-    filter(year == most_recent_year) %>%
-    group_by(source_std) %>%
-    summarise(
-      median_ratio = median(ratio, na.rm = TRUE),
-      mean_ratio = mean(ratio, na.rm = TRUE),
-      sd_ratio = sd(ratio, na.rm = TRUE),
-      n_excellent = sum(ratio >= 0.95 & ratio <= 1.05, na.rm = TRUE),
-      n_good = sum(ratio >= 0.90 & ratio <= 1.10 & !(ratio >= 0.95 & ratio <= 1.05), na.rm = TRUE),
-      n_moderate = sum(ratio >= 0.70 & ratio <= 1.30 & !(ratio >= 0.90 & ratio <= 1.10),
-        na.rm =
-          TRUE
-      ),
-      n_problematic = sum(ratio < 0.70 | ratio > 1.30, na.rm = TRUE),
-      .groups = "drop"
-    )
-
-  write_csv(summary_stats, file.path(diagnostics_folder, "summary_statistics.csv"))
-
-  # ============================================================================
-  # 9. Result Timeseries
-  # ============================================================================
-  sources <- unique(entsoe_monthly$source_std)
-  for (src in sources) {
-    plt <- entsoe_monthly %>%
-      left_join(ember_monthly_prep, by = c("iso2", "year", "month", "source_std", "date")) %>%
-      left_join(result_monthly, by = c("iso2", "year", "month", "source_std", "date")) %>%
-      tidyr::pivot_longer(
-        cols = c(entsoe_mwh, ember_mwh, result_mwh),
-        names_to = "data_source",
-        values_to = "value_mwh"
-      ) %>%
-      filter(source_std == src) %>%
-      ggplot(aes(x = date, y = value_mwh / 1e6, color = data_source, linetype = data_source)) +
-      geom_line(linewidth = 0.8) +
-      facet_wrap(~iso2, scales = "free_y") +
-      labs(
-        title = paste0(src, " Generation: ENTSOE vs EMBER vs Corrected by Country (Monthly)"),
-        x = NULL,
-        y = "Generation (TWh)",
-        color = "Data Source",
-        linetype = "Data Source"
-      )
-
-    ggsave(file.path(diagnostics_folder, paste0("overall_", tolower(src), "_all_countries.png")),
-      plt,
-      width = 16, height = 14
-    )
-  }
-
-  log_info(glue::glue("Diagnostics saved to: {diagnostics_folder}"))
+  message("Diagnostics saved to: ", diagnostics_folder)
 }
