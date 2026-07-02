@@ -189,14 +189,6 @@ Key outputs:
   series and full country-component debugging charts.
 
 
-## TO DO
-[ ] scale monthly power generation data to yearly values (the latter is more accurate and can be significantly different)
-
-[ ] <span style="color:red">Align weather‑correction models between Weather‑controlled CO2 and Demand components.</span>
-
-[ ] Bring over benchmarks and some of Lauri's analysis from [2025 study](https://github.com/energyandcleanair/202511_2025_eu_emissions)
-
-
 ## Running Scripts
 
 Use `./rr` to run repository scripts in a containerized R runtime.
