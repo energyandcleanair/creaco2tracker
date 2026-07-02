@@ -169,7 +169,9 @@ short_source_name <- function(source_id, source) {
     source_id == "unfccc" ~ "UNFCCC",
     source_id == "pik" ~ "PIK",
     source_id == "global-carbon-budget-2025" ~ "GCB 2025",
+    source_id == "iea-carbon-emissions" ~ "IEA balance CO2",
     source_id == "carbon-monitor" ~ "Carbon Monitor",
+    source_id == "carbon-monitor-excl-bunkers" ~ "Carbon Monitor excl. bunkers",
     source_id == "primap-energy-and-industry" ~ "PRIMAP E+I",
     source_id == "primap-energy-and-industry-excl-mineral-industry" ~ "PRIMAP excl. mineral",
     TRUE ~ source
@@ -533,38 +535,42 @@ plot_country_diff_ranking <- function(country_totals, plots_dir) {
 plot_monthly_carbonmonitor_eu <- function(monthly_pairs, plots_dir) {
   plot_data <- monthly_pairs %>%
     filter(
-      source_id == "carbon-monitor",
+      source_id %in% c("carbon-monitor", "carbon-monitor-excl-bunkers"),
       crea_variant == "adjusted",
       iso2 == "EU"
     ) %>%
-    select(date, external_value_mt, crea_value_mt) %>%
+    select(source_id, source_short, date, external_value_mt, crea_value_mt) %>%
     pivot_longer(
       c(external_value_mt, crea_value_mt),
       names_to = "series",
       values_to = "value_mt"
     ) %>%
-    mutate(series = recode(
-      series,
-      external_value_mt = "Carbon Monitor",
-      crea_value_mt = paste(target_series_name(), "adjusted")
-    )) %>%
+    mutate(
+      series = if_else(
+        series == "external_value_mt",
+        source_short,
+        paste(target_series_name(), "adjusted")
+      )
+    ) %>%
+    distinct(date, series, value_mt) %>%
     filter(!is.na(value_mt))
 
   path <- file.path(plots_dir, "monthly_carbonmonitor_eu_timeseries.png")
   if (nrow(plot_data) == 0) {
-    save_blank_plot(path, "EU monthly Carbon Monitor comparison")
+    save_blank_plot(path, "EU monthly Carbon Monitor comparisons")
     return(invisible(path))
   }
 
-  plt <- ggplot(plot_data, aes(date, value_mt, color = series)) +
+  plt <- ggplot(plot_data, aes(date, value_mt, color = series, linetype = series)) +
     geom_line(linewidth = 0.65) +
     scale_y_continuous(labels = label_number()) +
     labs(
-      title = "EU monthly Carbon Monitor comparison",
-      subtitle = "Target adjusted total vs Carbon Monitor",
+      title = "EU monthly Carbon Monitor comparisons",
+      subtitle = "Target adjusted total vs Carbon Monitor streams",
       x = NULL,
       y = "Mt CO2 / month",
-      color = NULL
+      color = NULL,
+      linetype = NULL
     ) +
     theme_external_compare()
 
@@ -575,26 +581,29 @@ plot_monthly_carbonmonitor_eu <- function(monthly_pairs, plots_dir) {
 plot_monthly_carbonmonitor_countries <- function(monthly_pairs, plots_dir) {
   plot_data <- monthly_pairs %>%
     filter(
-      source_id == "carbon-monitor",
+      source_id %in% c("carbon-monitor", "carbon-monitor-excl-bunkers"),
       crea_variant == "adjusted",
       iso2 != "EU"
     ) %>%
-    select(iso2, date, external_value_mt, crea_value_mt) %>%
+    select(iso2, source_id, source_short, date, external_value_mt, crea_value_mt) %>%
     pivot_longer(
       c(external_value_mt, crea_value_mt),
       names_to = "series",
       values_to = "value_mt"
     ) %>%
-    mutate(series = recode(
-      series,
-      external_value_mt = "Carbon Monitor",
-      crea_value_mt = paste(target_series_name(), "adjusted")
-    )) %>%
+    mutate(
+      series = if_else(
+        series == "external_value_mt",
+        source_short,
+        paste(target_series_name(), "adjusted")
+      )
+    ) %>%
+    distinct(iso2, date, series, value_mt) %>%
     filter(!is.na(value_mt))
 
   path <- file.path(plots_dir, "monthly_carbonmonitor_country_timeseries.png")
   if (nrow(plot_data) == 0) {
-    save_blank_plot(path, "Country monthly Carbon Monitor comparison")
+    save_blank_plot(path, "Country monthly Carbon Monitor comparisons")
     return(invisible(path))
   }
 
@@ -602,16 +611,17 @@ plot_monthly_carbonmonitor_countries <- function(monthly_pairs, plots_dir) {
   ncol <- min(4, max(1, n_country))
   nrow <- ceiling(n_country / ncol)
 
-  plt <- ggplot(plot_data, aes(date, value_mt, color = series)) +
+  plt <- ggplot(plot_data, aes(date, value_mt, color = series, linetype = series)) +
     geom_line(linewidth = 0.25, alpha = 0.9) +
     facet_wrap(~iso2, scales = "free_y", ncol = ncol) +
     scale_y_continuous(labels = label_number()) +
     labs(
-      title = "Country monthly Carbon Monitor comparison",
-      subtitle = "Target adjusted total vs Carbon Monitor",
+      title = "Country monthly Carbon Monitor comparisons",
+      subtitle = "Target adjusted total vs Carbon Monitor streams",
       x = NULL,
       y = "Mt CO2 / month",
-      color = NULL
+      color = NULL,
+      linetype = NULL
     ) +
     theme_external_compare() +
     theme(
