@@ -1,31 +1,17 @@
 name: Deployment workflow
 
 on:
-  push:
-    branches: [ master ]
-    paths:
-      - "R/**"
-      - "tests/**"
-      - "inst/**"
-      - "scripts/**"
-      - "DESCRIPTION"
-      - "NAMESPACE"
-      - "Dockerfile"
-      - ".dockerignore"
-      - ".github/workflows/deploy.yaml"
   pull_request:
-    branches: [ master ]
-    paths:
-      - "R/**"
-      - "tests/**"
-      - "inst/**"
-      - "scripts/**"
-      - "DESCRIPTION"
-      - "NAMESPACE"
-      - "Dockerfile"
-      - ".dockerignore"
-      - ".github/workflows/deploy.yaml"
+  push:
+    branches:
+      - "master"
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Tag the tested image as latest even when not running from master"
+        type: "boolean"
+        required: false
+        default: false
 
 env:
   IMAGE_NAME: europe-docker.pkg.dev/crea-aq-data/creaengine/creaco2tracker
@@ -128,6 +114,7 @@ jobs:
             -e EMBER_KEY \
             -e EIA_API_KEY \
             -e GITHUB_PAT \
+            -e RUN_CLIENT_INTEGRATION_TESTS \
             "$TEST_TAG" \
             "devtools::test(reporter = 'summary')"
 
@@ -180,7 +167,9 @@ jobs:
     needs:
       - metadata
       - push-sha
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
+      (github.event_name == 'workflow_dispatch' && inputs.force)
     permissions:
       contents: read
       id-token: write
