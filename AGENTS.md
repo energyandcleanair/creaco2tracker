@@ -16,6 +16,7 @@ The provides data to dashboard on a regular basis.
 - `R/core_*` contains shared utilities, logging, masking, cache, and helper functions.
 - `tests/testthat/` contains the test suite, fixtures, and architecture-boundary checks.
 
+
 ## Development Setup
 
 - Open the repo in the provided dev container when possible. The container is configured to use the workspace library in `.r-lib/` and temp files in `.tmp/`.
@@ -30,6 +31,7 @@ The provides data to dashboard on a regular basis.
 - Avoid changing unrelated generated data or cache outputs when editing code.
 - Only change the README (unless otherwise requested) with critical information. Keep the rest of the documentation closer to the code.
 - When documenting code behavior, describe the current behavior directly in present tense. If something has been removed, don't refer to it. Do not frame it as a change from previous behavior unless writing release notes, migration notes, or a changelog.
+- The logger already uses a `glue` formatter. Using `glue` to construct messages for it can cause problems (especially if there's nested braces). Use `paste0` instead. `warning` still needs `glue`.
 
 ## Validation
 
