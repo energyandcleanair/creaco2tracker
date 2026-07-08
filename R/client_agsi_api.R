@@ -1,9 +1,13 @@
 .agsi_retry_delay_seconds <- function(
   retry_number,
   initial_delay_seconds = 1,
-  backoff_multiplier = 2
+  backoff_multiplier = 2,
+  max_delay_seconds = 70
 ) {
-  initial_delay_seconds * backoff_multiplier^(retry_number - 1)
+  min(
+    initial_delay_seconds * backoff_multiplier^(retry_number - 1),
+    max_delay_seconds
+  )
 }
 
 .agsi_json_field_has_value <- function(value) {
@@ -35,9 +39,10 @@
   iso2,
   date_from,
   date_to,
-  max_attempts = 4,
+  max_attempts = 9,
   initial_delay_seconds = 1,
-  backoff_multiplier = 2
+  backoff_multiplier = 2,
+  max_delay_seconds = 70
 ) {
   for (attempt in seq_len(max_attempts)) {
     http_response <- tryCatch(
@@ -57,7 +62,8 @@
       delay_seconds <- .agsi_retry_delay_seconds(
         retry_number = attempt,
         initial_delay_seconds = initial_delay_seconds,
-        backoff_multiplier = backoff_multiplier
+        backoff_multiplier = backoff_multiplier,
+        max_delay_seconds = max_delay_seconds
       )
 
       log_warn(paste0(
@@ -84,7 +90,8 @@
       delay_seconds <- .agsi_retry_delay_seconds(
         retry_number = attempt,
         initial_delay_seconds = initial_delay_seconds,
-        backoff_multiplier = backoff_multiplier
+        backoff_multiplier = backoff_multiplier,
+        max_delay_seconds = max_delay_seconds
       )
 
       log_warn(paste0(
