@@ -5,6 +5,43 @@ test_that("sum_or_na keeps all-missing aggregates missing", {
   expect_equal(sum_or_na(c(1, NA_real_, 2)), 3)
 })
 
+test_that("recombine_fuels keeps all-missing merged fuels missing", {
+  co2 <- tibble::tibble(
+    iso2 = "EU",
+    date = as.Date("2025-05-01"),
+    fuel = c(FUEL_COAL, FUEL_PEAT),
+    sector = SECTOR_ELEC,
+    estimate = "central",
+    unit = "t",
+    value = c(NA_real_, NA_real_)
+  )
+
+  result <- recombine_fuels(co2)
+
+  expect_equal(nrow(result), 1)
+  expect_true(is.na(result$value))
+})
+
+test_that("add_total_co2 keeps all-missing total fuels missing", {
+  co2 <- tidyr::crossing(
+    iso2 = "EU",
+    date = as.Date("2025-05-01"),
+    fuel = c(FUEL_COAL, FUEL_GAS),
+    sector = SECTOR_ELEC,
+    estimate = c("central", "lower", "upper"),
+    unit = "t"
+  ) %>%
+    dplyr::mutate(value = NA_real_)
+
+  result <- add_total_co2(co2)
+
+  total_central <- result %>%
+    dplyr::filter(fuel == FUEL_TOTAL, estimate == "central") %>%
+    dplyr::pull(value)
+
+  expect_true(is.na(total_central))
+})
+
 test_that("collect_oil preserves unavailable Eurostat oil rows", {
   monthly_stub <- tibble::tibble(
     siec = c(SIEC_OIL_PRODUCTS, SIEC_OIL_PRODUCTS),

@@ -40,8 +40,12 @@ project_until_now <- function(
       eurostat_indprod = eurostat_indprod, dts_month = dts_month,
       fill_mode = fill_mode
     ) %>%
+    fill_eu_internal_gaps() %>%
     # Then run projections
     project_until_now_forecast(dts_month = dts_month) %>%
+    # Forecast expansion can introduce internal NA rows that did not exist when
+    # the pre-forecast EU gap fill ran.
+    fill_eu_internal_gaps() %>%
     # And detotalise, since data from total and other sectors may now overlap again
     detotalise_co2()
 }

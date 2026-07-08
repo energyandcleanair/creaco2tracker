@@ -2351,6 +2351,7 @@ plot_get_co2_revision_analysis_validation <- function(
     !!SECTOR_TRANSPORT_INTERNATIONAL_AVIATION := "Transport (International Aviation)",
     !!SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING := "Transport (International Shipping)",
     !!SECTOR_OTHERS := "Others (Industry & Buildings)",
+    !!SECTOR_UNKNOWN := "Unknown",
     !!SECTOR_ALL := "Total",
     .default = stringr::str_to_title(gsub("_", " ", sector))
   )

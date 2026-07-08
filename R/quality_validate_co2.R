@@ -3,8 +3,10 @@ validate_co2 <- function(
   diagnostics_folder = "diagnostics",
   date_from = "1990-01-01"
 ) {
+  validate_co2_no_missing_required_keys(co2)
   validate_co2_no_negative_components(co2)
   validate_co2_no_sector_all_for_non_total_fuels(co2)
+  validate_co2_no_protected_eu_internal_gaps(co2)
 
   if (is_null_or_empty(diagnostics_folder)) {
     log_info("No diagnostics folder provided. Skipping validation.")
@@ -44,14 +46,122 @@ validate_co2 <- function(
   )
 }
 
-validate_co2_no_sector_all_for_non_total_fuels <- function(co2) {
-  required_cols <- c("fuel", "sector")
+validate_co2_no_missing_required_keys <- function(co2) {
+  key_cols <- intersect(names(co2), c("iso2", "date", "fuel", "sector", "estimate", "unit"))
+  if (length(key_cols) == 0) {
+    return(invisible(TRUE))
+  }
+
+  missing_key_rows <- co2 %>%
+    ungroup() %>%
+    mutate(.row_id = row_number()) %>%
+    filter(if_any(all_of(key_cols), is.na))
+
+  if (nrow(missing_key_rows) == 0) {
+    return(invisible(TRUE))
+  }
+
+  examples <- missing_key_rows %>%
+    head(5) %>%
+    mutate(
+      .missing_cols = apply(
+        select(., all_of(key_cols)),
+        1,
+        function(row) paste(key_cols[is.na(row)], collapse = ",")
+      ),
+      example = paste0(
+        "row ", .row_id,
+        " missing ", .missing_cols,
+        " (",
+        "iso2=", coalesce(as.character(iso2), "<NA>"),
+        ", date=", coalesce(as.character(date), "<NA>"),
+        ", fuel=", coalesce(as.character(fuel), "<NA>"),
+        ", sector=", coalesce(as.character(sector), "<NA>"),
+        ")"
+      )
+    ) %>%
+    pull(example) %>%
+    paste(collapse = "; ")
+
+  stop(
+    paste0(
+      "CO2 rows contain missing required key values. ",
+      "Rows: ", nrow(missing_key_rows), ". Examples: ", examples
+    ),
+    call. = FALSE
+  )
+}
+
+validate_co2_no_protected_eu_internal_gaps <- function(co2) {
+  required_cols <- c("iso2", "date", "fuel", "sector", "estimate", "value")
   if (!all(required_cols %in% names(co2))) {
     return(invisible(TRUE))
   }
 
-  bad_rows <- co2 %>%
-    filter(sector == SECTOR_ALL, fuel != FUEL_TOTAL)
+  missing_internal_gaps <- co2 %>%
+    filter(iso2 == "EU", estimate == "central") %>%
+    arrange(fuel, sector, date) %>%
+    group_by(fuel, sector) %>%
+    mutate(
+      .has_before = dplyr::lag(dplyr::cumany(!is.na(value)), default = FALSE),
+      .has_after = rev(dplyr::lag(dplyr::cumany(rev(!is.na(value))), default = FALSE)),
+      .is_internal_gap = is.na(value) & .has_before & .has_after
+    ) %>%
+    ungroup() %>%
+    filter(.is_internal_gap)
+
+  if (nrow(missing_internal_gaps) == 0) {
+    return(invisible(TRUE))
+  }
+
+  examples <- missing_internal_gaps %>%
+    distinct(fuel, sector, date) %>%
+    arrange(date, fuel, sector) %>%
+    head(5) %>%
+    mutate(example = paste0(date, " ", fuel, "/", sector)) %>%
+    pull(example) %>%
+    paste(collapse = "; ")
+
+  stop(
+    paste0(
+      "Protected EU central CO2 rows still contain internal gaps after fallback. ",
+      "Rows: ", nrow(missing_internal_gaps), ". Examples: ", examples
+    ),
+    call. = FALSE
+  )
+}
+
+validate_co2_no_sector_all_for_non_total_fuels <- function(co2) {
+  required_cols <- c("fuel", "sector", "value")
+  if (!all(required_cols %in% names(co2))) {
+    return(invisible(TRUE))
+  }
+
+  group_cols <- intersect(names(co2), c("iso2", "date", "fuel", "estimate", "unit"))
+
+  co2_check <- co2 %>% ungroup()
+  non_total <- co2_check %>% filter(fuel != FUEL_TOTAL)
+  if (nrow(non_total) == 0) {
+    return(invisible(TRUE))
+  }
+
+  group_key <- if (length(group_cols) == 0) {
+    rep("all", nrow(non_total))
+  } else {
+    do.call(paste, c(non_total[group_cols], sep = "\r"))
+  }
+
+  group_indices <- split(seq_len(nrow(non_total)), group_key)
+  bad_group_keys <- names(group_indices)[vapply(group_indices, function(idx) {
+    any(non_total$sector[idx] == SECTOR_ALL & !is.na(non_total$value[idx])) &&
+      any(non_total$sector[idx] != SECTOR_ALL & !is.na(non_total$value[idx]))
+  }, logical(1))]
+
+  bad_rows <- non_total[
+    group_key %in% bad_group_keys &
+      non_total$sector == SECTOR_ALL &
+      !is.na(non_total$value),
+  ]
 
   if (nrow(bad_rows) == 0) {
     return(invisible(TRUE))
@@ -68,7 +178,8 @@ validate_co2_no_sector_all_for_non_total_fuels <- function(co2) {
     paste0(
       "sector='all' found for non-total fuel in ",
       nrow(bad_rows),
-      " rows. This means detotalise_co2 did not run or failed. ",
+      " rows where disaggregated sector data also exists. ",
+      "This means detotalise_co2 did not run or failed for these groups. ",
       "Examples: ", examples
     ),
     call. = FALSE

@@ -2,6 +2,39 @@ library(testthat)
 library(dplyr)
 library(tibble)
 
+# validate_co2_no_missing_required_keys -------------------------------------
+
+test_that("validate_co2_no_missing_required_keys errors on missing sector keys", {
+  co2 <- tibble(
+    iso2 = "CY",
+    date = as.Date("2023-01-01"),
+    fuel = FUEL_OIL,
+    sector = NA_character_,
+    estimate = "central",
+    unit = "t",
+    value = 100
+  )
+
+  expect_error(
+    validate_co2_no_missing_required_keys(co2),
+    regexp = "missing required key values"
+  )
+})
+
+test_that("validate_co2_no_missing_required_keys allows explicit unknown sector", {
+  co2 <- tibble(
+    iso2 = "CY",
+    date = as.Date("2023-01-01"),
+    fuel = FUEL_OIL,
+    sector = SECTOR_UNKNOWN,
+    estimate = "central",
+    unit = "t",
+    value = 100
+  )
+
+  expect_no_error(validate_co2_no_missing_required_keys(co2))
+})
+
 # validate_co2_no_sector_all_for_non_total_fuels ----------------------------
 
 test_that("validate_co2_no_sector_all_for_non_total_fuels passes for correct output", {
@@ -46,6 +79,20 @@ test_that("validate_co2_no_sector_all_for_non_total_fuels errors on gas/all", {
     validate_co2_no_sector_all_for_non_total_fuels(co2),
     regexp = "sector='all' found for non-total fuel"
   )
+})
+
+test_that("validate_co2_no_sector_all_for_non_total_fuels allows aggregate-only non-total rows", {
+  co2 <- tibble(
+    iso2 = "AT",
+    date = as.Date(c("1990-01-01", "1990-02-01")),
+    fuel = FUEL_OIL,
+    sector = SECTOR_ALL,
+    estimate = "central",
+    unit = "t",
+    value = c(100, 110)
+  )
+
+  expect_no_error(validate_co2_no_sector_all_for_non_total_fuels(co2))
 })
 
 test_that("validate_co2_no_sector_all_for_non_total_fuels is silent for total/all", {

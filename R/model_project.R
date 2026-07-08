@@ -670,6 +670,185 @@ project_until_now_forecast <- function(co2, dts_month, last_years = 10, conf_lev
   return(res_long)
 }
 
+fill_eu_internal_gaps <- function(
+  co2,
+  min_countries = 20,
+  max_rel_diff = 0.05,
+  min_points = 12,
+  allow_interpolation = TRUE,
+  protected_fuels = NULL,
+  protected_sectors = NULL
+) {
+  required_cols <- c("iso2", "date", "fuel", "sector", "unit", "value")
+  if (!all(required_cols %in% names(co2))) {
+    return(co2)
+  }
+
+  is_protected_group <- function(data) {
+    protected <- rep(TRUE, nrow(data))
+    if (!is.null(protected_fuels)) {
+      protected <- protected & data$fuel %in% protected_fuels
+    }
+    if (!is.null(protected_sectors)) {
+      protected <- protected & data$sector %in% protected_sectors
+    }
+    protected
+  }
+
+  interpolate_internal <- function(dates, values) {
+    non_missing <- !is.na(values)
+    if (sum(non_missing) < 2) {
+      return(rep(NA_real_, length(values)))
+    }
+
+    stats::approx(
+      x = as.numeric(dates[non_missing]),
+      y = values[non_missing],
+      xout = as.numeric(dates),
+      rule = 1
+    )$y
+  }
+
+  has_estimate <- "estimate" %in% names(co2)
+  co2_work <- co2 %>%
+    mutate(
+      .row_id = row_number(),
+      .is_central = if (has_estimate) estimate == "central" else TRUE
+    )
+
+  protected_eu <- co2_work %>%
+    filter(iso2 == "EU", .is_central) %>%
+    filter(is_protected_group(.)) %>%
+    arrange(fuel, sector, unit, date, .row_id) %>%
+    group_by(fuel, sector, unit) %>%
+    mutate(
+      .has_before = dplyr::lag(dplyr::cumany(!is.na(value)), default = FALSE),
+      .has_after = rev(dplyr::lag(dplyr::cumany(rev(!is.na(value))), default = FALSE)),
+      .is_internal_gap = is.na(value) & .has_before & .has_after
+    ) %>%
+    ungroup()
+
+  internal_gaps <- protected_eu %>%
+    filter(.is_internal_gap) %>%
+    select(.row_id, date, fuel, sector, unit)
+
+  if (nrow(internal_gaps) == 0) {
+    return(co2)
+  }
+
+  country_data <- co2_work %>%
+    filter(
+      .is_central,
+      iso2 %in% get_eu_iso2s(include_eu = FALSE)
+    ) %>%
+    select(iso2, date, fuel, sector, unit, value)
+
+  eu_data <- co2_work %>%
+    filter(iso2 == "EU", .is_central) %>%
+    select(date, fuel, sector, unit, value)
+
+  country_fills <- vector("list", nrow(internal_gaps))
+  for (i in seq_len(nrow(internal_gaps))) {
+    gap <- internal_gaps[i, ]
+
+    gap_country_values <- country_data %>%
+      filter(
+        date == gap$date,
+        fuel == gap$fuel,
+        sector == gap$sector,
+        unit == gap$unit,
+        !is.na(value)
+      )
+
+    current_countries <- unique(gap_country_values$iso2)
+    if (length(current_countries) < min_countries) {
+      next
+    }
+
+    country_sums <- country_data %>%
+      filter(
+        iso2 %in% current_countries,
+        fuel == gap$fuel,
+        sector == gap$sector,
+        unit == gap$unit
+      ) %>%
+      group_by(date) %>%
+      summarise(
+        value_sum = sum_or_na(value),
+        n_countries = sum(!is.na(value)),
+        .groups = "drop"
+      ) %>%
+      filter(n_countries == length(current_countries))
+
+    historical_check_data <- eu_data %>%
+      filter(
+        fuel == gap$fuel,
+        sector == gap$sector,
+        unit == gap$unit,
+        !is.na(value)
+      ) %>%
+      left_join(country_sums, by = "date")
+
+    correlation_check <- check_proxy_correlation(
+      historical_check_data$value,
+      historical_check_data$value_sum,
+      max_rel_diff = max_rel_diff,
+      min_points = min_points
+    )
+
+    if (!isTRUE(correlation_check$is_good_enough)) {
+      next
+    }
+
+    gap_sum <- country_sums %>%
+      filter(date == gap$date) %>%
+      pull(value_sum)
+
+    if (length(gap_sum) == 1 && !is.na(gap_sum)) {
+      country_fills[[i]] <- tibble(
+        .row_id = gap$.row_id,
+        .fill_value = gap_sum
+      )
+    }
+  }
+
+  fills <- bind_rows(country_fills)
+  if (nrow(fills) > 0) {
+    co2_work <- co2_work %>%
+      left_join(fills, by = ".row_id") %>%
+      mutate(value = coalesce(value, .fill_value)) %>%
+      select(-.fill_value)
+  }
+
+  if (allow_interpolation) {
+    interpolation_fills <- co2_work %>%
+      filter(iso2 == "EU", .is_central) %>%
+      filter(is_protected_group(.)) %>%
+      arrange(fuel, sector, unit, date, .row_id) %>%
+      group_by(fuel, sector, unit) %>%
+      mutate(
+        .has_before = dplyr::lag(dplyr::cumany(!is.na(value)), default = FALSE),
+        .has_after = rev(dplyr::lag(dplyr::cumany(rev(!is.na(value))), default = FALSE)),
+        .is_internal_gap = is.na(value) & .has_before & .has_after,
+        .fill_value = interpolate_internal(date, value)
+      ) %>%
+      ungroup() %>%
+      semi_join(internal_gaps, by = ".row_id") %>%
+      filter(.is_internal_gap, !is.na(.fill_value)) %>%
+      select(.row_id, .fill_value)
+
+    if (nrow(interpolation_fills) > 0) {
+      co2_work <- co2_work %>%
+        left_join(interpolation_fills, by = ".row_id") %>%
+        mutate(value = coalesce(value, .fill_value)) %>%
+        select(-.fill_value)
+    }
+  }
+
+  co2_work %>%
+    select(-.row_id, -.is_central)
+}
+
 fill_lower_upper <- function(df) {
   df %>%
     mutate(

@@ -239,7 +239,7 @@ recombine_fuels <- function(co2) {
     ) %>%
     group_by(across(c(-value))) %>%
     summarise(
-      value = sum(value, na.rm = TRUE),
+      value = sum_or_na(value),
       .groups = "drop"
     )
 }
@@ -257,13 +257,10 @@ add_total_co2 <- function(co2) {
     group_by(iso2, date, unit) %>%
     summarise(
       # First calculate central value and std dev
-      central_value = sum(value[estimate == "central"], na.rm = TRUE),
-      std_dev = sqrt(
-        sum(
-          # Convert confidence intervals to standard deviations
-          (value[estimate == "upper"] - value[estimate == "central"])^2
-        )
-      ),
+      central_value = sum_or_na(value[estimate == "central"]),
+      # Convert confidence intervals to standard deviations
+      std_dev = sum_or_na((value[estimate == "upper"] - value[estimate == "central"])^2) %>%
+        sqrt(),
       .groups = "drop"
     ) %>%
     # Create three rows for each group with the different estimates
@@ -413,6 +410,7 @@ sector_label_to_code <- function(sector_label) {
     sector_label == str_to_title(SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING) ~
       SECTOR_TRANSPORT_INTERNATIONAL_SHIPPING,
     sector_label == str_to_title(SECTOR_OTHERS) ~ SECTOR_OTHERS,
+    sector_label == str_to_title(SECTOR_UNKNOWN) ~ SECTOR_UNKNOWN,
     sector_label == str_to_title(SECTOR_ALL) ~ SECTOR_ALL,
     TRUE ~ NA_character_
   )
