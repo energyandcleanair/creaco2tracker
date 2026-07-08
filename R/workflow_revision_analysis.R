@@ -33,6 +33,9 @@ REV_ANALYSIS_DATA_COLLECTION_RETRY_DELAY_SECONDS <- 300
 #' @param output_folder Folder for CSV, RDS, and chart outputs. Defaults to a
 #'   diagnostics folder named for the validation-year range.
 #' @param validation_years Years to validate.
+#' @param include_country_detail_charts Whether to render the per-country and
+#'   per-component detail charts under `charts/details`. Skip this to make the
+#'   analysis faster.
 #'
 #' @return A list with vintage metadata, raw CO2 outputs, the canonical vintage
 #'   revision comparison table, debugging summaries, outlier rows, and summary
@@ -40,12 +43,14 @@ REV_ANALYSIS_DATA_COLLECTION_RETRY_DELAY_SECONDS <- 300
 #' @export
 validate_get_co2_revision_analysis <- function(
   output_folder = NULL,
-  validation_years = REV_ANALYSIS_VALIDATION_YEARS
+  validation_years = REV_ANALYSIS_VALIDATION_YEARS,
+  include_country_detail_charts = FALSE
 ) {
   .with_revision_analysis_stacktrace(
     .validate_get_co2_revision_analysis_impl(
       output_folder = output_folder,
-      validation_years = validation_years
+      validation_years = validation_years,
+      include_country_detail_charts = include_country_detail_charts
     ),
     entrypoint = "validate_get_co2_revision_analysis"
   )
@@ -54,7 +59,8 @@ validate_get_co2_revision_analysis <- function(
 
 .validate_get_co2_revision_analysis_impl <- function(
   output_folder = NULL,
-  validation_years = REV_ANALYSIS_VALIDATION_YEARS
+  validation_years = REV_ANALYSIS_VALIDATION_YEARS,
+  include_country_detail_charts = TRUE
 ) {
   analysis_plan <- .get_co2_revision_analysis_year_plan(
     validation_years = validation_years
@@ -148,7 +154,8 @@ validate_get_co2_revision_analysis <- function(
     vintage_co2 = vintage_co2,
     reference_vintage_co2 = reference_vintage_co2,
     output_folder = output_folder,
-    analysis_plan = analysis_plan
+    analysis_plan = analysis_plan,
+    include_country_detail_charts = include_country_detail_charts
   )
 
   list(

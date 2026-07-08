@@ -3,7 +3,8 @@ plot_get_co2_revision_analysis_validation <- function(
   vintage_co2,
   reference_vintage_co2,
   output_folder,
-  analysis_plan
+  analysis_plan,
+  include_country_detail_charts = TRUE
 ) {
   tables_dir <- file.path(output_folder, "tables")
   summary_dir <- file.path(output_folder, "charts", "summary")
@@ -95,15 +96,17 @@ plot_get_co2_revision_analysis_validation <- function(
     dpi = REV_ANALYSIS_PLOT_DPI,
     top_n = REV_ANALYSIS_TOP_N
   )
-  .plot_get_co2_revision_analysis_detail_charts(
-    comparison_internal = comparison_internal,
-    country_summary = country_summary,
-    country_component_summary = country_component_summary,
-    output_dir = details_dir,
-    width = REV_ANALYSIS_PLOT_WIDTH,
-    height = REV_ANALYSIS_PLOT_HEIGHT,
-    dpi = REV_ANALYSIS_PLOT_DPI
-  )
+  if (isTRUE(include_country_detail_charts)) {
+    .plot_get_co2_revision_analysis_detail_charts(
+      comparison_internal = comparison_internal,
+      country_summary = country_summary,
+      country_component_summary = country_component_summary,
+      output_dir = details_dir,
+      width = REV_ANALYSIS_PLOT_WIDTH,
+      height = REV_ANALYSIS_PLOT_HEIGHT,
+      dpi = REV_ANALYSIS_PLOT_DPI
+    )
+  }
 
   readr::write_csv(
     vintage_revision_comparison,
