@@ -465,13 +465,11 @@ test_that(
     tracker$stage_titles <- character()
 
     local_mocked_bindings(
-      .plot_get_co2_revision_analysis_summary_bar = function(
-        plot_data,
-        x_var,
-        y_var,
-        filepath,
-        ...
-      ) {
+      .plot_get_co2_revision_analysis_summary_bar = function(plot_data,
+                                                             x_var,
+                                                             y_var,
+                                                             filepath,
+                                                             ...) {
         tracker$bar_x_vars <- c(tracker$bar_x_vars, x_var)
         tracker$bar_paths <- c(tracker$bar_paths, basename(filepath))
         invisible(filepath)
@@ -480,22 +478,18 @@ test_that(
         tracker$line_calls <- tracker$line_calls + 1L
         invisible(NULL)
       },
-      .plot_get_co2_revision_analysis_revision_heatmap = function(
-        group_data,
-        filepath,
-        title_prefix,
-        ...
-      ) {
+      .plot_get_co2_revision_analysis_revision_heatmap = function(group_data,
+                                                                  filepath,
+                                                                  title_prefix,
+                                                                  ...) {
         tracker$heatmap_paths <- c(tracker$heatmap_paths, basename(filepath))
         tracker$heatmap_titles <- c(tracker$heatmap_titles, title_prefix)
         invisible(filepath)
       },
-      .plot_get_co2_revision_analysis_revision_by_data_maturity_stage = function(
-        group_data,
-        filepath,
-        title_prefix,
-        ...
-      ) {
+      .plot_get_co2_revision_analysis_revision_by_data_maturity_stage = function(group_data,
+                                                                                 filepath,
+                                                                                 title_prefix,
+                                                                                 ...) {
         tracker$stage_paths <- c(tracker$stage_paths, basename(filepath))
         tracker$stage_titles <- c(tracker$stage_titles, title_prefix)
         invisible(filepath)
@@ -966,9 +960,7 @@ test_that(
           )
         )
       },
-      plot_get_co2_revision_analysis_validation = function(
-        ..., include_country_detail_charts
-      ) {
+      plot_get_co2_revision_analysis_validation = function(..., include_country_detail_charts) {
         include_country_detail_charts_arg <<- include_country_detail_charts
         list(
           vintage_revision_comparison = tibble(example = 1),

@@ -940,11 +940,14 @@ plot_get_co2_revision_analysis_validation <- function(
       mean_revision = numeric(),
       mean_revision_mt = numeric(),
       mean_absolute_revision_year_share = numeric(),
-      sd_absolute_revision_year_share = numeric(),
+      min_absolute_revision_year_share = numeric(),
+      max_absolute_revision_year_share = numeric(),
       mean_absolute_revision = numeric(),
       mean_absolute_revision_mt = numeric(),
-      sd_absolute_revision = numeric(),
-      sd_absolute_revision_mt = numeric(),
+      min_absolute_revision = numeric(),
+      min_absolute_revision_mt = numeric(),
+      max_absolute_revision = numeric(),
+      max_absolute_revision_mt = numeric(),
       n_years = integer(),
       n_observations = integer()
     ))
@@ -959,14 +962,22 @@ plot_get_co2_revision_analysis_validation <- function(
         .data$absolute_revision_year_share,
         na.rm = TRUE
       ),
-      sd_absolute_revision_year_share = stats::sd(
-        .data$absolute_revision_year_share,
-        na.rm = TRUE
+      min_absolute_revision_year_share = .get_co2_revision_analysis_safe_min(
+        .data$absolute_revision_year_share
       ),
-      sd_absolute_revision = stats::sd(.data$mean_absolute_revision, na.rm = TRUE),
+      max_absolute_revision_year_share = .get_co2_revision_analysis_safe_max(
+        .data$absolute_revision_year_share
+      ),
+      min_absolute_revision = .get_co2_revision_analysis_safe_min(
+        .data$mean_absolute_revision
+      ),
+      min_absolute_revision_mt = min_absolute_revision / 1e6,
+      max_absolute_revision = .get_co2_revision_analysis_safe_max(
+        .data$mean_absolute_revision
+      ),
+      max_absolute_revision_mt = max_absolute_revision / 1e6,
       mean_absolute_revision = mean(.data$mean_absolute_revision, na.rm = TRUE),
       mean_absolute_revision_mt = mean_absolute_revision / 1e6,
-      sd_absolute_revision_mt = sd_absolute_revision / 1e6,
       n_years = n_distinct(validation_year),
       n_observations = sum(n_observations, na.rm = TRUE),
       .groups = "drop"
@@ -1244,7 +1255,9 @@ plot_get_co2_revision_analysis_validation <- function(
   height,
   dpi
 ) {
-  title <- "Following-year absolute signed-sum revision by validation year"
+  title <- "Monthly revision to annual EU total by year (absolute)"
+  subtitle <- "Absolute monthly revision (Mt CO2) | Target years 2020-2024"
+  caption_extra <- "*Each year’s reference is its Jan y+2 vintage."
   if (nrow(plot_data) == 0) {
     return(.plot_get_co2_revision_analysis_empty(filepath, title, width, height, dpi))
   }
@@ -1272,12 +1285,9 @@ plot_get_co2_revision_analysis_validation <- function(
     rcrea::theme_crea_new() +
     labs(
       title = title,
-      subtitle = paste(
-        "EU total absolute signed-sum revision, Jan-Dec of the following year",
-        "versus January y+2 reference"
-      ),
-      x = "Following-year vintage month",
-      y = "Absolute signed-sum revision (Mt CO2)",
+      subtitle = subtitle,
+      x = "Month in following year",
+      y = "Absolute revision (Mt CO2)",
       color = "Year",
       caption = "Source: CREA analysis."
     )
@@ -1294,12 +1304,26 @@ plot_get_co2_revision_analysis_validation <- function(
   height,
   dpi
 ) {
-  title <- "Following-year absolute signed-sum revision mean across years"
+  title <- "Average monthly revision to annual EU total over time (absolute)"
+  subtitle <- "Mean absolute monthly revision (Mt CO2) | Target years 2020-2024"
+  caption_extra <- "*Each year’s reference is its Jan y+2 vintage."
   if (nrow(plot_data) == 0) {
     return(.plot_get_co2_revision_analysis_empty(filepath, title, width, height, dpi))
   }
 
+  plot_data <- plot_data %>%
+    mutate(
+      ymin = pmax(0, min_absolute_revision_mt),
+      ymax = max_absolute_revision_mt
+    )
+
   plt <- ggplot(plot_data, aes(following_year_month_offset, mean_absolute_revision_mt)) +
+    geom_ribbon(
+      aes(ymin = ymin, ymax = ymax),
+      fill = rcrea::pal_crea[["Blue"]],
+      alpha = 0.15,
+      na.rm = TRUE
+    ) +
     geom_line(color = rcrea::pal_crea[["Blue"]], linewidth = 0.9, na.rm = TRUE) +
     geom_point(color = rcrea::pal_crea[["Blue"]], size = 2.2, na.rm = TRUE) +
     scale_x_continuous(
@@ -1311,10 +1335,10 @@ plot_get_co2_revision_analysis_validation <- function(
     rcrea::theme_crea_new() +
     labs(
       title = title,
-      subtitle = "Mean of yearly EU total absolute signed-sum revision lines",
-      x = "Following-year vintage month",
-      y = "Absolute signed-sum revision (Mt CO2)",
-      caption = "Source: CREA analysis."
+      subtitle = subtitle,
+      x = "Month of following year",
+      y = "Mean absolute revision (Mt CO2)",
+      caption = paste("Source: CREA analysis.", caption_extra)
     )
 
   rcrea::quicksave(filepath, plot = plt, width = width, height = height, dpi = dpi)
@@ -1329,7 +1353,9 @@ plot_get_co2_revision_analysis_validation <- function(
   height,
   dpi
 ) {
-  title <- "Following-year signed-sum revision share by validation year"
+  title <- "Monthly revision to annual EU total by year (%)"
+  subtitle <- "Absolute monthly revision (% of year-specific reference) | Target years 2020-2024"
+  caption_extra <- "*Each year’s reference is its Jan y+2 vintage."
   if (nrow(plot_data) == 0) {
     return(.plot_get_co2_revision_analysis_empty(filepath, title, width, height, dpi))
   }
@@ -1357,11 +1383,11 @@ plot_get_co2_revision_analysis_validation <- function(
     rcrea::theme_crea_new() +
     labs(
       title = title,
-      subtitle = "Absolute signed-sum revision as a share of the reference-year EU total",
+      subtitle = subtitle,
       x = "Following-year vintage month",
       y = "Revision share of reference year",
       color = "Year",
-      caption = "Source: CREA analysis."
+      caption = paste("Source: CREA analysis.", caption_extra)
     )
 
   rcrea::quicksave(filepath, plot = plt, width = width, height = height, dpi = dpi)
@@ -1376,25 +1402,27 @@ plot_get_co2_revision_analysis_validation <- function(
   height,
   dpi
 ) {
-  title <- "Following-year signed-sum revision share mean across years"
+  title <- "Average monthly revision to annual EU total over time (%)"
+  subtitle <- "Mean absolute monthly revision (% of year-specific reference) | Target years 2020-2024"
+  caption_extra <- "*Each year’s reference is its Jan y+2 vintage."
   if (nrow(plot_data) == 0) {
     return(.plot_get_co2_revision_analysis_empty(filepath, title, width, height, dpi))
   }
 
   plot_data <- plot_data %>%
     mutate(
-      ymin = pmax(0, mean_absolute_revision_year_share - sd_absolute_revision_year_share),
-      ymax = mean_absolute_revision_year_share + sd_absolute_revision_year_share
+      ymin = pmax(0, min_absolute_revision_year_share),
+      ymax = max_absolute_revision_year_share
     )
 
   plt <- ggplot(
     plot_data,
     aes(following_year_month_offset, mean_absolute_revision_year_share)
   ) +
-    geom_errorbar(
+    geom_ribbon(
       aes(ymin = ymin, ymax = ymax),
-      width = 0.35,
-      color = "gray45",
+      fill = rcrea::pal_crea[["Blue"]],
+      alpha = 0.15,
       na.rm = TRUE
     ) +
     geom_line(color = rcrea::pal_crea[["Blue"]], linewidth = 0.9, na.rm = TRUE) +
@@ -1408,13 +1436,10 @@ plot_get_co2_revision_analysis_validation <- function(
     rcrea::theme_crea_new() +
     labs(
       title = title,
-      subtitle = paste(
-        "Mean share of absolute signed-sum year-total revision across validation years;",
-        "error bars show cross-year standard deviation"
-      ),
+      subtitle = subtitle,
       x = "Following-year vintage month",
       y = "Revision share of reference year",
-      caption = "Source: CREA analysis."
+      caption = paste("Source: CREA analysis.", caption_extra)
     )
 
   rcrea::quicksave(filepath, plot = plt, width = width, height = height, dpi = dpi)
@@ -1429,7 +1454,9 @@ plot_get_co2_revision_analysis_validation <- function(
   height,
   dpi
 ) {
-  title <- "Following-year signed-sum revision by validation year"
+  title <- "Monthly revision to annual EU total by year (signed)"
+  subtitle <- "Signed monthly revision (Mt CO2) | Target years 2020-2024"
+  caption_extra <- "*Each year’s reference is its Jan y+2 vintage."
   if (nrow(plot_data) == 0) {
     return(.plot_get_co2_revision_analysis_empty(filepath, title, width, height, dpi))
   }
@@ -1458,11 +1485,11 @@ plot_get_co2_revision_analysis_validation <- function(
     rcrea::theme_crea_new() +
     labs(
       title = title,
-      subtitle = "Signed-sum EU total revision (Jan-Dec year total) versus January y+2 reference",
-      x = "Following-year vintage month",
-      y = "Signed-sum revision (Mt CO2)",
+      subtitle = subtitle,
+      x = "Month of following year",
+      y = "Signed revision (Mt CO2)",
       color = "Year",
-      caption = "Source: CREA analysis."
+      caption = paste("Source: CREA analysis.", caption_extra)
     )
 
   rcrea::quicksave(filepath, plot = plt, width = width, height = height, dpi = dpi)
@@ -2365,6 +2392,16 @@ plot_get_co2_revision_analysis_validation <- function(
   }
 
   max(x)
+}
+
+
+.get_co2_revision_analysis_safe_min <- function(x) {
+  x <- x[is.finite(x)]
+  if (length(x) == 0) {
+    return(NA_real_)
+  }
+
+  min(x)
 }
 
 
