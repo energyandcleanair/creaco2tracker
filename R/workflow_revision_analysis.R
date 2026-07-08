@@ -30,7 +30,7 @@ REV_ANALYSIS_DATA_COLLECTION_RETRY_DELAY_SECONDS <- 300
 #' - Revision: Difference between an earlier vintage and the reference vintage.
 #' - Data availability regime: Source availability state used for a given vintage.
 #'
-#' @param output_folder Folder for CSV, RDS, and chart outputs. Defaults to a
+#' @param output_folder Folder for CSV, parquet, and chart outputs. Defaults to a
 #'   diagnostics folder named for the validation-year range.
 #' @param validation_years Years to validate.
 #' @param include_country_detail_charts Whether to render the per-country and
@@ -141,12 +141,12 @@ validate_get_co2_revision_analysis <- function(
   revision_comparison <- bind_rows(lapply(year_outputs, `[[`, "revision_comparison"))
 
   if (REV_ANALYSIS_SAVE_RUNS) {
-    saveRDS(
+    cache_parquet_write(
       reference_vintage_co2,
-      file.path(output_folder, "reference_vintage_co2.rds")
+      file.path(output_folder, "reference_vintage_co2.parquet")
     )
-    saveRDS(vintage_co2, file.path(output_folder, "vintage_co2.rds"))
-    saveRDS(all_run_co2, file.path(output_folder, "all_run_co2.rds"))
+    cache_parquet_write(vintage_co2, file.path(output_folder, "vintage_co2.parquet"))
+    cache_parquet_write(all_run_co2, file.path(output_folder, "all_run_co2.parquet"))
   }
 
   plot_outputs <- plot_get_co2_revision_analysis_validation(
@@ -295,8 +295,8 @@ validate_get_co2_revision_analysis <- function(
   )
 
   if (REV_ANALYSIS_REUSE_RUN_CACHE && file.exists(cache_path)) {
-    log_info(glue::glue("Reading cached get_co2 revision-analysis run from {cache_path}"))
-    co2 <- readRDS(cache_path)
+    log_info(paste0("Reading cached get_co2 revision-analysis run from ", cache_path))
+    co2 <- cache_parquet_read(cache_path)
     co2$vintage_month <- as.Date(vintage_month)
     return(co2)
   }
@@ -323,7 +323,7 @@ validate_get_co2_revision_analysis <- function(
 
   co2 <- do.call(get_co2, args)
   co2$vintage_month <- as.Date(vintage_month)
-  saveRDS(co2, cache_path)
+  cache_parquet_write(co2, cache_path)
   co2
 }
 
@@ -349,7 +349,7 @@ validate_get_co2_revision_analysis <- function(
     co2_diagnostics = REV_ANALYSIS_CO2_DIAGNOSTICS
   ))
 
-  file.path(cache_dir, paste0(run_name, "_", cache_hash, ".rds"))
+  file.path(cache_dir, paste0(run_name, "_", cache_hash, ".parquet"))
 }
 
 

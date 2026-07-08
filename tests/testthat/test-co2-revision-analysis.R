@@ -898,6 +898,7 @@ test_that(
       output_folder = output_folder,
       validation_years = 2024
     )
+    output_files <- list.files(output_folder, recursive = TRUE)
 
     expect_true(all(c(
       "vintage_run_info",
@@ -917,6 +918,12 @@ test_that(
       "plot_paths",
       "drilldown_manifest"
     ) %in% names(result)))
+    expect_setequal(
+      basename(list.files(output_folder, pattern = "\\.parquet$")),
+      c("reference_vintage_co2.parquet", "vintage_co2.parquet", "all_run_co2.parquet")
+    )
+    expect_true(any(grepl("^run_cache/vintage_.*\\.parquet$", output_files)))
+    expect_false(any(grepl("\\.rds$", output_files)))
   }
 )
 
