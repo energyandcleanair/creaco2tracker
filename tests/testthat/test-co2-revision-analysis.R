@@ -922,6 +922,69 @@ test_that(
 
 
 test_that(
+  "validate_get_co2_revision_analysis can skip country detail charts",
+  {
+    output_folder <- tempfile("revision-analysis-workflow-")
+    dir.create(output_folder, recursive = TRUE)
+    on.exit(unlink(output_folder, recursive = TRUE), add = TRUE)
+
+    include_country_detail_charts_arg <- NULL
+
+    local_mocked_bindings(
+      get_co2 = function(date_to, ...) {
+        month_seq <- seq.Date(
+          from = as.Date("2024-01-01"),
+          to = lubridate::floor_date(as.Date(date_to), "month"),
+          by = "month"
+        )
+
+        bind_rows(
+          tibble(
+            iso2 = "DE",
+            fuel = "coal",
+            sector = SECTOR_ELEC,
+            estimate = "central",
+            unit = "t",
+            date = month_seq,
+            value = seq_along(month_seq) * 10
+          ),
+          tibble(
+            iso2 = "EU",
+            fuel = FUEL_TOTAL,
+            sector = SECTOR_ALL,
+            estimate = "central",
+            unit = "t",
+            date = month_seq,
+            value = seq_along(month_seq) * 15
+          )
+        )
+      },
+      plot_get_co2_revision_analysis_validation = function(
+        ..., include_country_detail_charts
+      ) {
+        include_country_detail_charts_arg <<- include_country_detail_charts
+        list(
+          vintage_revision_comparison = tibble(example = 1),
+          debug_revision_summary = tibble(example = 2),
+          revision_outliers = tibble(example = 3),
+          summary_plot_paths = c(example = "summary.png")
+        )
+      },
+      .package = "creaco2tracker"
+    )
+
+    validate_get_co2_revision_analysis(
+      output_folder = output_folder,
+      validation_years = 2024,
+      include_country_detail_charts = FALSE
+    )
+
+    expect_false(include_country_detail_charts_arg)
+  }
+)
+
+
+test_that(
   "validate_get_co2_revision_analysis prints the exception and stacktrace before rethrowing",
   {
     local_mocked_bindings(

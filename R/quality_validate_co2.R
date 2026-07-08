@@ -4,6 +4,7 @@ validate_co2 <- function(
   date_from = "1990-01-01"
 ) {
   validate_co2_no_negative_components(co2)
+  validate_co2_no_sector_all_for_non_total_fuels(co2)
 
   if (is_null_or_empty(diagnostics_folder)) {
     log_info("No diagnostics folder provided. Skipping validation.")
@@ -40,6 +41,37 @@ validate_co2 <- function(
     co2,
     folder = file.path(diagnostics_folder, "co2_transport"),
     year_to = latest_year
+  )
+}
+
+validate_co2_no_sector_all_for_non_total_fuels <- function(co2) {
+  required_cols <- c("fuel", "sector")
+  if (!all(required_cols %in% names(co2))) {
+    return(invisible(TRUE))
+  }
+
+  bad_rows <- co2 %>%
+    filter(sector == SECTOR_ALL, fuel != FUEL_TOTAL)
+
+  if (nrow(bad_rows) == 0) {
+    return(invisible(TRUE))
+  }
+
+  examples <- bad_rows %>%
+    distinct(iso2, fuel, sector, date) %>%
+    head(5) %>%
+    mutate(example = paste0(iso2, " ", date, " ", fuel, "/", sector)) %>%
+    pull(example) %>%
+    paste(collapse = "; ")
+
+  stop(
+    paste0(
+      "sector='all' found for non-total fuel in ",
+      nrow(bad_rows),
+      " rows. This means detotalise_co2 did not run or failed. ",
+      "Examples: ", examples
+    ),
+    call. = FALSE
   )
 }
 

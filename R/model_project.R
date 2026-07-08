@@ -555,8 +555,9 @@ project_until_now_coal_others <- function(
 
 
 project_until_now_forecast <- function(co2, dts_month, last_years = 10, conf_level = 0.90) {
-  fallback_forecast_values <- function(df) {
-    df %>%
+  # Returns a one-row-per-date wide frame (value_central/lower/upper, no estimate column).
+  fallback_forecast_values <- function(df_central) {
+    df_central %>%
       rename(value_central = value) %>%
       mutate(
         value_lower = value_central,
@@ -564,7 +565,16 @@ project_until_now_forecast <- function(co2, dts_month, last_years = 10, conf_lev
       )
   }
 
-  res <- co2 %>%
+  # The forecasting logic only needs the central estimate to build a time series.
+  # Lower/upper are derived from forecast confidence intervals. Strip out non-central
+  # estimate rows before the group pipeline so expand_dates works on one row per date.
+  co2_central <- if ("estimate" %in% names(co2)) {
+    co2 %>% filter(estimate == "central") %>% select(-estimate)
+  } else {
+    co2
+  }
+
+  res <- co2_central %>%
     group_by(iso2, fuel, sector, unit) %>%
     expand_dates("date", dts_month) %>%
     arrange(date) %>%
@@ -575,6 +585,7 @@ project_until_now_forecast <- function(co2, dts_month, last_years = 10, conf_lev
           "sector={group_keys$sector}"
         )
       )
+
       # Get the latest date with actual data
       latest_data <- max(df$date[!is.na(df$value)])
 
@@ -628,7 +639,9 @@ project_until_now_forecast <- function(co2, dts_month, last_years = 10, conf_lev
         return(fallback_forecast_values(df))
       }
 
-      # Update values in the original dataframe
+      # Update values in the central-estimate dataframe and derive lower/upper from
+      # forecast confidence intervals. Historical dates keep their original value;
+      # projected dates receive the forecast mean/bounds.
       df %>%
         left_join(forecasted, by = "date") %>%
         mutate(
