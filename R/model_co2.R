@@ -163,6 +163,10 @@ get_co2 <- function(
   # Re-combine fuels e.g. peat goes to coal
   co2 <- recombine_fuels(co2)
 
+  # Ensure aggregate sector rows cannot coexist with disaggregated sector rows
+  # before final fuel totals are calculated.
+  co2 <- detotalise_co2(co2)
+
   # Add total
   co2 <- add_total_co2(co2)
 
