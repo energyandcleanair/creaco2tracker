@@ -165,16 +165,16 @@ Rule fields:
 - Matching rows are masked by removing them from the source table, simulating unavailable data as absent rows.
 
 For the default publication-lag revision-analysis setup, use `data_masking_as_of()` or the
-2025 CO2 revision-analysis workflow:
+historical CO2 revision-analysis workflow:
 
 ```r
 results <- validate_get_co2_revision_analysis()
 ```
 
-This runs `get_co2()` at each 2025 month-end for all EU countries plus the EU aggregate,
-using the default as-of masks, and compares each vintage month with the reference vintage
-month `2026-03-01`. Outputs are written by default to
-`diagnostics/get_co2_revision_analysis_2025`.
+This runs `get_co2()` at each unique month-end needed to validate 2020 through 2024 for
+all EU countries plus the EU aggregate, using the default as-of masks. Each validation
+year is compared with the January vintage two years later. Outputs are written by default
+to `diagnostics/get_co2_revision_analysis_2020_2024`.
 
 Key outputs:
 - `tables/vintage_revision_comparison.csv`: One row per comparable estimate with lag buckets,
@@ -182,11 +182,13 @@ Key outputs:
 - `tables/debug_revision_summary.csv`: Lag-bucket and maturity-stage summaries for totals,
   country totals, and country-components.
 - `tables/revision_outliers.csv`: Largest absolute revisions, sorted by tonnes CO2.
-- `tables/country_component_chart_inventory.csv`: Every generated country-component chart path.
+- `tables/following_year_absolute_revision_by_year.csv` and
+  `tables/following_year_absolute_revision_mean.csv`: Inputs for the historical
+  following-year revision charts.
 - `charts/summary/`: Aggregate debugging charts by lag bucket, data maturity, and gross
-  revision contribution.
-- `charts/aggregate_timeseries/` and `charts/country_component/`: Milestone-vintage time
-  series and full country-component debugging charts.
+  revision contribution, plus following-year absolute, year-share, and raw-revision charts.
+- `charts/details/`: Country and country-component revision heatmaps and maturity-stage
+  debugging charts.
 
 
 ## Running Scripts

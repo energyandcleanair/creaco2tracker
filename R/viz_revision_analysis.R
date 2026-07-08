@@ -3,18 +3,7 @@ plot_get_co2_revision_analysis_validation <- function(
   vintage_co2,
   reference_vintage_co2,
   output_folder,
-  reference_vintage_month,
-  target_months,
-  vintage_dates,
-  vintage_months,
-  data_masking_lags,
-  data_masking_publication_months,
-  near_zero_reference_threshold_tonnes_co2 = 100000,
-  top_n = 15,
-  trend_min_n = 6,
-  width = 10,
-  height = 6,
-  dpi = 300
+  analysis_plan
 ) {
   tables_dir <- file.path(output_folder, "tables")
   summary_dir <- file.path(output_folder, "charts", "summary")
@@ -24,17 +13,16 @@ plot_get_co2_revision_analysis_validation <- function(
   create_dir(summary_dir)
   create_dir(details_dir)
 
-  source_availability <- .get_co2_revision_analysis_source_availability(
-    vintage_dates = vintage_dates,
-    vintage_months = vintage_months,
-    target_months = target_months,
-    lags = data_masking_lags,
-    publication_months = data_masking_publication_months
+  source_availability <- .get_co2_revision_analysis_source_availability_for_plan(
+    analysis_plan = analysis_plan,
+    lags = default_source_lags(),
+    publication_months = default_source_publication_months()
   )
   comparison_internal <- .build_get_co2_revision_analysis_vintage_revision_comparison(
     revision_comparison = revision_comparison,
     source_availability = source_availability,
-    near_zero_reference_threshold_tonnes_co2 = near_zero_reference_threshold_tonnes_co2
+    near_zero_reference_threshold_tonnes_co2 =
+      REV_ANALYSIS_NEAR_ZERO_REFERENCE_THRESHOLD_TONNES_CO2
   )
   comparison_candidates <- .get_co2_revision_analysis_component_candidates(
     vintage_co2 = vintage_co2,
@@ -44,7 +32,8 @@ plot_get_co2_revision_analysis_validation <- function(
   .validate_get_co2_revision_analysis_comparison(
     comparison_internal = comparison_internal,
     comparison_candidates = comparison_candidates,
-    near_zero_reference_threshold_tonnes_co2 = near_zero_reference_threshold_tonnes_co2
+    near_zero_reference_threshold_tonnes_co2 =
+      REV_ANALYSIS_NEAR_ZERO_REFERENCE_THRESHOLD_TONNES_CO2
   )
 
   vintage_revision_comparison <- .get_co2_revision_analysis_public_comparison(
@@ -52,32 +41,43 @@ plot_get_co2_revision_analysis_validation <- function(
   )
   debug_revision_summary <- .summarise_get_co2_revision_analysis_debug_summary(
     comparison_internal = comparison_internal,
-    near_zero_reference_threshold_tonnes_co2 = near_zero_reference_threshold_tonnes_co2
+    near_zero_reference_threshold_tonnes_co2 =
+      REV_ANALYSIS_NEAR_ZERO_REFERENCE_THRESHOLD_TONNES_CO2
   )
   revision_outliers <- .build_get_co2_revision_analysis_outlier_table(comparison_internal)
   country_summary <- .summarise_get_co2_revision_analysis_country_overall(
     comparison_internal = comparison_internal,
-    near_zero_reference_threshold_tonnes_co2 = near_zero_reference_threshold_tonnes_co2
+    near_zero_reference_threshold_tonnes_co2 =
+      REV_ANALYSIS_NEAR_ZERO_REFERENCE_THRESHOLD_TONNES_CO2
   )
   country_component_summary <- .summarise_get_co2_revision_analysis_country_component_overall(
     comparison_internal = comparison_internal,
-    near_zero_reference_threshold_tonnes_co2 = near_zero_reference_threshold_tonnes_co2
+    near_zero_reference_threshold_tonnes_co2 =
+      REV_ANALYSIS_NEAR_ZERO_REFERENCE_THRESHOLD_TONNES_CO2
   )
   lag_summary <- .summarise_get_co2_revision_analysis_plot_summary(
     comparison_internal = comparison_internal,
     grouping_vars = c("aggregation_level", "lag_bucket"),
-    near_zero_reference_threshold_tonnes_co2 = near_zero_reference_threshold_tonnes_co2
+    near_zero_reference_threshold_tonnes_co2 =
+      REV_ANALYSIS_NEAR_ZERO_REFERENCE_THRESHOLD_TONNES_CO2
   )
   stage_summary <- .summarise_get_co2_revision_analysis_plot_summary(
     comparison_internal = comparison_internal,
     grouping_vars = c("aggregation_level", "data_maturity_stage"),
-    near_zero_reference_threshold_tonnes_co2 = near_zero_reference_threshold_tonnes_co2
+    near_zero_reference_threshold_tonnes_co2 =
+      REV_ANALYSIS_NEAR_ZERO_REFERENCE_THRESHOLD_TONNES_CO2
   )
   trend_direction_agreement <- .summarise_get_co2_revision_analysis_trend_direction_agreement(
     comparison_internal = comparison_internal,
     country_component_summary = country_component_summary,
-    top_n = top_n,
-    trend_min_n = trend_min_n
+    top_n = REV_ANALYSIS_TOP_N,
+    trend_min_n = REV_ANALYSIS_TREND_MIN_N
+  )
+  following_year_revision_summary <- .summarise_get_co2_revision_analysis_following_year_revision(
+    comparison_internal
+  )
+  following_year_revision_mean <- .summarise_get_co2_revision_analysis_following_year_mean(
+    following_year_revision_summary
   )
 
   summary_plot_paths <- .plot_get_co2_revision_analysis_summary_charts(
@@ -86,21 +86,23 @@ plot_get_co2_revision_analysis_validation <- function(
     country_summary = country_summary,
     country_component_summary = country_component_summary,
     trend_direction_agreement = trend_direction_agreement,
+    following_year_revision_summary = following_year_revision_summary,
+    following_year_revision_mean = following_year_revision_mean,
     comparison_internal = comparison_internal,
     output_dir = summary_dir,
-    width = width,
-    height = height,
-    dpi = dpi,
-    top_n = top_n
+    width = REV_ANALYSIS_PLOT_WIDTH,
+    height = REV_ANALYSIS_PLOT_HEIGHT,
+    dpi = REV_ANALYSIS_PLOT_DPI,
+    top_n = REV_ANALYSIS_TOP_N
   )
   .plot_get_co2_revision_analysis_detail_charts(
     comparison_internal = comparison_internal,
     country_summary = country_summary,
     country_component_summary = country_component_summary,
     output_dir = details_dir,
-    width = width,
-    height = height,
-    dpi = dpi
+    width = REV_ANALYSIS_PLOT_WIDTH,
+    height = REV_ANALYSIS_PLOT_HEIGHT,
+    dpi = REV_ANALYSIS_PLOT_DPI
   )
 
   readr::write_csv(
@@ -114,6 +116,14 @@ plot_get_co2_revision_analysis_validation <- function(
   readr::write_csv(
     revision_outliers,
     file.path(tables_dir, "revision_outliers.csv")
+  )
+  readr::write_csv(
+    following_year_revision_summary,
+    file.path(tables_dir, "following_year_absolute_revision_by_year.csv")
+  )
+  readr::write_csv(
+    following_year_revision_mean,
+    file.path(tables_dir, "following_year_absolute_revision_mean.csv")
   )
 
   list(
@@ -237,11 +247,39 @@ plot_get_co2_revision_analysis_validation <- function(
 }
 
 
+.get_co2_revision_analysis_source_availability_for_plan <- function(
+  analysis_plan,
+  lags,
+  publication_months
+) {
+  bind_rows(lapply(seq_len(nrow(analysis_plan)), function(i) {
+    .get_co2_revision_analysis_source_availability(
+      vintage_dates = analysis_plan$vintage_dates[[i]],
+      vintage_months = analysis_plan$vintage_months[[i]],
+      target_months = analysis_plan$target_months[[i]],
+      lags = lags,
+      publication_months = publication_months
+    ) %>%
+      mutate(validation_year = analysis_plan$validation_year[[i]]) %>%
+      select(validation_year, everything())
+  }))
+}
+
+
 .build_get_co2_revision_analysis_vintage_revision_comparison <- function(
   revision_comparison,
   source_availability,
   near_zero_reference_threshold_tonnes_co2
 ) {
+  if (!"validation_year" %in% names(revision_comparison)) {
+    revision_comparison <- revision_comparison %>%
+      mutate(validation_year = NA_integer_)
+  }
+  join_vars <- intersect(
+    c("validation_year", "vintage_month", "target_month"),
+    names(source_availability)
+  )
+
   component_flags <- revision_comparison %>%
     filter(
       estimate == "central",
@@ -269,6 +307,7 @@ plot_get_co2_revision_analysis_validation <- function(
   revision_comparison %>%
     filter(estimate == "central") %>%
     transmute(
+      validation_year = as.integer(validation_year),
       reference_vintage = as.Date(reference_vintage_month),
       vintage_month = as.Date(vintage_month),
       target_month = as.Date(target_month),
@@ -306,7 +345,7 @@ plot_get_co2_revision_analysis_validation <- function(
       )
     ) %>%
     filter(!is.na(aggregation_level)) %>%
-    left_join(source_availability, by = c("vintage_month", "target_month")) %>%
+    left_join(source_availability, by = join_vars) %>%
     left_join(component_flags, by = c("country", "component")) %>%
     mutate(
       is_always_zero_country_component = replace_na(
@@ -363,7 +402,7 @@ plot_get_co2_revision_analysis_validation <- function(
 
   total_reconciliation <- comparison_internal %>%
     filter(aggregation_level %in% c("total", "country")) %>%
-    group_by(vintage_month, target_month) %>%
+    group_by(validation_year, vintage_month, target_month) %>%
     summarise(
       total_estimate = sum(estimate[aggregation_level == "total"], na.rm = TRUE),
       country_estimate = sum(estimate[aggregation_level == "country"], na.rm = TRUE),
@@ -380,7 +419,7 @@ plot_get_co2_revision_analysis_validation <- function(
 
   country_reconciliation <- comparison_internal %>%
     filter(aggregation_level %in% c("country", "component")) %>%
-    group_by(vintage_month, target_month, country) %>%
+    group_by(validation_year, vintage_month, target_month, country) %>%
     summarise(
       country_estimate = sum(estimate[aggregation_level == "country"], na.rm = TRUE),
       component_estimate = sum(estimate[aggregation_level == "component"], na.rm = TRUE),
@@ -417,6 +456,7 @@ plot_get_co2_revision_analysis_validation <- function(
 .get_co2_revision_analysis_public_comparison <- function(comparison_internal) {
   comparison_internal %>%
     select(
+      validation_year,
       reference_vintage,
       vintage_month,
       target_month,
@@ -451,11 +491,17 @@ plot_get_co2_revision_analysis_validation <- function(
   bind_rows(
     .summarise_get_co2_revision_analysis_debug_level(
       comparison_internal = comparison_internal %>% filter(aggregation_level == "total"),
-      grouping_vars = c("aggregation_level", "lag_bucket", "data_maturity_stage"),
+      grouping_vars = c(
+        "validation_year",
+        "aggregation_level",
+        "lag_bucket",
+        "data_maturity_stage"
+      ),
       near_zero_reference_threshold_tonnes_co2 = near_zero_reference_threshold_tonnes_co2
     ) %>%
       mutate(country = "EU", component = NA_character_) %>%
       select(
+        validation_year,
         aggregation_level,
         country,
         component,
@@ -475,11 +521,18 @@ plot_get_co2_revision_analysis_validation <- function(
       ),
     .summarise_get_co2_revision_analysis_debug_level(
       comparison_internal = comparison_internal %>% filter(aggregation_level == "country"),
-      grouping_vars = c("aggregation_level", "country", "lag_bucket", "data_maturity_stage"),
+      grouping_vars = c(
+        "validation_year",
+        "aggregation_level",
+        "country",
+        "lag_bucket",
+        "data_maturity_stage"
+      ),
       near_zero_reference_threshold_tonnes_co2 = near_zero_reference_threshold_tonnes_co2
     ) %>%
       mutate(component = NA_character_) %>%
       select(
+        validation_year,
         aggregation_level,
         country,
         component,
@@ -504,6 +557,7 @@ plot_get_co2_revision_analysis_validation <- function(
           !is_always_zero_country_component
         ),
       grouping_vars = c(
+        "validation_year",
         "aggregation_level",
         "country",
         "component",
@@ -514,6 +568,7 @@ plot_get_co2_revision_analysis_validation <- function(
       near_zero_reference_threshold_tonnes_co2 = near_zero_reference_threshold_tonnes_co2
     ) %>%
       select(
+        validation_year,
         aggregation_level,
         country,
         component,
@@ -532,7 +587,7 @@ plot_get_co2_revision_analysis_validation <- function(
         rmse
       )
   ) %>%
-    arrange(aggregation_level, country, component, lag_bucket, data_maturity_stage)
+    arrange(validation_year, aggregation_level, country, component, lag_bucket, data_maturity_stage)
 }
 
 
@@ -544,6 +599,7 @@ plot_get_co2_revision_analysis_validation <- function(
   if (nrow(comparison_internal) == 0) {
     return(tibble(
       aggregation_level = character(),
+      validation_year = integer(),
       country = character(),
       component = character(),
       component_id = character(),
@@ -572,7 +628,7 @@ plot_get_co2_revision_analysis_validation <- function(
     ungroup()
 
   share_grouping_vars <- intersect(
-    c("aggregation_level", "lag_bucket", "data_maturity_stage"),
+    c("validation_year", "aggregation_level", "lag_bucket", "data_maturity_stage"),
     names(summary)
   )
   summary %>%
@@ -701,6 +757,7 @@ plot_get_co2_revision_analysis_validation <- function(
   comparison_internal %>%
     arrange(desc(absolute_revision), desc(abs(reference_estimate)), vintage_month, target_month) %>%
     select(
+      validation_year,
       vintage_month,
       target_month,
       country,
@@ -768,6 +825,7 @@ plot_get_co2_revision_analysis_validation <- function(
 ) {
   prev_data <- selected_data %>%
     transmute(
+      validation_year,
       aggregation_level,
       country,
       component,
@@ -782,6 +840,7 @@ plot_get_co2_revision_analysis_validation <- function(
     left_join(
       prev_data,
       by = c(
+        "validation_year",
         "aggregation_level",
         "country",
         "component",
@@ -805,12 +864,122 @@ plot_get_co2_revision_analysis_validation <- function(
 }
 
 
+.summarise_get_co2_revision_analysis_following_year_revision <- function(
+  comparison_internal
+) {
+  reference_year_totals <- comparison_internal %>%
+    filter(
+      aggregation_level == "total",
+      !is.na(validation_year),
+      lubridate::year(target_month) == validation_year
+    ) %>%
+    group_by(validation_year, reference_vintage, target_month) %>%
+    summarise(
+      reference_estimate = dplyr::first(reference_estimate),
+      .groups = "drop"
+    ) %>%
+    group_by(validation_year, reference_vintage) %>%
+    summarise(
+      reference_year_total = sum(reference_estimate, na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  comparison_internal %>%
+    filter(
+      aggregation_level == "total",
+      !is.na(validation_year),
+      lubridate::year(target_month) == validation_year,
+      lubridate::year(vintage_month) == validation_year + 1L
+    ) %>%
+    mutate(
+      following_year_month_offset = lubridate::month(vintage_month),
+      target_start_month = as.Date(sprintf("%d-01-01", validation_year)),
+      target_end_month = as.Date(sprintf("%d-12-01", validation_year)),
+      vintage_period = "following_year"
+    ) %>%
+    group_by(
+      validation_year,
+      reference_vintage,
+      target_start_month,
+      target_end_month,
+      vintage_period,
+      vintage_month,
+      following_year_month_offset
+    ) %>%
+    summarise(
+      mean_absolute_revision = abs(sum(revision, na.rm = TRUE)),
+      mean_absolute_revision_mt = mean_absolute_revision / 1e6,
+      revision = sum(revision, na.rm = TRUE),
+      absolute_revision = abs(revision),
+      revision_mt = revision / 1e6,
+      absolute_revision_mt = absolute_revision / 1e6,
+      n_observations = n(),
+      .groups = "drop"
+    ) %>%
+    left_join(reference_year_totals, by = c("validation_year", "reference_vintage")) %>%
+    mutate(
+      absolute_revision_year_share = if_else(
+        reference_year_total == 0,
+        NA_real_,
+        absolute_revision / reference_year_total
+      )
+    ) %>%
+    arrange(validation_year, vintage_month)
+}
+
+
+.summarise_get_co2_revision_analysis_following_year_mean <- function(
+  following_year_revision_summary
+) {
+  if (nrow(following_year_revision_summary) == 0) {
+    return(tibble(
+      following_year_month_offset = integer(),
+      mean_revision = numeric(),
+      mean_revision_mt = numeric(),
+      mean_absolute_revision_year_share = numeric(),
+      sd_absolute_revision_year_share = numeric(),
+      mean_absolute_revision = numeric(),
+      mean_absolute_revision_mt = numeric(),
+      sd_absolute_revision = numeric(),
+      sd_absolute_revision_mt = numeric(),
+      n_years = integer(),
+      n_observations = integer()
+    ))
+  }
+
+  following_year_revision_summary %>%
+    group_by(following_year_month_offset) %>%
+    summarise(
+      mean_revision = mean(.data$revision, na.rm = TRUE),
+      mean_revision_mt = mean_revision / 1e6,
+      mean_absolute_revision_year_share = mean(
+        .data$absolute_revision_year_share,
+        na.rm = TRUE
+      ),
+      sd_absolute_revision_year_share = stats::sd(
+        .data$absolute_revision_year_share,
+        na.rm = TRUE
+      ),
+      sd_absolute_revision = stats::sd(.data$mean_absolute_revision, na.rm = TRUE),
+      mean_absolute_revision = mean(.data$mean_absolute_revision, na.rm = TRUE),
+      mean_absolute_revision_mt = mean_absolute_revision / 1e6,
+      sd_absolute_revision_mt = sd_absolute_revision / 1e6,
+      n_years = n_distinct(validation_year),
+      n_observations = sum(n_observations, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    arrange(following_year_month_offset)
+}
+
+
 .plot_get_co2_revision_analysis_summary_charts <- function(
   lag_summary,
   stage_summary,
   country_summary,
   country_component_summary,
   trend_direction_agreement,
+  following_year_revision_summary,
+  following_year_revision_mean,
   comparison_internal,
   output_dir,
   width,
@@ -852,6 +1021,26 @@ plot_get_co2_revision_analysis_validation <- function(
     component_estimate_vs_reference_by_data_maturity = file.path(
       output_dir,
       "component_estimate_vs_reference_by_data_maturity.png"
+    ),
+    following_year_absolute_revision_by_year = file.path(
+      output_dir,
+      "following_year_absolute_revision_by_year.png"
+    ),
+    following_year_absolute_revision_mean = file.path(
+      output_dir,
+      "following_year_absolute_revision_mean.png"
+    ),
+    following_year_revision_pct_by_year = file.path(
+      output_dir,
+      "following_year_revision_pct_by_year.png"
+    ),
+    following_year_revision_pct_all_years = file.path(
+      output_dir,
+      "following_year_revision_pct_all_years.png"
+    ),
+    following_year_raw_revision_by_year = file.path(
+      output_dir,
+      "following_year_raw_revision_by_year.png"
     )
   )
 
@@ -974,6 +1163,41 @@ plot_get_co2_revision_analysis_validation <- function(
     dpi = dpi,
     free_scales = TRUE
   )
+  .plot_get_co2_revision_analysis_following_year_by_year(
+    plot_data = following_year_revision_summary,
+    filepath = plot_paths[["following_year_absolute_revision_by_year"]],
+    width = width,
+    height = height,
+    dpi = dpi
+  )
+  .plot_get_co2_revision_analysis_following_year_mean(
+    plot_data = following_year_revision_mean,
+    filepath = plot_paths[["following_year_absolute_revision_mean"]],
+    width = width,
+    height = height,
+    dpi = dpi
+  )
+  .plot_get_co2_revision_analysis_following_year_pct_by_year(
+    plot_data = following_year_revision_summary,
+    filepath = plot_paths[["following_year_revision_pct_by_year"]],
+    width = width,
+    height = height,
+    dpi = dpi
+  )
+  .plot_get_co2_revision_analysis_following_year_pct_mean(
+    plot_data = following_year_revision_mean,
+    filepath = plot_paths[["following_year_revision_pct_all_years"]],
+    width = width,
+    height = height,
+    dpi = dpi
+  )
+  .plot_get_co2_revision_analysis_following_year_raw_by_year(
+    plot_data = following_year_revision_summary,
+    filepath = plot_paths[["following_year_raw_revision_by_year"]],
+    width = width,
+    height = height,
+    dpi = dpi
+  )
 
   if (nrow(trend_direction_agreement) > 0) {
     trend_path <- file.path(output_dir, "trend_direction_agreement.png")
@@ -988,6 +1212,258 @@ plot_get_co2_revision_analysis_validation <- function(
   }
 
   plot_paths
+}
+
+
+.plot_get_co2_revision_analysis_empty <- function(
+  filepath,
+  title,
+  width,
+  height,
+  dpi
+) {
+  plt <- ggplot() +
+    annotate("text", x = 0, y = 0, label = "No comparable observations available") +
+    theme_void() +
+    labs(
+      title = title,
+      caption = "Source: CREA analysis."
+    )
+  rcrea::quicksave(filepath, plot = plt, width = width, height = height, dpi = dpi)
+  plt
+}
+
+
+.plot_get_co2_revision_analysis_following_year_by_year <- function(
+  plot_data,
+  filepath,
+  width,
+  height,
+  dpi
+) {
+  title <- "Following-year absolute signed-sum revision by validation year"
+  if (nrow(plot_data) == 0) {
+    return(.plot_get_co2_revision_analysis_empty(filepath, title, width, height, dpi))
+  }
+
+  plot_data <- plot_data %>%
+    mutate(validation_year = factor(validation_year))
+
+  plt <- ggplot(
+    plot_data,
+    aes(
+      following_year_month_offset,
+      mean_absolute_revision_mt,
+      group = validation_year,
+      color = validation_year
+    )
+  ) +
+    geom_line(linewidth = 0.9, na.rm = TRUE) +
+    geom_point(size = 2, na.rm = TRUE) +
+    scale_x_continuous(
+      breaks = 1:12,
+      labels = month.abb,
+      limits = c(1, 12)
+    ) +
+    scale_y_continuous(labels = scales::label_number(suffix = "M")) +
+    rcrea::theme_crea_new() +
+    labs(
+      title = title,
+      subtitle = paste(
+        "EU total absolute signed-sum revision, Jan-Dec of the following year",
+        "versus January y+2 reference"
+      ),
+      x = "Following-year vintage month",
+      y = "Absolute signed-sum revision (Mt CO2)",
+      color = "Year",
+      caption = "Source: CREA analysis."
+    )
+
+  rcrea::quicksave(filepath, plot = plt, width = width, height = height, dpi = dpi)
+  plt
+}
+
+
+.plot_get_co2_revision_analysis_following_year_mean <- function(
+  plot_data,
+  filepath,
+  width,
+  height,
+  dpi
+) {
+  title <- "Following-year absolute signed-sum revision mean across years"
+  if (nrow(plot_data) == 0) {
+    return(.plot_get_co2_revision_analysis_empty(filepath, title, width, height, dpi))
+  }
+
+  plt <- ggplot(plot_data, aes(following_year_month_offset, mean_absolute_revision_mt)) +
+    geom_line(color = rcrea::pal_crea[["Blue"]], linewidth = 0.9, na.rm = TRUE) +
+    geom_point(color = rcrea::pal_crea[["Blue"]], size = 2.2, na.rm = TRUE) +
+    scale_x_continuous(
+      breaks = 1:12,
+      labels = month.abb,
+      limits = c(1, 12)
+    ) +
+    scale_y_continuous(labels = scales::label_number(suffix = "M")) +
+    rcrea::theme_crea_new() +
+    labs(
+      title = title,
+      subtitle = "Mean of yearly EU total absolute signed-sum revision lines",
+      x = "Following-year vintage month",
+      y = "Absolute signed-sum revision (Mt CO2)",
+      caption = "Source: CREA analysis."
+    )
+
+  rcrea::quicksave(filepath, plot = plt, width = width, height = height, dpi = dpi)
+  plt
+}
+
+
+.plot_get_co2_revision_analysis_following_year_pct_by_year <- function(
+  plot_data,
+  filepath,
+  width,
+  height,
+  dpi
+) {
+  title <- "Following-year signed-sum revision share by validation year"
+  if (nrow(plot_data) == 0) {
+    return(.plot_get_co2_revision_analysis_empty(filepath, title, width, height, dpi))
+  }
+
+  plot_data <- plot_data %>%
+    mutate(validation_year = factor(validation_year))
+
+  plt <- ggplot(
+    plot_data,
+    aes(
+      following_year_month_offset,
+      absolute_revision_year_share,
+      group = validation_year,
+      color = validation_year
+    )
+  ) +
+    geom_line(linewidth = 0.9, na.rm = TRUE) +
+    geom_point(size = 2, na.rm = TRUE) +
+    scale_x_continuous(
+      breaks = 1:12,
+      labels = month.abb,
+      limits = c(1, 12)
+    ) +
+    scale_y_continuous(labels = scales::label_percent(accuracy = 0.1)) +
+    rcrea::theme_crea_new() +
+    labs(
+      title = title,
+      subtitle = "Absolute signed-sum revision as a share of the reference-year EU total",
+      x = "Following-year vintage month",
+      y = "Revision share of reference year",
+      color = "Year",
+      caption = "Source: CREA analysis."
+    )
+
+  rcrea::quicksave(filepath, plot = plt, width = width, height = height, dpi = dpi)
+  plt
+}
+
+
+.plot_get_co2_revision_analysis_following_year_pct_mean <- function(
+  plot_data,
+  filepath,
+  width,
+  height,
+  dpi
+) {
+  title <- "Following-year signed-sum revision share mean across years"
+  if (nrow(plot_data) == 0) {
+    return(.plot_get_co2_revision_analysis_empty(filepath, title, width, height, dpi))
+  }
+
+  plot_data <- plot_data %>%
+    mutate(
+      ymin = pmax(0, mean_absolute_revision_year_share - sd_absolute_revision_year_share),
+      ymax = mean_absolute_revision_year_share + sd_absolute_revision_year_share
+    )
+
+  plt <- ggplot(
+    plot_data,
+    aes(following_year_month_offset, mean_absolute_revision_year_share)
+  ) +
+    geom_errorbar(
+      aes(ymin = ymin, ymax = ymax),
+      width = 0.35,
+      color = "gray45",
+      na.rm = TRUE
+    ) +
+    geom_line(color = rcrea::pal_crea[["Blue"]], linewidth = 0.9, na.rm = TRUE) +
+    geom_point(color = rcrea::pal_crea[["Blue"]], size = 2.2, na.rm = TRUE) +
+    scale_x_continuous(
+      breaks = 1:12,
+      labels = month.abb,
+      limits = c(1, 12)
+    ) +
+    scale_y_continuous(labels = scales::label_percent(accuracy = 0.1)) +
+    rcrea::theme_crea_new() +
+    labs(
+      title = title,
+      subtitle = paste(
+        "Mean share of absolute signed-sum year-total revision across validation years;",
+        "error bars show cross-year standard deviation"
+      ),
+      x = "Following-year vintage month",
+      y = "Revision share of reference year",
+      caption = "Source: CREA analysis."
+    )
+
+  rcrea::quicksave(filepath, plot = plt, width = width, height = height, dpi = dpi)
+  plt
+}
+
+
+.plot_get_co2_revision_analysis_following_year_raw_by_year <- function(
+  plot_data,
+  filepath,
+  width,
+  height,
+  dpi
+) {
+  title <- "Following-year signed-sum revision by validation year"
+  if (nrow(plot_data) == 0) {
+    return(.plot_get_co2_revision_analysis_empty(filepath, title, width, height, dpi))
+  }
+
+  plot_data <- plot_data %>%
+    mutate(validation_year = factor(validation_year))
+
+  plt <- ggplot(
+    plot_data,
+    aes(
+      following_year_month_offset,
+      revision_mt,
+      group = validation_year,
+      color = validation_year
+    )
+  ) +
+    geom_hline(yintercept = 0, color = "gray65", linewidth = 0.4) +
+    geom_line(linewidth = 0.9, na.rm = TRUE) +
+    geom_point(size = 2, na.rm = TRUE) +
+    scale_x_continuous(
+      breaks = 1:12,
+      labels = month.abb,
+      limits = c(1, 12)
+    ) +
+    scale_y_continuous(labels = scales::label_number(suffix = "M")) +
+    rcrea::theme_crea_new() +
+    labs(
+      title = title,
+      subtitle = "Signed-sum EU total revision (Jan-Dec year total) versus January y+2 reference",
+      x = "Following-year vintage month",
+      y = "Signed-sum revision (Mt CO2)",
+      color = "Year",
+      caption = "Source: CREA analysis."
+    )
+
+  rcrea::quicksave(filepath, plot = plt, width = width, height = height, dpi = dpi)
+  plt
 }
 
 
