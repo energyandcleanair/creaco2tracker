@@ -463,6 +463,7 @@ test_that(
     tracker$heatmap_titles <- character()
     tracker$stage_paths <- character()
     tracker$stage_titles <- character()
+    tracker$h1_paths <- character()
 
     local_mocked_bindings(
       .plot_get_co2_revision_analysis_summary_bar = function(plot_data,
@@ -502,6 +503,36 @@ test_that(
       .plot_get_co2_revision_analysis_following_year_pct_by_year = function(...) invisible(NULL),
       .plot_get_co2_revision_analysis_following_year_pct_mean = function(...) invisible(NULL),
       .plot_get_co2_revision_analysis_following_year_raw_by_year = function(...) invisible(NULL),
+      .plot_get_co2_revision_analysis_h1_by_year = function(plot_data,
+                                                            filepath,
+                                                            ...) {
+        tracker$h1_paths <- c(tracker$h1_paths, basename(filepath))
+        invisible(filepath)
+      },
+      .plot_get_co2_revision_analysis_h1_mean = function(plot_data,
+                                                         filepath,
+                                                         ...) {
+        tracker$h1_paths <- c(tracker$h1_paths, basename(filepath))
+        invisible(filepath)
+      },
+      .plot_get_co2_revision_analysis_h1_pct_by_year = function(plot_data,
+                                                                filepath,
+                                                                ...) {
+        tracker$h1_paths <- c(tracker$h1_paths, basename(filepath))
+        invisible(filepath)
+      },
+      .plot_get_co2_revision_analysis_h1_pct_mean = function(plot_data,
+                                                             filepath,
+                                                             ...) {
+        tracker$h1_paths <- c(tracker$h1_paths, basename(filepath))
+        invisible(filepath)
+      },
+      .plot_get_co2_revision_analysis_h1_raw_by_year = function(plot_data,
+                                                                filepath,
+                                                                ...) {
+        tracker$h1_paths <- c(tracker$h1_paths, basename(filepath))
+        invisible(filepath)
+      },
       .package = "creaco2tracker"
     )
 
@@ -569,6 +600,40 @@ test_that(
         n_years = 1L,
         n_observations = 1L
       ),
+      h1_revision_summary = tibble(
+        validation_year = 2024L,
+        reference_vintage = as.Date("2026-01-01"),
+        target_start_month = as.Date("2024-01-01"),
+        target_end_month = as.Date("2024-06-01"),
+        vintage_period = "h1_july_to_dec_plus_1",
+        vintage_month = as.Date("2024-07-01"),
+        h1_revision_month_offset = 1L,
+        mean_absolute_revision = 10,
+        mean_absolute_revision_mt = 0.00001,
+        revision = -10,
+        absolute_revision = 10,
+        revision_mt = -0.00001,
+        absolute_revision_mt = 0.00001,
+        reference_h1_total = 100,
+        absolute_revision_h1_share = 0.1,
+        n_observations = 1L
+      ),
+      h1_revision_mean = tibble(
+        h1_revision_month_offset = 1L,
+        mean_revision = -10,
+        mean_revision_mt = -0.00001,
+        mean_absolute_revision_h1_share = 0.1,
+        min_absolute_revision_h1_share = 0.1,
+        max_absolute_revision_h1_share = 0.1,
+        mean_absolute_revision = 10,
+        mean_absolute_revision_mt = 0.00001,
+        min_absolute_revision = 10,
+        min_absolute_revision_mt = 0.00001,
+        max_absolute_revision = 10,
+        max_absolute_revision_mt = 0.00001,
+        n_years = 1L,
+        n_observations = 1L
+      ),
       comparison_internal = tibble(
         aggregation_level = c("total", "country", "component"),
         vintage_month = as.Date(c("2025-01-01", "2025-01-01", "2025-01-01")),
@@ -603,7 +668,12 @@ test_that(
       "following_year_absolute_revision_mean",
       "following_year_revision_pct_by_year",
       "following_year_revision_pct_all_years",
-      "following_year_raw_revision_by_year"
+      "following_year_raw_revision_by_year",
+      "h1_absolute_revision_by_year",
+      "h1_absolute_revision_mean",
+      "h1_revision_pct_by_year",
+      "h1_revision_pct_all_years",
+      "h1_raw_revision_by_year"
     ) %in% names(plot_paths)))
     expect_false(any(c(
       "mean_absolute_revision_by_period_year",
@@ -627,6 +697,16 @@ test_that(
     expect_equal(tracker$heatmap_titles, "EU")
     expect_equal(tracker$stage_paths, "eu_revision_by_data_maturity_stage.png")
     expect_equal(tracker$stage_titles, "EU")
+    expect_equal(
+      tracker$h1_paths,
+      c(
+        "h1_absolute_revision_by_year.png",
+        "h1_absolute_revision_mean.png",
+        "h1_revision_pct_by_year.png",
+        "h1_revision_pct_all_years.png",
+        "h1_raw_revision_by_year.png"
+      )
+    )
   }
 )
 
@@ -776,6 +856,66 @@ test_that(
     expect_equal(mean_summary$mean_revision, 25)
     expect_equal(mean_summary$mean_absolute_revision_year_share, 0.125)
     expect_equal(mean_summary$n_years, 2)
+  }
+)
+
+
+test_that(
+  "revision-analysis H1 summaries use Jan-Jun targets and July to Dec plus 1 vintages",
+  {
+    comparison_internal <- tibble(
+      validation_year = 2020L,
+      aggregation_level = c(rep("total", 7), "country"),
+      reference_vintage = as.Date("2022-01-01"),
+      vintage_month = as.Date(c(
+        "2020-07-01",
+        "2020-07-01",
+        "2020-07-01",
+        "2020-06-01",
+        "2021-12-01",
+        "2021-12-01",
+        "2022-01-01",
+        "2020-07-01"
+      )),
+      target_month = as.Date(c(
+        "2020-01-01",
+        "2020-06-01",
+        "2020-07-01",
+        "2020-01-01",
+        "2020-01-01",
+        "2020-06-01",
+        "2020-01-01",
+        "2020-01-01"
+      )),
+      reference_estimate = c(100, 300, 500, 100, 100, 300, 100, 50),
+      revision = c(10, -20, 999, 999, 30, 20, 999, 999),
+      absolute_revision = abs(revision),
+      data_maturity_stage = "monthly_missing"
+    )
+
+    h1_summary <- getFromNamespace(
+      ".summarise_get_co2_revision_analysis_h1_revision",
+      "creaco2tracker"
+    )(comparison_internal)
+    h1_mean <- getFromNamespace(
+      ".summarise_get_co2_revision_analysis_h1_mean",
+      "creaco2tracker"
+    )(h1_summary)
+
+    expect_equal(nrow(h1_summary), 2)
+    expect_equal(h1_summary$vintage_month, as.Date(c("2020-07-01", "2021-12-01")))
+    expect_equal(h1_summary$h1_revision_month_offset, c(1L, 18L))
+    expect_equal(h1_summary$target_start_month, rep(as.Date("2020-01-01"), 2))
+    expect_equal(h1_summary$target_end_month, rep(as.Date("2020-06-01"), 2))
+    expect_equal(h1_summary$revision, c(-10, 50))
+    expect_equal(h1_summary$absolute_revision, c(10, 50))
+    expect_equal(h1_summary$reference_h1_total, c(400, 400))
+    expect_equal(h1_summary$absolute_revision_h1_share, c(0.025, 0.125))
+    expect_equal(h1_summary$n_observations, c(2L, 2L))
+    expect_equal(h1_mean$h1_revision_month_offset, c(1L, 18L))
+    expect_equal(h1_mean$mean_absolute_revision, c(10, 50))
+    expect_equal(h1_mean$mean_absolute_revision_h1_share, c(0.025, 0.125))
+    expect_equal(h1_mean$n_years, c(1L, 1L))
   }
 )
 

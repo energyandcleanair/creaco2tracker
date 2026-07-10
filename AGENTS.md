@@ -20,7 +20,7 @@ The provides data to dashboard on a regular basis.
 ## Development Setup
 
 - Open the repo in the provided dev container when possible. The container is configured to use the workspace library in `.r-lib/` and temp files in `.tmp/`.
-- Keep secrets and service credentials out of the repo. Tests and workflows may rely on environment variables such as `CREA_DB_PRODUCTION`, `AGSI_API_KEY`, `API_KEY`, `EMBER_KEY`, `EIA_API_KEY`, and `GITHUB_PAT`.
+- Keep secrets and service credentials out of the repo. Integration tests and workflows may rely on environment variables such as `CREA_DB_PRODUCTION`, `AGSI_API_KEY`, `API_KEY`, `EMBER_KEY`, `EIA_API_KEY`, and `GITHUB_PAT`.
 - Treat `cache/`, `diagnostics/`, `reports/`, and similar output folders as derived artifacts unless a task explicitly says otherwise.
 
 ## Editing Rules
@@ -43,6 +43,7 @@ The provides data to dashboard on a regular basis.
 ## Debugging and Validation Notes
 
 * For slow or expensive workflows, start with the smallest check that still exercises the relevant behaviour.
+* When running the `get_co2` pipeline, or commands that invoke it, run it as a blocking foreground command and wait for it to finish completely. Do not background it or poll logs unless explicitly asked. Use a timeout long enough for the full run, 1-5 minutes per `get_co2` run depending on cache state.
 * For behavioural regressions, inspect existing outputs or logs to locate the first likely divergence before changing code.
 * Narrow investigations by the smallest affected input set, date range, or workflow stage where possible.
 * For long debugging sessions, briefly record ruled-out causes when they affect the next steps.
@@ -61,3 +62,16 @@ Many operations in this repo include long
 
 - The package is organized around the CO2 pipeline, weather correction, demand decomposition, data masking, and publication workflows. When in doubt, follow the data flow from source loaders into model and workflow functions rather than editing surface wrappers first.
 - If a change touches a public workflow, check the corresponding test file in `tests/testthat/` and update or add coverage nearby.
+
+## Charts
+
+For ggplot labels, write for the reader, not the implementation.
+
+Use:
+
+* `title`: short, snappy description.
+* `subtitle`: `<metric> | <scope> | <aggregation / grouping / visual encoding / reference info>`.
+* `caption`: optional. Use only for definitions, caveats, exclusions, or interpretation-relevant implementation details.
+* Axis and guide labels: use `NULL` when already clear from the subtitle, ticks, legend values, facets, or direct labels. Keep labels when they reduce ambiguity.
+
+Use colour, fill, facets, and other visual encodings when useful. Avoid redundant or implementation-focused labels, not useful encodings.

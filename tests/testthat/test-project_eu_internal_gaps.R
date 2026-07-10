@@ -223,3 +223,229 @@ test_that("validate_co2 rejects protected EU central internal gaps", {
     "Protected EU central CO2 rows still contain internal gaps"
   )
 })
+
+test_that("stabilise_eu_tail_estimates applies validated country-sum tail adjustments", {
+  dates <- seq.Date(as.Date("2025-01-01"), as.Date("2025-08-01"), by = "month")
+  country_rows <- bind_rows(lapply(c("DE", "FR"), function(iso2) {
+    tibble(
+      iso2 = iso2,
+      date = dates,
+      fuel = FUEL_TOTAL,
+      sector = SECTOR_ALL,
+      estimate = "central",
+      unit = "t",
+      value = c(rep(50, 6), 70, 80)
+    )
+  }))
+
+  co2 <- bind_rows(
+    tibble(
+      iso2 = "EU",
+      date = dates,
+      fuel = FUEL_TOTAL,
+      sector = SECTOR_ALL,
+      estimate = "central",
+      unit = "t",
+      value = c(rep(100, 6), 130, 135)
+    ),
+    country_rows
+  )
+
+  result <- stabilise_eu_tail_estimates(
+    co2,
+    country_sum_min_countries = 2,
+    country_sum_min_points = 6,
+    tail_months = 2
+  )
+
+  expect_equal(
+    result %>%
+      filter(iso2 == "EU", date >= as.Date("2025-07-01")) %>%
+      arrange(date) %>%
+      pull(value),
+    c(140, 160)
+  )
+})
+
+test_that("country-sum submodel selects no tail adjustments when history disagrees", {
+  dates <- seq.Date(as.Date("2025-01-01"), as.Date("2025-08-01"), by = "month")
+  country_rows <- bind_rows(lapply(c("DE", "FR"), function(iso2) {
+    tibble(
+      iso2 = iso2,
+      date = dates,
+      fuel = FUEL_TOTAL,
+      sector = SECTOR_ALL,
+      estimate = "central",
+      unit = "t",
+      value = c(rep(40, 6), 70, 80)
+    )
+  }))
+
+  co2 <- bind_rows(
+    tibble(
+      iso2 = "EU",
+      date = dates,
+      fuel = FUEL_TOTAL,
+      sector = SECTOR_ALL,
+      estimate = "central",
+      unit = "t",
+      value = c(rep(100, 6), 130, 135)
+    ),
+    country_rows
+  )
+
+  adjustments <- select_eu_tail_country_sum_adjustments(
+    co2,
+    min_countries = 2,
+    min_points = 6,
+    max_rel_diff = 0.05,
+    tail_months = 2
+  )
+
+  expect_equal(nrow(adjustments), 0)
+})
+
+test_that("country-sum submodel selects no tail adjustments below country threshold", {
+  dates <- seq.Date(as.Date("2025-01-01"), as.Date("2025-08-01"), by = "month")
+  co2 <- bind_rows(
+    tibble(
+      iso2 = "EU",
+      date = dates,
+      fuel = FUEL_TOTAL,
+      sector = SECTOR_ALL,
+      estimate = "central",
+      unit = "t",
+      value = c(rep(100, 6), 130, 135)
+    ),
+    tibble(
+      iso2 = "DE",
+      date = dates,
+      fuel = FUEL_TOTAL,
+      sector = SECTOR_ALL,
+      estimate = "central",
+      unit = "t",
+      value = c(rep(100, 6), 140, 160)
+    )
+  )
+
+  adjustments <- select_eu_tail_country_sum_adjustments(
+    co2,
+    min_countries = 2,
+    min_points = 6,
+    tail_months = 2
+  )
+
+  expect_equal(nrow(adjustments), 0)
+})
+
+make_eu_tail_seasonal_fixture <- function(tail_values, holdout_value = 130) {
+  dates <- seq.Date(as.Date("2023-01-01"), as.Date("2024-12-01"), by = "month")
+  values <- rep(100, length(dates))
+  values[dates == as.Date("2023-11-01")] <- 100
+  values[dates == as.Date("2023-12-01")] <- 110
+  values[dates == as.Date("2024-08-01")] <- 120
+  values[dates == as.Date("2024-09-01")] <- 120
+  values[dates == as.Date("2024-10-01")] <- holdout_value
+  values[dates == as.Date("2024-11-01")] <- tail_values[[1]]
+  values[dates == as.Date("2024-12-01")] <- tail_values[[2]]
+
+  bind_rows(lapply(c("central", "lower", "upper"), function(estimate) {
+    tibble(
+      iso2 = "EU",
+      date = dates,
+      fuel = FUEL_OIL,
+      sector = SECTOR_TRANSPORT_DOMESTIC,
+      estimate = estimate,
+      unit = "t",
+      value = values
+    )
+  }))
+}
+
+test_that("stabilise_eu_tail_estimates applies selected seasonal-YoY tail adjustments", {
+  co2 <- make_eu_tail_seasonal_fixture(tail_values = c(95, 95))
+
+  result <- stabilise_eu_tail_estimates(
+    co2,
+    tail_months = 2,
+    seasonal_min_history_points = 12
+  )
+
+  expect_equal(
+    result %>%
+      filter(
+        iso2 == "EU",
+        fuel == FUEL_OIL,
+        sector == SECTOR_TRANSPORT_DOMESTIC,
+        estimate == "central",
+        date %in% as.Date(c("2024-11-01", "2024-12-01"))
+      ) %>%
+      arrange(date) %>%
+      pull(value),
+    c(120, 132)
+  )
+})
+
+test_that("seasonal-YoY submodel selects no tail adjustments when backtest is worse", {
+  co2 <- make_eu_tail_seasonal_fixture(tail_values = c(95, 95), holdout_value = 100)
+
+  adjustments <- select_eu_tail_seasonal_yoy_adjustments(
+    co2,
+    tail_months = 2,
+    min_history_points = 12
+  )
+
+  expect_equal(nrow(adjustments), 0)
+})
+
+test_that("stabilise_eu_tail_estimates keeps selected total adjustments after recomputing totals", {
+  component_rows <- make_eu_tail_seasonal_fixture(tail_values = c(95, 95))
+  dates <- seq.Date(as.Date("2023-01-01"), as.Date("2024-12-01"), by = "month")
+
+  eu_total_rows <- tibble(
+    iso2 = "EU",
+    date = dates,
+    fuel = FUEL_TOTAL,
+    sector = SECTOR_ALL,
+    estimate = "central",
+    unit = "t",
+    value = if_else(dates >= as.Date("2024-11-01"), 95, 100)
+  )
+  country_total_rows <- bind_rows(lapply(c("DE", "FR"), function(iso2) {
+    tibble(
+      iso2 = iso2,
+      date = dates,
+      fuel = FUEL_TOTAL,
+      sector = SECTOR_ALL,
+      estimate = "central",
+      unit = "t",
+      value = if_else(
+        dates == as.Date("2024-11-01"),
+        70,
+        if_else(dates == as.Date("2024-12-01"), 80, 50)
+      )
+    )
+  }))
+
+  result <- stabilise_eu_tail_estimates(
+    bind_rows(component_rows, eu_total_rows, country_total_rows),
+    country_sum_min_countries = 2,
+    country_sum_min_points = 6,
+    tail_months = 2,
+    seasonal_min_history_points = 12
+  )
+
+  expect_equal(
+    result %>%
+      filter(
+        iso2 == "EU",
+        fuel == FUEL_TOTAL,
+        sector == SECTOR_ALL,
+        estimate == "central",
+        date %in% as.Date(c("2024-11-01", "2024-12-01"))
+      ) %>%
+      arrange(date) %>%
+      pull(value),
+    c(140, 160)
+  )
+})

@@ -80,6 +80,12 @@ plot_get_co2_revision_analysis_validation <- function(
   following_year_revision_mean <- .summarise_get_co2_revision_analysis_following_year_mean(
     following_year_revision_summary
   )
+  h1_revision_summary <- .summarise_get_co2_revision_analysis_h1_revision(
+    comparison_internal
+  )
+  h1_revision_mean <- .summarise_get_co2_revision_analysis_h1_mean(
+    h1_revision_summary
+  )
 
   summary_plot_paths <- .plot_get_co2_revision_analysis_summary_charts(
     lag_summary = lag_summary,
@@ -89,6 +95,8 @@ plot_get_co2_revision_analysis_validation <- function(
     trend_direction_agreement = trend_direction_agreement,
     following_year_revision_summary = following_year_revision_summary,
     following_year_revision_mean = following_year_revision_mean,
+    h1_revision_summary = h1_revision_summary,
+    h1_revision_mean = h1_revision_mean,
     comparison_internal = comparison_internal,
     output_dir = summary_dir,
     width = REV_ANALYSIS_PLOT_WIDTH,
@@ -127,6 +135,14 @@ plot_get_co2_revision_analysis_validation <- function(
   readr::write_csv(
     following_year_revision_mean,
     file.path(tables_dir, "following_year_absolute_revision_mean.csv")
+  )
+  readr::write_csv(
+    h1_revision_summary,
+    file.path(tables_dir, "h1_absolute_revision_by_year.csv")
+  )
+  readr::write_csv(
+    h1_revision_mean,
+    file.path(tables_dir, "h1_absolute_revision_mean.csv")
   )
 
   list(
@@ -986,6 +1002,129 @@ plot_get_co2_revision_analysis_validation <- function(
 }
 
 
+.summarise_get_co2_revision_analysis_h1_revision <- function(
+  comparison_internal
+) {
+  reference_h1_totals <- comparison_internal %>%
+    filter(
+      aggregation_level == "total",
+      !is.na(validation_year),
+      lubridate::year(target_month) == validation_year,
+      lubridate::month(target_month) <= 6L
+    ) %>%
+    group_by(validation_year, reference_vintage, target_month) %>%
+    summarise(
+      reference_estimate = dplyr::first(reference_estimate),
+      .groups = "drop"
+    ) %>%
+    group_by(validation_year, reference_vintage) %>%
+    summarise(
+      reference_h1_total = sum(reference_estimate, na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  comparison_internal %>%
+    filter(
+      aggregation_level == "total",
+      !is.na(validation_year),
+      lubridate::year(target_month) == validation_year,
+      lubridate::month(target_month) <= 6L,
+      vintage_month >= as.Date(sprintf("%d-07-01", validation_year)),
+      vintage_month <= as.Date(sprintf("%d-12-01", validation_year + 1L))
+    ) %>%
+    mutate(
+      h1_revision_month_offset = (lubridate::year(vintage_month) - validation_year) * 12L +
+        lubridate::month(vintage_month) - 6L,
+      target_start_month = as.Date(sprintf("%d-01-01", validation_year)),
+      target_end_month = as.Date(sprintf("%d-06-01", validation_year)),
+      vintage_period = "h1_july_to_dec_plus_1"
+    ) %>%
+    group_by(
+      validation_year,
+      reference_vintage,
+      target_start_month,
+      target_end_month,
+      vintage_period,
+      vintage_month,
+      h1_revision_month_offset
+    ) %>%
+    summarise(
+      mean_absolute_revision = abs(sum(revision, na.rm = TRUE)),
+      mean_absolute_revision_mt = mean_absolute_revision / 1e6,
+      revision = sum(revision, na.rm = TRUE),
+      absolute_revision = abs(revision),
+      revision_mt = revision / 1e6,
+      absolute_revision_mt = absolute_revision / 1e6,
+      n_observations = n(),
+      .groups = "drop"
+    ) %>%
+    left_join(reference_h1_totals, by = c("validation_year", "reference_vintage")) %>%
+    mutate(
+      absolute_revision_h1_share = if_else(
+        reference_h1_total == 0,
+        NA_real_,
+        absolute_revision / reference_h1_total
+      )
+    ) %>%
+    arrange(validation_year, vintage_month)
+}
+
+
+.summarise_get_co2_revision_analysis_h1_mean <- function(
+  h1_revision_summary
+) {
+  if (nrow(h1_revision_summary) == 0) {
+    return(tibble(
+      h1_revision_month_offset = integer(),
+      mean_revision = numeric(),
+      mean_revision_mt = numeric(),
+      mean_absolute_revision_h1_share = numeric(),
+      min_absolute_revision_h1_share = numeric(),
+      max_absolute_revision_h1_share = numeric(),
+      mean_absolute_revision = numeric(),
+      mean_absolute_revision_mt = numeric(),
+      min_absolute_revision = numeric(),
+      min_absolute_revision_mt = numeric(),
+      max_absolute_revision = numeric(),
+      max_absolute_revision_mt = numeric(),
+      n_years = integer(),
+      n_observations = integer()
+    ))
+  }
+
+  h1_revision_summary %>%
+    group_by(h1_revision_month_offset) %>%
+    summarise(
+      mean_revision = mean(.data$revision, na.rm = TRUE),
+      mean_revision_mt = mean_revision / 1e6,
+      mean_absolute_revision_h1_share = mean(
+        .data$absolute_revision_h1_share,
+        na.rm = TRUE
+      ),
+      min_absolute_revision_h1_share = .get_co2_revision_analysis_safe_min(
+        .data$absolute_revision_h1_share
+      ),
+      max_absolute_revision_h1_share = .get_co2_revision_analysis_safe_max(
+        .data$absolute_revision_h1_share
+      ),
+      min_absolute_revision = .get_co2_revision_analysis_safe_min(
+        .data$mean_absolute_revision
+      ),
+      min_absolute_revision_mt = min_absolute_revision / 1e6,
+      max_absolute_revision = .get_co2_revision_analysis_safe_max(
+        .data$mean_absolute_revision
+      ),
+      max_absolute_revision_mt = max_absolute_revision / 1e6,
+      mean_absolute_revision = mean(.data$mean_absolute_revision, na.rm = TRUE),
+      mean_absolute_revision_mt = mean_absolute_revision / 1e6,
+      n_years = n_distinct(validation_year),
+      n_observations = sum(n_observations, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    arrange(h1_revision_month_offset)
+}
+
+
 .plot_get_co2_revision_analysis_summary_charts <- function(
   lag_summary,
   stage_summary,
@@ -994,6 +1133,8 @@ plot_get_co2_revision_analysis_validation <- function(
   trend_direction_agreement,
   following_year_revision_summary,
   following_year_revision_mean,
+  h1_revision_summary,
+  h1_revision_mean,
   comparison_internal,
   output_dir,
   width,
@@ -1055,6 +1196,26 @@ plot_get_co2_revision_analysis_validation <- function(
     following_year_raw_revision_by_year = file.path(
       output_dir,
       "following_year_raw_revision_by_year.png"
+    ),
+    h1_absolute_revision_by_year = file.path(
+      output_dir,
+      "h1_absolute_revision_by_year.png"
+    ),
+    h1_absolute_revision_mean = file.path(
+      output_dir,
+      "h1_absolute_revision_mean.png"
+    ),
+    h1_revision_pct_by_year = file.path(
+      output_dir,
+      "h1_revision_pct_by_year.png"
+    ),
+    h1_revision_pct_all_years = file.path(
+      output_dir,
+      "h1_revision_pct_all_years.png"
+    ),
+    h1_raw_revision_by_year = file.path(
+      output_dir,
+      "h1_raw_revision_by_year.png"
     )
   )
 
@@ -1208,6 +1369,41 @@ plot_get_co2_revision_analysis_validation <- function(
   .plot_get_co2_revision_analysis_following_year_raw_by_year(
     plot_data = following_year_revision_summary,
     filepath = plot_paths[["following_year_raw_revision_by_year"]],
+    width = width,
+    height = height,
+    dpi = dpi
+  )
+  .plot_get_co2_revision_analysis_h1_by_year(
+    plot_data = h1_revision_summary,
+    filepath = plot_paths[["h1_absolute_revision_by_year"]],
+    width = width,
+    height = height,
+    dpi = dpi
+  )
+  .plot_get_co2_revision_analysis_h1_mean(
+    plot_data = h1_revision_mean,
+    filepath = plot_paths[["h1_absolute_revision_mean"]],
+    width = width,
+    height = height,
+    dpi = dpi
+  )
+  .plot_get_co2_revision_analysis_h1_pct_by_year(
+    plot_data = h1_revision_summary,
+    filepath = plot_paths[["h1_revision_pct_by_year"]],
+    width = width,
+    height = height,
+    dpi = dpi
+  )
+  .plot_get_co2_revision_analysis_h1_pct_mean(
+    plot_data = h1_revision_mean,
+    filepath = plot_paths[["h1_revision_pct_all_years"]],
+    width = width,
+    height = height,
+    dpi = dpi
+  )
+  .plot_get_co2_revision_analysis_h1_raw_by_year(
+    plot_data = h1_revision_summary,
+    filepath = plot_paths[["h1_raw_revision_by_year"]],
     width = width,
     height = height,
     dpi = dpi
@@ -1487,6 +1683,244 @@ plot_get_co2_revision_analysis_validation <- function(
       title = title,
       subtitle = subtitle,
       x = "Month of following year",
+      y = "Signed revision (Mt CO2)",
+      color = "Year",
+      caption = paste("Source: CREA analysis.", caption_extra)
+    )
+
+  rcrea::quicksave(filepath, plot = plt, width = width, height = height, dpi = dpi)
+  plt
+}
+
+
+.get_co2_revision_analysis_h1_vintage_scale <- function() {
+  scale_x_continuous(
+    breaks = 1:18,
+    labels = c(month.abb[7:12], month.abb),
+    limits = c(1, 18)
+  )
+}
+
+
+.plot_get_co2_revision_analysis_h1_by_year <- function(
+  plot_data,
+  filepath,
+  width,
+  height,
+  dpi
+) {
+  title <- "Monthly revision to H1 EU total by year (absolute)"
+  subtitle <- "Absolute monthly revision (Mt CO2) | Target years 2020-2024 H1"
+  caption_extra <- "*Each year's reference is its Jan y+2 vintage."
+  if (nrow(plot_data) == 0) {
+    return(.plot_get_co2_revision_analysis_empty(filepath, title, width, height, dpi))
+  }
+
+  plot_data <- plot_data %>%
+    mutate(validation_year = factor(validation_year))
+
+  plt <- ggplot(
+    plot_data,
+    aes(
+      h1_revision_month_offset,
+      mean_absolute_revision_mt,
+      group = validation_year,
+      color = validation_year
+    )
+  ) +
+    geom_line(linewidth = 0.9, na.rm = TRUE) +
+    geom_point(size = 2, na.rm = TRUE) +
+    .get_co2_revision_analysis_h1_vintage_scale() +
+    scale_y_continuous(labels = scales::label_number(suffix = "M")) +
+    rcrea::theme_crea_new() +
+    labs(
+      title = title,
+      subtitle = subtitle,
+      x = "Vintage month, from Jul y to Dec y+1",
+      y = "Absolute revision (Mt CO2)",
+      color = "Year",
+      caption = "Source: CREA analysis."
+    )
+
+  rcrea::quicksave(filepath, plot = plt, width = width, height = height, dpi = dpi)
+  plt
+}
+
+
+.plot_get_co2_revision_analysis_h1_mean <- function(
+  plot_data,
+  filepath,
+  width,
+  height,
+  dpi
+) {
+  title <- "Average monthly revision to H1 EU total over time (absolute)"
+  subtitle <- "Mean absolute monthly revision (Mt CO2) | Target years 2020-2024 H1"
+  caption_extra <- "*Each year's reference is its Jan y+2 vintage."
+  if (nrow(plot_data) == 0) {
+    return(.plot_get_co2_revision_analysis_empty(filepath, title, width, height, dpi))
+  }
+
+  plot_data <- plot_data %>%
+    mutate(
+      ymin = pmax(0, min_absolute_revision_mt),
+      ymax = max_absolute_revision_mt
+    )
+
+  plt <- ggplot(plot_data, aes(h1_revision_month_offset, mean_absolute_revision_mt)) +
+    geom_ribbon(
+      aes(ymin = ymin, ymax = ymax),
+      fill = rcrea::pal_crea[["Blue"]],
+      alpha = 0.15,
+      na.rm = TRUE
+    ) +
+    geom_line(color = rcrea::pal_crea[["Blue"]], linewidth = 0.9, na.rm = TRUE) +
+    geom_point(color = rcrea::pal_crea[["Blue"]], size = 2.2, na.rm = TRUE) +
+    .get_co2_revision_analysis_h1_vintage_scale() +
+    scale_y_continuous(labels = scales::label_number(suffix = "M")) +
+    rcrea::theme_crea_new() +
+    labs(
+      title = title,
+      subtitle = subtitle,
+      x = "Vintage month, from Jul y to Dec y+1",
+      y = "Mean absolute revision (Mt CO2)",
+      caption = paste("Source: CREA analysis.", caption_extra)
+    )
+
+  rcrea::quicksave(filepath, plot = plt, width = width, height = height, dpi = dpi)
+  plt
+}
+
+
+.plot_get_co2_revision_analysis_h1_pct_by_year <- function(
+  plot_data,
+  filepath,
+  width,
+  height,
+  dpi
+) {
+  title <- "Monthly revision to H1 EU total by year (%)"
+  subtitle <- "Absolute monthly revision (% of H1 reference) | Target years 2020-2024"
+  caption_extra <- "*Each year's reference is its Jan y+2 vintage."
+  if (nrow(plot_data) == 0) {
+    return(.plot_get_co2_revision_analysis_empty(filepath, title, width, height, dpi))
+  }
+
+  plot_data <- plot_data %>%
+    mutate(validation_year = factor(validation_year))
+
+  plt <- ggplot(
+    plot_data,
+    aes(
+      h1_revision_month_offset,
+      absolute_revision_h1_share,
+      group = validation_year,
+      color = validation_year
+    )
+  ) +
+    geom_line(linewidth = 0.9, na.rm = TRUE) +
+    geom_point(size = 2, na.rm = TRUE) +
+    .get_co2_revision_analysis_h1_vintage_scale() +
+    scale_y_continuous(labels = scales::label_percent(accuracy = 0.1)) +
+    rcrea::theme_crea_new() +
+    labs(
+      title = title,
+      subtitle = subtitle,
+      x = "Vintage month, from Jul y to Dec y+1",
+      y = "Revision share of H1 reference",
+      color = "Year",
+      caption = paste("Source: CREA analysis.", caption_extra)
+    )
+
+  rcrea::quicksave(filepath, plot = plt, width = width, height = height, dpi = dpi)
+  plt
+}
+
+
+.plot_get_co2_revision_analysis_h1_pct_mean <- function(
+  plot_data,
+  filepath,
+  width,
+  height,
+  dpi
+) {
+  title <- "Average monthly revision to H1 EU total over time (%)"
+  subtitle <- "Mean absolute monthly revision (% of H1 reference) | Target years 2020-2024"
+  caption_extra <- "*Each year's reference is its Jan y+2 vintage."
+  if (nrow(plot_data) == 0) {
+    return(.plot_get_co2_revision_analysis_empty(filepath, title, width, height, dpi))
+  }
+
+  plot_data <- plot_data %>%
+    mutate(
+      ymin = pmax(0, min_absolute_revision_h1_share),
+      ymax = max_absolute_revision_h1_share
+    )
+
+  plt <- ggplot(
+    plot_data,
+    aes(h1_revision_month_offset, mean_absolute_revision_h1_share)
+  ) +
+    geom_ribbon(
+      aes(ymin = ymin, ymax = ymax),
+      fill = rcrea::pal_crea[["Blue"]],
+      alpha = 0.15,
+      na.rm = TRUE
+    ) +
+    geom_line(color = rcrea::pal_crea[["Blue"]], linewidth = 0.9, na.rm = TRUE) +
+    geom_point(color = rcrea::pal_crea[["Blue"]], size = 2.2, na.rm = TRUE) +
+    .get_co2_revision_analysis_h1_vintage_scale() +
+    scale_y_continuous(labels = scales::label_percent(accuracy = 0.1)) +
+    rcrea::theme_crea_new() +
+    labs(
+      title = title,
+      subtitle = subtitle,
+      x = "Vintage month, from Jul y to Dec y+1",
+      y = "Revision share of H1 reference",
+      caption = paste("Source: CREA analysis.", caption_extra)
+    )
+
+  rcrea::quicksave(filepath, plot = plt, width = width, height = height, dpi = dpi)
+  plt
+}
+
+
+.plot_get_co2_revision_analysis_h1_raw_by_year <- function(
+  plot_data,
+  filepath,
+  width,
+  height,
+  dpi
+) {
+  title <- "Monthly revision to H1 EU total by year (signed)"
+  subtitle <- "Signed monthly revision (Mt CO2) | Target years 2020-2024 H1"
+  caption_extra <- "*Each year's reference is its Jan y+2 vintage."
+  if (nrow(plot_data) == 0) {
+    return(.plot_get_co2_revision_analysis_empty(filepath, title, width, height, dpi))
+  }
+
+  plot_data <- plot_data %>%
+    mutate(validation_year = factor(validation_year))
+
+  plt <- ggplot(
+    plot_data,
+    aes(
+      h1_revision_month_offset,
+      revision_mt,
+      group = validation_year,
+      color = validation_year
+    )
+  ) +
+    geom_hline(yintercept = 0, color = "gray65", linewidth = 0.4) +
+    geom_line(linewidth = 0.9, na.rm = TRUE) +
+    geom_point(size = 2, na.rm = TRUE) +
+    .get_co2_revision_analysis_h1_vintage_scale() +
+    scale_y_continuous(labels = scales::label_number(suffix = "M")) +
+    rcrea::theme_crea_new() +
+    labs(
+      title = title,
+      subtitle = subtitle,
+      x = "Vintage month, from Jul y to Dec y+1",
       y = "Signed revision (Mt CO2)",
       color = "Year",
       caption = paste("Source: CREA analysis.", caption_extra)

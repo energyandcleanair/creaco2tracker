@@ -170,6 +170,9 @@ get_co2 <- function(
   # Add total
   co2 <- add_total_co2(co2)
 
+  # Improve latest EU months using validated tail-estimate submodels.
+  co2 <- stabilise_eu_tail_estimates(co2)
+
   # Validation
   log_timed_stage("validate_co2", {
     validate_co2(co2, diagnostics_folder = diagnostics_folder)
