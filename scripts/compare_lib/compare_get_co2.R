@@ -12,7 +12,15 @@ VALID_OPTIONS <- c(
   "raw_base",
   "raw_target",
   "base_short_sha",
-  "target_short_sha"
+  "target_short_sha",
+  "base_ref",
+  "target_ref",
+  "date_to",
+  "runner",
+  "report_hash",
+  "base_run_hash",
+  "target_run_hash",
+  "summary_limit"
 )
 REQUIRED_OUTPUTS <- c(
   "comparison_totals_eu.csv",
@@ -21,7 +29,8 @@ REQUIRED_OUTPUTS <- c(
   "comparison_totals_component.csv",
   "monthly_eu_component_metrics.csv",
   "monthly_country_metrics.csv",
-  "monthly_component_metrics.csv"
+  "monthly_component_metrics.csv",
+  "summary.md"
 )
 
 usage <- function() {
@@ -29,6 +38,9 @@ usage <- function() {
     "Usage:",
     "  compare_get_co2.R --comparison-dir <dir> --raw-base <csv> --raw-target <csv>",
     "    --base-short-sha <sha12> --target-short-sha <sha12>",
+    "    --base-ref <ref> --target-ref <ref> --date-to <YYYY-MM-DD>",
+    "    --runner <runner> --report-hash <hash>",
+    "    --base-run-hash <hash> --target-run-hash <hash>",
     sep = "\n"
   ), "\n")
 }
@@ -692,6 +704,319 @@ write_plots <- function(pairs, comparison_dir, base_short_sha, target_short_sha)
   )
 }
 
+option_or <- function(opts, name, default) {
+  value <- opts[[name]]
+  if (is.null(value) || !nzchar(value)) {
+    default
+  } else {
+    value
+  }
+}
+
+fmt_summary_number <- function(value, scale = 1, digits = 2) {
+  number <- suppressWarnings(as.numeric(value))
+  ifelse(
+    is.na(number),
+    "NA",
+    formatC(number / scale, format = "f", digits = digits, big.mark = ",")
+  )
+}
+
+fmt_summary_pct <- function(value) {
+  number <- suppressWarnings(as.numeric(value))
+  ifelse(is.na(number), "NA", paste0(fmt_summary_number(number, digits = 2), "%"))
+}
+
+top_abs_rows <- function(data, field, limit) {
+  if (nrow(data) == 0 || !field %in% names(data)) {
+    return(data[0, , drop = FALSE])
+  }
+
+  data %>%
+    mutate(.abs_value = abs(suppressWarnings(as.numeric(.data[[field]])))) %>%
+    arrange(desc(.abs_value)) %>%
+    slice_head(n = limit) %>%
+    select(-.abs_value)
+}
+
+metric_range_summary <- function(data, field, scale = 1, digits = 2) {
+  if (nrow(data) == 0 || !field %in% names(data)) {
+    return("NA")
+  }
+
+  values <- suppressWarnings(as.numeric(data[[field]]))
+  values <- values[is.finite(values)]
+  if (length(values) == 0) {
+    return("NA")
+  }
+
+  paste0(
+    fmt_summary_number(min(values), scale = scale, digits = digits),
+    " to ",
+    fmt_summary_number(max(values), scale = scale, digits = digits)
+  )
+}
+
+md_table <- function(headers, rows) {
+  if (nrow(rows) == 0) {
+    return("_No rows available._")
+  }
+
+  rows <- as.data.frame(rows, stringsAsFactors = FALSE)
+  body <- apply(rows, 1, function(row) paste0("| ", paste(row, collapse = " | "), " |"))
+  c(
+    paste0("| ", paste(headers, collapse = " | "), " |"),
+    paste0("| ", paste(rep("---", length(headers)), collapse = " | "), " |"),
+    body
+  )
+}
+
+summary_label <- function(data, fields) {
+  fields <- intersect(fields, names(data))
+  if (nrow(data) == 0 || length(fields) == 0) {
+    return(character())
+  }
+
+  apply(data[, fields, drop = FALSE], 1, function(row) {
+    parts <- row[!is.na(row) & nzchar(row)]
+    if (length(parts) == 0) {
+      "unknown"
+    } else {
+      paste(parts, collapse = " / ")
+    }
+  })
+}
+
+first_field <- function(data, field, default = "NA") {
+  if (nrow(data) == 0 || !field %in% names(data) || is.na(data[[field]][[1]])) {
+    return(default)
+  }
+  as.character(data[[field]][[1]])
+}
+
+artifact_status <- function(comparison_dir) {
+  names <- c(
+    "complete.ok", "summary.md",
+    "comparison_totals_eu.csv", "comparison_totals_eu_component.csv",
+    "comparison_totals_country.csv", "comparison_totals_component.csv",
+    "monthly_eu_component_metrics.csv", "monthly_country_metrics.csv",
+    "monthly_component_metrics.csv", "plots"
+  )
+
+  tibble(
+    Artifact = paste0("`", names, "`"),
+    Status = if_else(file.exists(file.path(comparison_dir, names)), "present", "missing")
+  )
+}
+
+plot_summary_lines <- function(comparison_dir) {
+  plots_dir <- file.path(comparison_dir, "plots")
+  if (!dir.exists(plots_dir)) {
+    return("_No generated plot images found._")
+  }
+
+  image_suffixes <- c("png", "jpg", "jpeg", "svg")
+  image_plots <- list.files(plots_dir, full.names = FALSE)
+  image_plots <- image_plots[tolower(tools::file_ext(image_plots)) %in% image_suffixes]
+  image_rel <- sort(file.path("plots", image_plots))
+  if (length(image_rel) == 0) {
+    return("_No generated plot images found._")
+  }
+
+  priority <- c(
+    "plots/eu_timeseries.png",
+    "plots/country_timeseries_small_multiples.png",
+    "plots/fuel_sector_month_scatter_small_multiples.png"
+  )
+  lines <- unlist(lapply(priority, function(rel) {
+    if (file.exists(file.path(comparison_dir, rel))) {
+      paste0("![", rel, "](", rel, ")")
+    } else {
+      paste0("- Missing expected priority plot: `", rel, "`")
+    }
+  }), use.names = FALSE)
+
+  other_plots <- setdiff(image_rel, priority)
+  if (length(other_plots) == 0) {
+    return(lines)
+  }
+
+  c(
+    lines,
+    "",
+    "<details>",
+    "<summary>Other plots</summary>",
+    "",
+    paste0("![", other_plots, "](", other_plots, ")"),
+    "",
+    "</details>"
+  )
+}
+
+read_summary_table <- function(path) {
+  if (!file.exists(path)) {
+    return(tibble())
+  }
+  read_csv(path, show_col_types = FALSE)
+}
+
+write_version_summary <- function(
+  comparison_dir, limit, base_ref, target_ref, base_short_sha, target_short_sha,
+  date_to, runner, report_hash, base_run_hash, target_run_hash
+) {
+  eu <- read_summary_table(file.path(comparison_dir, "comparison_totals_eu.csv"))
+  eu_components <- read_summary_table(file.path(comparison_dir, "comparison_totals_eu_component.csv"))
+  countries <- read_summary_table(file.path(comparison_dir, "comparison_totals_country.csv"))
+  components <- read_summary_table(file.path(comparison_dir, "comparison_totals_component.csv"))
+  monthly_eu_component <- read_summary_table(file.path(comparison_dir, "monthly_eu_component_metrics.csv"))
+  monthly_country <- read_summary_table(file.path(comparison_dir, "monthly_country_metrics.csv"))
+  monthly_component <- read_summary_table(file.path(comparison_dir, "monthly_component_metrics.csv"))
+
+  base_label <- paste0(base_ref, " (", base_short_sha, ")")
+  target_label <- paste0(target_ref, " (", target_short_sha, ")")
+  eu_row <- if (nrow(eu) > 0) eu[1, , drop = FALSE] else tibble()
+  diff <- fmt_summary_number(first_field(eu_row, "diff"), scale = 1e6)
+  pct <- fmt_summary_pct(first_field(eu_row, "pct_diff"))
+  compared <- first_field(eu_row, "n_compared")
+  n_base <- first_field(eu_row, "n_base")
+  n_target <- first_field(eu_row, "n_target")
+
+  eu_component_rows <- top_abs_rows(eu_components, "diff", limit) %>%
+    mutate(
+      Component = summary_label(pick(everything()), c("fuel", "sector")),
+      `Diff (Mt CO2)` = fmt_summary_number(diff, scale = 1e6),
+      `% diff` = fmt_summary_pct(pct_diff),
+      Rows = as.character(n_compared)
+    ) %>%
+    select(Component, `Diff (Mt CO2)`, `% diff`, Rows)
+  country_rows <- top_abs_rows(countries, "diff", limit) %>%
+    mutate(
+      Country = summary_label(pick(everything()), "iso2"),
+      `Diff (Mt CO2)` = fmt_summary_number(diff, scale = 1e6),
+      `% diff` = fmt_summary_pct(pct_diff),
+      Rows = as.character(n_compared)
+    ) %>%
+    select(Country, `Diff (Mt CO2)`, `% diff`, Rows)
+  component_rows <- top_abs_rows(components, "diff", limit) %>%
+    mutate(
+      Component = summary_label(pick(everything()), c("iso2", "fuel", "sector")),
+      `Diff (Mt CO2)` = fmt_summary_number(diff, scale = 1e6),
+      `% diff` = fmt_summary_pct(pct_diff),
+      Rows = as.character(n_compared)
+    ) %>%
+    select(Component, `Diff (Mt CO2)`, `% diff`, Rows)
+
+  lines <- c(
+    "# get_co2 comparison summary",
+    "",
+    paste0(
+      "**Headline:** EU total diff is **", diff, " Mt CO2 (", pct, ")** for `",
+      target_label, "` vs `", base_label, "`."
+    ),
+    "",
+    "<details>",
+    "<summary>Detailed comparison</summary>",
+    "",
+    "## Top-line metrics",
+    paste0("- Base: `", base_label, "`"),
+    paste0("- Target: `", target_label, "`"),
+    paste0("- date_to: `", date_to, "`"),
+    paste0("- Runner: `", runner, "`"),
+    paste0("- EU total diff: **", diff, " Mt CO2 (", pct, ")**"),
+    paste0(
+      "- Row coverage: compared **", compared, "** rows; base **",
+      n_base, "**, target **", n_target, "**"
+    ),
+    paste0("- Report hash: `", report_hash, "`"),
+    paste0("- Run hashes: base `", base_run_hash, "`, target `", target_run_hash, "`"),
+    paste0("- Directory: `", comparison_dir, "`"),
+    "",
+    "## Key plots",
+    plot_summary_lines(comparison_dir),
+    "",
+    "<details>",
+    "<summary>Run context</summary>",
+    "",
+    md_table(
+      c("Field", "Value"),
+      tibble(
+        Field = c(
+          "`base_ref`", "`target_ref`", "`base_short_sha`", "`target_short_sha`",
+          "`date_to`", "`runner`", "`report_hash`", "`base_run_hash`",
+          "`target_run_hash`"
+        ),
+        Value = c(
+          paste0("`", base_ref, "`"),
+          paste0("`", target_ref, "`"),
+          paste0("`", base_short_sha, "`"),
+          paste0("`", target_short_sha, "`"),
+          paste0("`", date_to, "`"),
+          paste0("`", runner, "`"),
+          paste0("`", report_hash, "`"),
+          paste0("`", base_run_hash, "`"),
+          paste0("`", target_run_hash, "`")
+        )
+      )
+    ),
+    "",
+    "</details>",
+    "",
+    "<details>",
+    paste0("<summary>Top EU component diffs (", min(limit, nrow(eu_components)), ")</summary>"),
+    "",
+    md_table(c("Component", "Diff (Mt CO2)", "% diff", "Rows"), eu_component_rows),
+    "",
+    "</details>",
+    "",
+    "<details>",
+    paste0("<summary>Top country diffs (", min(limit, nrow(countries)), ")</summary>"),
+    "",
+    md_table(c("Country", "Diff (Mt CO2)", "% diff", "Rows"), country_rows),
+    "",
+    "</details>",
+    "",
+    "<details>",
+    paste0("<summary>Top country/fuel/sector component diffs (", min(limit, nrow(components)), ")</summary>"),
+    "",
+    md_table(c("Component", "Diff (Mt CO2)", "% diff", "Rows"), component_rows),
+    "",
+    "</details>",
+    "",
+    "<details>",
+    "<summary>Monthly metric ranges</summary>",
+    "",
+    md_table(
+      c("Table", "RMSE range (Mt CO2)", "R2 range"),
+      tibble(
+        Table = c("Country", "EU component", "Country/fuel/sector component"),
+        `RMSE range (Mt CO2)` = c(
+          metric_range_summary(monthly_country, "rmse", scale = 1e6),
+          metric_range_summary(monthly_eu_component, "rmse", scale = 1e6),
+          metric_range_summary(monthly_component, "rmse", scale = 1e6)
+        ),
+        `R2 range` = c(
+          metric_range_summary(monthly_country, "r2", digits = 3),
+          metric_range_summary(monthly_eu_component, "r2", digits = 3),
+          metric_range_summary(monthly_component, "r2", digits = 3)
+        )
+      )
+    ),
+    "",
+    "</details>",
+    "",
+    "<details>",
+    "<summary>Artifact status</summary>",
+    "",
+    md_table(c("Artifact", "Status"), artifact_status(comparison_dir)),
+    "",
+    "</details>",
+    "",
+    "</details>"
+  )
+
+  writeLines(lines, file.path(comparison_dir, "summary.md"))
+}
+
 validate_comparison_outputs <- function(comparison_dir) {
   missing_outputs <- REQUIRED_OUTPUTS[
     !file.exists(file.path(comparison_dir, REQUIRED_OUTPUTS)) |
@@ -716,12 +1041,36 @@ run_compare <- function(opts) {
   raw_target <- normalizePath(require_option(opts, "raw_target"), mustWork = TRUE)
   base_short_sha <- require_option(opts, "base_short_sha")
   target_short_sha <- require_option(opts, "target_short_sha")
+  base_ref <- require_option(opts, "base_ref")
+  target_ref <- require_option(opts, "target_ref")
+  date_to <- require_option(opts, "date_to")
+  runner <- require_option(opts, "runner")
+  report_hash <- require_option(opts, "report_hash")
+  base_run_hash <- require_option(opts, "base_run_hash")
+  target_run_hash <- require_option(opts, "target_run_hash")
+  summary_limit <- suppressWarnings(as.integer(option_or(opts, "summary_limit", "5")))
+  if (is.na(summary_limit) || summary_limit < 1) {
+    stop("--summary-limit must be an integer of at least 1.")
+  }
 
   base_data <- read_raw(raw_base) %>% normalise_for_compare()
   target_data <- read_raw(raw_target) %>% normalise_for_compare()
 
   pairs <- write_comparison_tables(comparison_dir, base_data, target_data)
   write_plots(pairs, comparison_dir, base_short_sha, target_short_sha)
+  write_version_summary(
+    comparison_dir,
+    summary_limit,
+    base_ref,
+    target_ref,
+    base_short_sha,
+    target_short_sha,
+    date_to,
+    runner,
+    report_hash,
+    base_run_hash,
+    target_run_hash
+  )
   validate_comparison_outputs(comparison_dir)
 
   message("[compare_get_co2.R] Wrote comparison report to ", comparison_dir)

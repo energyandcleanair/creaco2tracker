@@ -1,0 +1,1635 @@
+#!/usr/bin/env python3
+"""Collect and compare get_co2() outputs across versions and external sources."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+import re
+import shlex
+import shutil
+import stat
+import subprocess
+import sys
+import tarfile
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Iterable, Sequence
+
+
+CACHE_ROOT = Path(".tmp/comparison")
+SUPPORT_DIR = Path("scripts/compare_lib")
+RAW_CACHE_VERSION = 3
+REPORT_CACHE_VERSION = 3
+EXTERNAL_SOURCE_CACHE_VERSION = 1
+EXTERNAL_REPORT_CACHE_VERSION = 1
+REF_RUN_DIR_HASH_LEN = 7
+COMPARISON_DIR_HASH_LEN = 7
+EXTERNAL_SOURCE_DIR_HASH_LEN = 7
+EXTERNAL_COMPARISON_DIR_HASH_LEN = 7
+DEFAULT_BASE_REF = "master"
+WORKTREE_ALIASES = {"worktree", "working-tree", "."}
+LOG_PREFIX = "compare"
+DEFAULT_EXTERNAL_SOURCES = "all"
+DEFAULT_EXTERNAL_PERIODS = "annual,monthly"
+DEFAULT_ALLOW_SOURCE_FAILURES = False
+
+
+class CompareError(RuntimeError):
+    """Expected command-line failure."""
+
+
+@dataclass(frozen=True)
+class Paths:
+    repo_root: Path
+    cache_root: Path
+    ref_runs_root: Path
+    comparisons_root: Path
+    external_sources_root: Path
+    external_comparisons_root: Path
+    support_root: Path
+    collect_src: Path
+    compare_src: Path
+    external_collect_src: Path
+    external_compare_src: Path
+
+
+@dataclass(frozen=True)
+class WorktreeState:
+    head_sha: str
+    head_short: str
+    worktree_key: str
+    worktree_hash: str
+    diff_bytes: bytes
+    untracked_paths: tuple[str, ...]
+    status_text: str
+
+    @property
+    def dirty_tracked(self) -> bool:
+        return bool(self.diff_bytes)
+
+    @property
+    def dirty_untracked_unignored(self) -> bool:
+        return bool(self.untracked_paths)
+
+
+@dataclass(frozen=True)
+class Source:
+    ref: str
+    source_type: str
+    sha: str
+    short_sha: str
+    source_id: str
+    dir_label: str
+    worktree: WorktreeState | None = None
+
+
+@dataclass(frozen=True)
+class RawRun:
+    source: Source
+    run_dir: Path
+    cache_key: str
+    run_hash: str
+    date_to: str | None = None
+
+
+@dataclass(frozen=True)
+class ExternalSourceRun:
+    source_dir: Path
+    cache_key: str
+    run_hash: str
+    date_to: str | None = None
+
+
+@dataclass(frozen=True)
+class ComparisonRun:
+    comparison_dir: Path
+    cache_key: str
+    report_hash: str
+
+
+@dataclass(frozen=True)
+class ExternalComparisonRun:
+    comparison_dir: Path
+    cache_key: str
+    report_hash: str
+
+
+@dataclass(frozen=True)
+class Runner:
+    name: str
+
+    @classmethod
+    def from_request(cls, requested_runner: str, repo_root: Path) -> "Runner":
+        if requested_runner not in {"auto", "rscript", "rr"}:
+            die("--runner must be one of: auto, rscript, rr")
+        if requested_runner != "auto":
+            return cls(requested_runner)
+        if is_devcontainer_environment(repo_root):
+            return cls("rscript")
+        return cls("rr")
+
+    def require(self, repo_root: Path) -> None:
+        if self.name == "rscript":
+            if shutil.which("Rscript") is None:
+                die("Rscript is required for --runner rscript")
+        elif self.name == "rr":
+            if not os.access(repo_root / "rr", os.X_OK):
+                die("missing executable rr script at repo root")
+        else:
+            die(f"unsupported resolved runner: {self.name}")
+
+    def run(self, repo_root: Path, work_dir: Path, args: Sequence[str]) -> bool:
+        if self.name == "rscript":
+            return run_status(["Rscript", *args], cwd=work_dir) == 0
+
+        env = os.environ.copy()
+        env["RR_WORK_DIR"] = str(work_dir)
+        return run_status(["./rr", "run", *args], cwd=repo_root, env=env) == 0
+
+
+@dataclass(frozen=True)
+class CollectionWorkspace:
+    source_dir: Path
+    sha_arg: str
+    cleanup_action: Callable[[], None]
+
+    def cleanup(self) -> None:
+        self.cleanup_action()
+
+
+@dataclass(frozen=True)
+class CommitSourceMaterializer:
+    source: Source
+
+    def materialize(self, paths: Paths, tmp_dir: Path) -> CollectionWorkspace:
+        source_dir = tmp_dir / "source"
+        if run_status(
+            ["git", "worktree", "add", "--detach", "--quiet", str(source_dir), self.source.sha],
+            cwd=paths.repo_root,
+        ) != 0:
+            remove_temp_git_worktree(paths.repo_root, source_dir)
+            die(
+                f"failed to create temporary worktree for "
+                f"{self.source.ref} ({self.source.short_sha})"
+            )
+
+        return CollectionWorkspace(
+            source_dir=source_dir,
+            sha_arg=self.source.sha,
+            cleanup_action=lambda: remove_temp_git_worktree(paths.repo_root, source_dir),
+        )
+
+
+@dataclass(frozen=True)
+class WorktreeSourceMaterializer:
+    source: Source
+
+    def materialize(self, paths: Paths, tmp_dir: Path) -> CollectionWorkspace:
+        worktree = self.source.worktree
+        if worktree is None:
+            die("internal error: worktree materializer used without worktree source")
+        assert worktree is not None
+
+        diff_file = tmp_dir / "worktree_diff.patch"
+        status_file = tmp_dir / "worktree_status.txt"
+        untracked_file = tmp_dir / "untracked_files.txt"
+        source_dir = tmp_dir / "source"
+
+        diff_file.write_bytes(worktree.diff_bytes)
+        status_file.write_text(worktree.status_text, encoding="utf-8")
+        untracked_file.write_text("\n".join(worktree.untracked_paths) + "\n", encoding="utf-8")
+        build_working_copy_snapshot(
+            paths.repo_root,
+            source_dir,
+            diff_file,
+            worktree.untracked_paths,
+        )
+
+        return CollectionWorkspace(
+            source_dir=source_dir,
+            sha_arg=f"{self.source.sha}+worktree:{worktree.worktree_hash}",
+            cleanup_action=lambda: shutil.rmtree(source_dir, ignore_errors=True),
+        )
+
+
+def log(message: str, prefix: str = LOG_PREFIX) -> None:
+    print(f"[{prefix}] {message}", flush=True)
+
+
+def die(message: str) -> None:
+    raise CompareError(message)
+
+
+def cmd_text(args: Sequence[str | os.PathLike[str]], cwd: Path | None = None) -> str:
+    result = subprocess.run(
+        [str(arg) for arg in args],
+        cwd=cwd,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if result.returncode != 0:
+        command = shlex.join(str(arg) for arg in args)
+        detail = result.stderr.strip() or result.stdout.strip()
+        die(f"command failed ({command}): {detail}")
+    return result.stdout
+
+
+def cmd_bytes(args: Sequence[str | os.PathLike[str]], cwd: Path | None = None) -> bytes:
+    result = subprocess.run(
+        [str(arg) for arg in args],
+        cwd=cwd,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        command = shlex.join(str(arg) for arg in args)
+        detail = result.stderr.decode("utf-8", "replace").strip()
+        die(f"command failed ({command}): {detail}")
+    return result.stdout
+
+
+def run_status(
+    args: Sequence[str | os.PathLike[str]],
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> int:
+    return subprocess.run([str(arg) for arg in args], cwd=cwd, env=env, check=False).returncode
+
+
+def run_checked(args: Sequence[str | os.PathLike[str]], cwd: Path | None = None) -> None:
+    status = run_status(args, cwd=cwd)
+    if status != 0:
+        die(f"command failed ({shlex.join(str(arg) for arg in args)}) with exit code {status}")
+
+
+def hash_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def hash_text(value: str) -> str:
+    return hash_bytes(value.encode("utf-8"))
+
+
+def hash_file(path: Path) -> str:
+    if not path.is_file():
+        die(f"cannot hash missing file: {path}")
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def stable_hash(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hash_bytes(encoded)
+
+
+def short_hash(value: str) -> str:
+    return value[:12]
+
+
+def utc_timestamp() -> str:
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def validate_date_to(value: str) -> str:
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        die(f"--date-to must use YYYY-MM-DD, got: {value}")
+    try:
+        parsed = dt.date.fromisoformat(value)
+    except ValueError as exc:
+        raise CompareError(f"--date-to is not a valid date: {value}") from exc
+    if parsed.isoformat() != value:
+        die(f"--date-to is not a valid date: {value}")
+    return value
+
+
+def is_worktree_alias(value: str) -> bool:
+    return value in WORKTREE_ALIASES
+
+
+def resolve_commit(ref: str, repo_root: Path) -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", f"{ref}^{{commit}}"],
+        cwd=repo_root,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    if result.returncode != 0:
+        die(f"could not resolve ref as a commit: {ref}")
+    return result.stdout.strip()
+
+
+def short_commit(sha: str, repo_root: Path) -> str:
+    return cmd_text(["git", "rev-parse", "--short=12", sha], cwd=repo_root).strip()
+
+
+def repo_root() -> Path:
+    root = cmd_text(["git", "rev-parse", "--show-toplevel"]).strip()
+    return Path(root).resolve()
+
+
+def has_tracked_changes(repo_root: Path) -> bool:
+    return run_status(["git", "diff", "--quiet", "HEAD", "--"], cwd=repo_root) != 0
+
+
+def untracked_unignored_paths(repo_root: Path) -> tuple[str, ...]:
+    raw = cmd_bytes(["git", "ls-files", "--others", "--exclude-standard", "-z"], cwd=repo_root)
+    paths = [os.fsdecode(part) for part in raw.split(b"\0") if part]
+    return tuple(sorted(paths, key=os.fsencode))
+
+
+def hash_untracked_files(paths: Iterable[str], repo_root: Path) -> str:
+    paths = tuple(paths)
+    if not paths:
+        return hash_text("no-untracked-unignored-files")
+
+    digest = hashlib.sha256()
+    for rel_path in paths:
+        digest.update(b"path\0")
+        digest.update(os.fsencode(rel_path))
+        digest.update(b"\0sha256\0")
+        digest.update(hash_file(repo_root / rel_path).encode("ascii"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def read_worktree_state(repo_root: Path, head_sha: str, head_short: str) -> WorktreeState:
+    diff_bytes = cmd_bytes(["git", "diff", "--binary", "HEAD", "--"], cwd=repo_root)
+    untracked = untracked_unignored_paths(repo_root)
+    status_text = cmd_text(
+        ["git", "status", "--short", "--untracked-files=all"],
+        cwd=repo_root,
+    )
+    worktree_key = stable_hash(
+        {
+            "cache_version": RAW_CACHE_VERSION,
+            "head_sha": head_sha,
+            "tracked_diff_hash": hash_bytes(diff_bytes),
+            "untracked_unignored_hash": hash_untracked_files(untracked, repo_root),
+        }
+    )
+    return WorktreeState(
+        head_sha=head_sha,
+        head_short=head_short,
+        worktree_key=worktree_key,
+        worktree_hash=short_hash(worktree_key),
+        diff_bytes=diff_bytes,
+        untracked_paths=untracked,
+        status_text=status_text,
+    )
+
+
+def is_devcontainer_environment(repo_root: Path) -> bool:
+    if os.environ.get("REMOTE_CONTAINERS") == "true":
+        return True
+    if os.environ.get("CODESPACES"):
+        return True
+    if os.environ.get("DEVCONTAINER"):
+        return True
+    if (repo_root / ".devcontainer").is_dir() and str(repo_root).startswith("/workspaces/"):
+        return os.environ.get("R_LIBS_USER") == str(repo_root / ".r-lib")
+    return False
+
+
+def chmod_public_dir(path: Path) -> None:
+    try:
+        path.chmod(path.stat().st_mode | stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+    except FileNotFoundError:
+        return
+
+
+def prepare_collection_source_dir(source_dir: Path, log_prefix: str = LOG_PREFIX) -> None:
+    artifact_dir = source_dir.parent
+    cache_dir = source_dir / "cache"
+    data_dir = source_dir / "data"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    chmod_public_dir(artifact_dir)
+    chmod_public_dir(cache_dir)
+    chmod_public_dir(data_dir)
+    log(f"Source cache dir: {cache_dir}", prefix=log_prefix)
+
+
+def copy_repo_renviron(repo_root: Path, source_dir: Path) -> None:
+    renviron = repo_root / ".Renviron"
+    if renviron.is_file():
+        shutil.copy2(renviron, source_dir / ".Renviron")
+
+
+def remove_temp_git_worktree(repo_root: Path, source_dir: Path) -> None:
+    if not source_dir.exists():
+        return
+    status = run_status(
+        ["git", "worktree", "remove", "--force", str(source_dir)],
+        cwd=repo_root,
+    )
+    if status != 0:
+        shutil.rmtree(source_dir, ignore_errors=True)
+    run_status(["git", "worktree", "prune"], cwd=repo_root)
+
+
+def artifact_allows_reuse(path: Path) -> bool:
+    return path.is_dir() and (path / "complete.ok").is_file()
+
+
+def atomic_promote(tmp_dir: Path, final_dir: Path) -> None:
+    if final_dir.exists():
+        if final_dir.is_dir():
+            shutil.rmtree(final_dir)
+        else:
+            final_dir.unlink()
+    tmp_dir.rename(final_dir)
+
+
+def write_complete(path: Path) -> None:
+    (path / "complete.ok").write_text(f"completed_at_utc={utc_timestamp()}\n", encoding="utf-8")
+
+
+def parse_retry_count() -> int:
+    value = os.environ.get("COMPARE_GET_CO2_COLLECT_RETRIES", "3")
+    try:
+        retries = int(value)
+    except ValueError as exc:
+        raise CompareError(
+            f"COMPARE_GET_CO2_COLLECT_RETRIES must be an integer, got: {value}"
+        ) from exc
+    if retries < 1:
+        die("COMPARE_GET_CO2_COLLECT_RETRIES must be at least 1")
+    return retries
+
+
+def extract_git_archive(repo_root: Path, source_dir: Path) -> None:
+    source_dir.mkdir(parents=True, exist_ok=True)
+    process = subprocess.Popen(
+        ["git", "archive", "--format=tar", "HEAD"],
+        cwd=repo_root,
+        stdout=subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    try:
+        with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
+            archive.extractall(source_dir)
+    finally:
+        process.stdout.close()
+    status = process.wait()
+    if status != 0:
+        die(f"failed to archive HEAD into {source_dir}")
+
+
+def copy_untracked_files(repo_root: Path, source_dir: Path, paths: Sequence[str]) -> None:
+    for rel_path in paths:
+        source = repo_root / rel_path
+        target = source_dir / rel_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+
+def build_working_copy_snapshot(
+    repo_root: Path,
+    source_dir: Path,
+    diff_file: Path,
+    untracked_paths: Sequence[str],
+) -> None:
+    extract_git_archive(repo_root, source_dir)
+
+    if diff_file.stat().st_size > 0:
+        run_checked(["git", "-C", str(source_dir), "init", "-q"], cwd=repo_root)
+        run_checked(
+            ["git", "-C", str(source_dir), "apply", str(diff_file.resolve())],
+            cwd=repo_root,
+        )
+        shutil.rmtree(source_dir / ".git", ignore_errors=True)
+
+    copy_untracked_files(repo_root, source_dir, untracked_paths)
+
+
+def build_paths(root: Path) -> Paths:
+    support_root = root / SUPPORT_DIR
+    return Paths(
+        repo_root=root,
+        cache_root=CACHE_ROOT,
+        ref_runs_root=CACHE_ROOT / "ref_runs",
+        comparisons_root=CACHE_ROOT / "comparisons",
+        external_sources_root=CACHE_ROOT / "external_sources",
+        external_comparisons_root=CACHE_ROOT / "external_comparisons",
+        support_root=support_root,
+        collect_src=support_root / "collect_get_co2.R",
+        compare_src=support_root / "compare_get_co2.R",
+        external_collect_src=support_root / "collect_external_co2_sources.R",
+        external_compare_src=support_root / "compare_get_co2_external.R",
+    )
+
+
+def require_files(paths: Sequence[Path]) -> None:
+    missing = [path for path in paths if not path.is_file()]
+    if missing:
+        die("missing required support file(s): " + ", ".join(str(path) for path in missing))
+
+
+def raw_cache_key(source: Source, date_to: str, collect_script_hash: str) -> str:
+    return stable_hash(
+        {
+            "artifact_type": "ref_run",
+            "cache_version": RAW_CACHE_VERSION,
+            "source_type": source.source_type,
+            "source_id": source.source_id,
+            "args": {"date_to": date_to},
+            "collect_script_hash": collect_script_hash,
+        }
+    )
+
+
+def make_raw_run(
+    source: Source,
+    paths: Paths,
+    date_to: str,
+    collect_script_hash: str,
+) -> RawRun:
+    cache_key = raw_cache_key(source, date_to, collect_script_hash)
+    run_hash = short_hash(cache_key)
+    ref_run_dir_hash = cache_key[:REF_RUN_DIR_HASH_LEN]
+    dirname = f"{ref_run_dir_hash}__{source.dir_label}"
+    return RawRun(
+        source=source,
+        run_dir=paths.ref_runs_root / dirname,
+        cache_key=cache_key,
+        run_hash=run_hash,
+        date_to=date_to,
+    )
+
+
+def external_source_cache_key(
+    target_source: Source,
+    date_to: str,
+    sources: str,
+    periods: str,
+    allow_source_failures: bool,
+    collect_script_hash: str,
+) -> str:
+    return stable_hash(
+        {
+            "artifact_type": "external_sources",
+            "cache_version": EXTERNAL_SOURCE_CACHE_VERSION,
+            "source_type": target_source.source_type,
+            "source_id": target_source.source_id,
+            "args": {
+                "date_to": date_to,
+                "sources": sources,
+                "periods": periods,
+                "allow_source_failures": allow_source_failures,
+            },
+            "collect_script_hash": collect_script_hash,
+        }
+    )
+
+
+def make_external_source_run(
+    target_source: Source,
+    paths: Paths,
+    date_to: str,
+    sources: str,
+    periods: str,
+    allow_source_failures: bool,
+    collect_script_hash: str,
+) -> ExternalSourceRun:
+    cache_key = external_source_cache_key(
+        target_source,
+        date_to,
+        sources,
+        periods,
+        allow_source_failures,
+        collect_script_hash,
+    )
+    dirname = f"{cache_key[:EXTERNAL_SOURCE_DIR_HASH_LEN]}__{target_source.dir_label}"
+    return ExternalSourceRun(
+        source_dir=paths.external_sources_root / dirname,
+        cache_key=cache_key,
+        run_hash=short_hash(cache_key),
+        date_to=date_to,
+    )
+
+
+def comparison_cache_key(base_run: RawRun, target_run: RawRun, compare_script_hash: str) -> str:
+    return stable_hash(
+        {
+            "artifact_type": "comparison",
+            "cache_version": REPORT_CACHE_VERSION,
+            "base_run_key": base_run.cache_key,
+            "target_run_key": target_run.cache_key,
+            "compare_script_hash": compare_script_hash,
+        }
+    )
+
+
+def make_comparison_run(
+    base_run: RawRun,
+    target_run: RawRun,
+    paths: Paths,
+    compare_script_hash: str,
+) -> ComparisonRun:
+    cache_key = comparison_cache_key(base_run, target_run, compare_script_hash)
+    comparison_dir = paths.comparisons_root / (
+        f"{cache_key[:COMPARISON_DIR_HASH_LEN]}__"
+        f"{base_run.source.dir_label}__{target_run.source.dir_label}"
+    )
+    return ComparisonRun(
+        comparison_dir=comparison_dir,
+        cache_key=cache_key,
+        report_hash=short_hash(cache_key),
+    )
+
+
+def external_comparison_cache_key(
+    target_raw_run: RawRun,
+    external_run: ExternalSourceRun,
+    compare_script_hash: str,
+) -> str:
+    return stable_hash(
+        {
+            "artifact_type": "external_comparison",
+            "cache_version": EXTERNAL_REPORT_CACHE_VERSION,
+            "target_run_key": target_raw_run.cache_key,
+            "external_source_key": external_run.cache_key,
+            "compare_script_hash": compare_script_hash,
+        }
+    )
+
+
+def make_external_comparison_run(
+    target_raw_run: RawRun,
+    external_run: ExternalSourceRun,
+    paths: Paths,
+    compare_script_hash: str,
+) -> ExternalComparisonRun:
+    cache_key = external_comparison_cache_key(target_raw_run, external_run, compare_script_hash)
+    comparison_dir = paths.external_comparisons_root / (
+        f"{cache_key[:EXTERNAL_COMPARISON_DIR_HASH_LEN]}__"
+        f"{target_raw_run.source.dir_label}__external"
+    )
+    return ExternalComparisonRun(
+        comparison_dir=comparison_dir,
+        cache_key=cache_key,
+        report_hash=short_hash(cache_key),
+    )
+
+
+def collect_raw_run(
+    label: str,
+    raw_run: RawRun,
+    paths: Paths,
+    date_to: str,
+    runner: Runner,
+    materializer: CommitSourceMaterializer | WorktreeSourceMaterializer,
+) -> None:
+    if artifact_allows_reuse(raw_run.run_dir):
+        log(f"Reusing cached {label} run: {raw_run.run_dir}")
+        return
+
+    raw_run.run_dir.parent.mkdir(parents=True, exist_ok=True)
+    tmp_dir = raw_run.run_dir.with_name(f"{raw_run.run_dir.name}.tmp.{os.getpid()}")
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    tmp_dir.mkdir(parents=True)
+
+    collect_copy = tmp_dir / "collect_get_co2.R"
+    shutil.copy2(paths.collect_src, collect_copy)
+
+    source = raw_run.source
+    log(f"Collecting {label} {source.ref} ({source.short_sha}) into {raw_run.run_dir}...")
+
+    workspace = materializer.materialize(paths, tmp_dir)
+    copy_repo_renviron(paths.repo_root, workspace.source_dir)
+    prepare_collection_source_dir(workspace.source_dir)
+
+    max_attempts = parse_retry_count()
+    for attempt in range(1, max_attempts + 1):
+        (tmp_dir / "raw.csv").unlink(missing_ok=True)
+        ok = runner.run(
+            paths.repo_root,
+            workspace.source_dir,
+            [
+                "../collect_get_co2.R",
+                "--output",
+                "../raw.csv",
+                "--date-to",
+                date_to,
+                "--sha",
+                workspace.sha_arg,
+            ],
+        )
+        if ok:
+            collect_copy.unlink(missing_ok=True)
+            workspace.cleanup()
+            write_complete(tmp_dir)
+            atomic_promote(tmp_dir, raw_run.run_dir)
+            return
+
+        if attempt == max_attempts:
+            workspace.cleanup()
+            die(
+                f"failed to collect {label} {source.ref} ({source.short_sha}) "
+                f"after {max_attempts} attempt(s)"
+            )
+
+        log(f"{label} collection failed; retrying ({attempt}/{max_attempts})...")
+        time.sleep(attempt * 10)
+
+
+def collect_external_sources(
+    external_run: ExternalSourceRun,
+    target_source: Source,
+    paths: Paths,
+    date_to: str,
+    sources: str,
+    periods: str,
+    allow_source_failures: bool,
+    runner: Runner,
+) -> None:
+    if artifact_allows_reuse(external_run.source_dir):
+        log(f"Reusing cached external sources: {external_run.source_dir}")
+        return
+
+    external_run.source_dir.parent.mkdir(parents=True, exist_ok=True)
+    tmp_dir = external_run.source_dir.with_name(
+        f"{external_run.source_dir.name}.tmp.{os.getpid()}"
+    )
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    tmp_dir.mkdir(parents=True)
+    chmod_public_dir(tmp_dir)
+
+    collect_copy = tmp_dir / "collect_external_co2_sources.R"
+    shutil.copy2(paths.external_collect_src, collect_copy)
+
+    log(
+        f"Collecting external sources for {target_source.ref} ({target_source.short_sha}) "
+        f"into {external_run.source_dir}..."
+    )
+
+    workspace = materializer_for(target_source).materialize(paths, tmp_dir)
+    copy_repo_renviron(paths.repo_root, workspace.source_dir)
+    prepare_collection_source_dir(workspace.source_dir)
+
+    ok = runner.run(
+        paths.repo_root,
+        workspace.source_dir,
+        [
+            "../collect_external_co2_sources.R",
+            "--output",
+            "../external_sources.csv",
+            "--source-status",
+            "../source_status.csv",
+            "--date-to",
+            date_to,
+            "--sources",
+            sources,
+            "--periods",
+            periods,
+            "--allow-source-failures",
+            "true" if allow_source_failures else "false",
+            "--sha",
+            workspace.sha_arg,
+        ],
+    )
+    workspace.cleanup()
+    if not ok:
+        die(f"failed to collect external sources: {external_run.source_dir}")
+
+    collect_copy.unlink(missing_ok=True)
+    write_complete(tmp_dir)
+    atomic_promote(tmp_dir, external_run.source_dir)
+
+
+def runner_path(paths: Paths, path: Path) -> str:
+    return os.path.relpath(path.resolve(), start=paths.repo_root)
+
+
+def build_comparison_report(
+    comparison: ComparisonRun,
+    base_run: RawRun,
+    target_run: RawRun,
+    paths: Paths,
+    date_to: str,
+    runner: Runner,
+) -> bool:
+    if artifact_allows_reuse(comparison.comparison_dir):
+        summary_file = comparison.comparison_dir / "summary.md"
+        if not summary_file.is_file() or summary_file.stat().st_size == 0:
+            die(
+                "cached comparison is incomplete (missing summary.md); "
+                "clean comparison cache and rerun"
+            )
+        log(f"Reusing cached comparison report: {comparison.comparison_dir}")
+        return True
+
+    comparison.comparison_dir.parent.mkdir(parents=True, exist_ok=True)
+    tmp_dir = comparison.comparison_dir.with_name(
+        f"{comparison.comparison_dir.name}.tmp.{os.getpid()}"
+    )
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    (tmp_dir / "plots").mkdir(parents=True)
+    chmod_public_dir(tmp_dir)
+    chmod_public_dir(tmp_dir / "plots")
+
+    compare_copy = tmp_dir / "compare_get_co2.R"
+    shutil.copy2(paths.compare_src, compare_copy)
+
+    log(f"Building comparison report: {comparison.comparison_dir}")
+    ok = runner.run(
+        paths.repo_root,
+        paths.repo_root,
+        [
+            runner_path(paths, compare_copy),
+            "--comparison-dir",
+            str(tmp_dir),
+            "--raw-base",
+            runner_path(paths, base_run.run_dir / "raw.csv"),
+            "--raw-target",
+            runner_path(paths, target_run.run_dir / "raw.csv"),
+            "--base-short-sha",
+            base_run.source.short_sha,
+            "--target-short-sha",
+            target_run.source.short_sha,
+            "--base-ref",
+            base_run.source.ref,
+            "--target-ref",
+            target_run.source.ref,
+            "--date-to",
+            date_to,
+            "--runner",
+            runner.name,
+            "--report-hash",
+            comparison.report_hash,
+            "--base-run-hash",
+            base_run.run_hash,
+            "--target-run-hash",
+            target_run.run_hash,
+        ],
+    )
+    if not ok:
+        die(f"failed to build comparison report: {comparison.comparison_dir}")
+
+    compare_copy.unlink(missing_ok=True)
+    write_complete(tmp_dir)
+    atomic_promote(tmp_dir, comparison.comparison_dir)
+    return False
+
+
+def build_external_report(
+    comparison: ExternalComparisonRun,
+    target_raw_run: RawRun,
+    external_run: ExternalSourceRun,
+    paths: Paths,
+    date_to: str,
+    runner: Runner,
+) -> bool:
+    if artifact_allows_reuse(comparison.comparison_dir):
+        summary_file = comparison.comparison_dir / "summary.md"
+        if not summary_file.is_file() or summary_file.stat().st_size == 0:
+            die(
+                "cached external comparison is incomplete (missing summary.md); "
+                "clean external comparison cache and rerun"
+            )
+        log(f"Reusing cached external comparison: {comparison.comparison_dir}")
+        return True
+
+    comparison.comparison_dir.parent.mkdir(parents=True, exist_ok=True)
+    tmp_dir = comparison.comparison_dir.with_name(
+        f"{comparison.comparison_dir.name}.tmp.{os.getpid()}"
+    )
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    (tmp_dir / "plots").mkdir(parents=True)
+    chmod_public_dir(tmp_dir)
+    chmod_public_dir(tmp_dir / "plots")
+
+    compare_copy = tmp_dir / "compare_get_co2_external.R"
+    shutil.copy2(paths.external_compare_src, compare_copy)
+
+    log(f"Building external comparison report: {comparison.comparison_dir}")
+    ok = runner.run(
+        paths.repo_root,
+        paths.repo_root,
+        [
+            runner_path(paths, compare_copy),
+            "--comparison-dir",
+            str(tmp_dir),
+            "--raw-crea",
+            runner_path(paths, target_raw_run.run_dir / "raw.csv"),
+            "--external-raw",
+            runner_path(paths, external_run.source_dir / "external_sources.csv"),
+            "--source-status",
+            runner_path(paths, external_run.source_dir / "source_status.csv"),
+            "--target-label",
+            target_raw_run.source.dir_label,
+            "--date-to",
+            date_to,
+        ],
+    )
+    if not ok:
+        die(f"failed to build external comparison report: {comparison.comparison_dir}")
+
+    compare_copy.unlink(missing_ok=True)
+    write_complete(tmp_dir)
+    atomic_promote(tmp_dir, comparison.comparison_dir)
+    return False
+
+
+def commit_source(ref: str, paths: Paths) -> Source:
+    sha = resolve_commit(ref, paths.repo_root)
+    short_sha = short_commit(sha, paths.repo_root)
+    return Source(
+        ref=ref,
+        source_type="commit",
+        sha=sha,
+        short_sha=short_sha,
+        source_id=sha,
+        dir_label=f"commit_{short_sha}",
+    )
+
+
+def worktree_source(paths: Paths) -> Source:
+    head_sha = resolve_commit("HEAD", paths.repo_root)
+    head_short = short_commit(head_sha, paths.repo_root)
+    state = read_worktree_state(paths.repo_root, head_sha, head_short)
+    return Source(
+        ref="worktree",
+        source_type="worktree",
+        sha=head_sha,
+        short_sha=head_short,
+        source_id=f"worktree:{head_sha}:{state.worktree_key}",
+        dir_label=f"worktree_{head_short}_{state.worktree_hash}",
+        worktree=state,
+    )
+
+
+def materializer_for(source: Source) -> CommitSourceMaterializer | WorktreeSourceMaterializer:
+    if source.source_type == "worktree":
+        return WorktreeSourceMaterializer(source)
+    return CommitSourceMaterializer(source)
+
+
+def source_from_ref(ref: str, paths: Paths) -> Source:
+    if is_worktree_alias(ref):
+        return worktree_source(paths)
+    return commit_source(ref, paths)
+
+
+def default_target_ref(paths: Paths) -> str:
+    tracked_dirty = has_tracked_changes(paths.repo_root)
+    untracked_dirty = bool(untracked_unignored_paths(paths.repo_root))
+    return "worktree" if tracked_dirty or untracked_dirty else "HEAD"
+
+
+def source_metadata(source: Source) -> dict[str, Any]:
+    metadata = {
+        "ref": source.ref,
+        "source_type": source.source_type,
+        "sha": source.sha,
+        "short_sha": source.short_sha,
+        "source_id": source.source_id,
+        "dir_label": source.dir_label,
+    }
+    if source.worktree is not None:
+        metadata["worktree"] = {
+            "head_sha": source.worktree.head_sha,
+            "head_short": source.worktree.head_short,
+            "worktree_key": source.worktree.worktree_key,
+            "worktree_hash": source.worktree.worktree_hash,
+            "untracked_paths": list(source.worktree.untracked_paths),
+            "status_text": source.worktree.status_text,
+        }
+    return metadata
+
+
+def source_from_metadata(metadata: dict[str, Any]) -> Source:
+    required = ("ref", "source_type", "sha", "short_sha", "source_id", "dir_label")
+    missing = [field for field in required if field not in metadata]
+    if missing:
+        die("run metadata is missing source field(s): " + ", ".join(missing))
+    return Source(
+        ref=str(metadata["ref"]),
+        source_type=str(metadata["source_type"]),
+        sha=str(metadata["sha"]),
+        short_sha=str(metadata["short_sha"]),
+        source_id=str(metadata["source_id"]),
+        dir_label=str(metadata["dir_label"]),
+    )
+
+
+def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    tmp_path = path.with_name(f".{path.name}.tmp.{os.getpid()}")
+    tmp_path.write_text(
+        json.dumps(payload, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    tmp_path.replace(path)
+
+
+def read_json(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        die(f"missing metadata file: {path}")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise CompareError(f"invalid JSON metadata: {path}") from exc
+    if not isinstance(payload, dict):
+        die(f"metadata must be a JSON object: {path}")
+    return payload
+
+
+def write_raw_metadata(
+    raw_run: RawRun,
+    *,
+    date_to: str,
+    collect_script_hash: str,
+) -> None:
+    write_json_atomic(
+        raw_run.run_dir / "metadata.json",
+        {
+            "artifact_type": "ref_run",
+            "cache_version": RAW_CACHE_VERSION,
+            "cache_key": raw_run.cache_key,
+            "run_hash": raw_run.run_hash,
+            "date_to": date_to,
+            "collect_script_hash": collect_script_hash,
+            "source": source_metadata(raw_run.source),
+        },
+    )
+
+
+def write_external_metadata(
+    external_run: ExternalSourceRun,
+    *,
+    target_source: Source,
+    date_to: str,
+    sources: str,
+    periods: str,
+    allow_source_failures: bool,
+    collect_script_hash: str,
+) -> None:
+    write_json_atomic(
+        external_run.source_dir / "metadata.json",
+        {
+            "artifact_type": "external_sources",
+            "cache_version": EXTERNAL_SOURCE_CACHE_VERSION,
+            "cache_key": external_run.cache_key,
+            "run_hash": external_run.run_hash,
+            "date_to": date_to,
+            "sources": sources,
+            "periods": periods,
+            "allow_source_failures": allow_source_failures,
+            "collect_script_hash": collect_script_hash,
+            "target_source": source_metadata(target_source),
+        },
+    )
+
+
+def load_raw_run(run_dir: Path) -> RawRun:
+    run_dir = run_dir.resolve()
+    if not (run_dir / "raw.csv").is_file():
+        die(f"raw run directory is missing raw.csv: {run_dir}")
+    metadata = read_json(run_dir / "metadata.json")
+    if metadata.get("artifact_type") != "ref_run":
+        die(f"metadata is not a ref_run artifact: {run_dir / 'metadata.json'}")
+    source_payload = metadata.get("source")
+    if not isinstance(source_payload, dict):
+        die(f"raw run metadata is missing source object: {run_dir / 'metadata.json'}")
+    return RawRun(
+        source=source_from_metadata(source_payload),
+        run_dir=run_dir,
+        cache_key=str(metadata.get("cache_key", "")),
+        run_hash=str(metadata.get("run_hash", "")),
+        date_to=str(metadata.get("date_to", "")),
+    )
+
+
+def load_external_run(source_dir: Path) -> ExternalSourceRun:
+    source_dir = source_dir.resolve()
+    if not (source_dir / "external_sources.csv").is_file():
+        die(f"external source directory is missing external_sources.csv: {source_dir}")
+    if not (source_dir / "source_status.csv").is_file():
+        die(f"external source directory is missing source_status.csv: {source_dir}")
+    metadata = read_json(source_dir / "metadata.json")
+    if metadata.get("artifact_type") != "external_sources":
+        die(f"metadata is not an external_sources artifact: {source_dir / 'metadata.json'}")
+    return ExternalSourceRun(
+        source_dir=source_dir,
+        cache_key=str(metadata.get("cache_key", "")),
+        run_hash=str(metadata.get("run_hash", "")),
+        date_to=str(metadata.get("date_to", "")),
+    )
+
+
+def emit_dir(path: str, directory: Path) -> None:
+    output = Path(path)
+    parent = output.parent
+    if not parent.is_dir():
+        die(f"output parent directory does not exist: {parent}")
+
+    tmp_output = parent / f".{output.name}.tmp.{os.getpid()}"
+    payload = os.path.abspath(str(directory))
+    tmp_output.write_text(f"{payload}\n", encoding="utf-8")
+    tmp_output.replace(output)
+
+
+def resolve_metadata_date(explicit_date_to: str | None, metadata_dates: Sequence[str | None]) -> str:
+    if explicit_date_to:
+        date_to = validate_date_to(explicit_date_to)
+        mismatches = sorted({value for value in metadata_dates if value and value != date_to})
+        if mismatches:
+            die(
+                f"--date-to {date_to} does not match collected artifact date(s): "
+                f"{', '.join(mismatches)}"
+            )
+        return date_to
+
+    dates = sorted({value for value in metadata_dates if value})
+    if len(dates) == 1:
+        return validate_date_to(dates[0])
+    if not dates:
+        die("collected artifact metadata does not include date_to")
+    die("collected artifacts have conflicting date_to values: " + ", ".join(dates))
+
+
+def default_runner_env() -> str:
+    return os.environ.get(
+        "COMPARE_RUNNER",
+        os.environ.get("COMPARE_GET_CO2_RUNNER", "auto"),
+    )
+
+
+def resolve_date_to(value: str | None) -> str:
+    return validate_date_to(value or dt.datetime.now(dt.timezone.utc).date().isoformat())
+
+
+def prepare_runner(paths: Paths, requested_runner: str) -> Runner:
+    runner = Runner.from_request(requested_runner, paths.repo_root)
+    runner.require(paths.repo_root)
+    return runner
+
+
+def collect_raw_artifact(
+    label: str,
+    source: Source,
+    paths: Paths,
+    date_to: str,
+    runner: Runner,
+    emit_run_dir: str | None = None,
+) -> RawRun:
+    require_files([paths.collect_src])
+    collect_script_hash = hash_file(paths.collect_src)
+    raw_run = make_raw_run(source, paths, date_to, collect_script_hash)
+
+    paths.ref_runs_root.mkdir(parents=True, exist_ok=True)
+
+    log(f"Cache root: {paths.cache_root}")
+    log(f"Collect kind: {label}")
+    log(f"Pinned date_to: {date_to}")
+    log(f"R runner: {runner.name}")
+    log(f"Source: {source.ref} ({source.source_type}, {source.short_sha})")
+    if source.worktree is not None:
+        log(f"Worktree hash: {source.worktree.worktree_hash}")
+    log(f"Run hash: {raw_run.run_hash}")
+
+    collect_raw_run(label, raw_run, paths, date_to, runner, materializer_for(source))
+    write_raw_metadata(raw_run, date_to=date_to, collect_script_hash=collect_script_hash)
+
+    if emit_run_dir:
+        emit_dir(emit_run_dir, raw_run.run_dir)
+    return raw_run
+
+
+def collect_external_artifact(
+    target_source: Source,
+    paths: Paths,
+    date_to: str,
+    runner: Runner,
+    emit_run_dir: str | None = None,
+) -> ExternalSourceRun:
+    require_files([paths.external_collect_src])
+    collect_script_hash = hash_file(paths.external_collect_src)
+    external_run = make_external_source_run(
+        target_source,
+        paths,
+        date_to,
+        DEFAULT_EXTERNAL_SOURCES,
+        DEFAULT_EXTERNAL_PERIODS,
+        DEFAULT_ALLOW_SOURCE_FAILURES,
+        collect_script_hash,
+    )
+
+    paths.external_sources_root.mkdir(parents=True, exist_ok=True)
+
+    log(f"Cache root: {paths.cache_root}")
+    log("Collect kind: external")
+    log(f"Pinned date_to: {date_to}")
+    log(f"Sources: {DEFAULT_EXTERNAL_SOURCES}")
+    log(f"Periods: {DEFAULT_EXTERNAL_PERIODS}")
+    log(f"Allow source failures: {DEFAULT_ALLOW_SOURCE_FAILURES}")
+    log(f"R runner: {runner.name}")
+    log(f"Target source: {target_source.ref} ({target_source.source_type})")
+    if target_source.worktree is not None:
+        log(f"Worktree hash: {target_source.worktree.worktree_hash}")
+    log(f"External source hash: {external_run.run_hash}")
+
+    collect_external_sources(
+        external_run,
+        target_source,
+        paths,
+        date_to,
+        DEFAULT_EXTERNAL_SOURCES,
+        DEFAULT_EXTERNAL_PERIODS,
+        DEFAULT_ALLOW_SOURCE_FAILURES,
+        runner,
+    )
+    write_external_metadata(
+        external_run,
+        target_source=target_source,
+        date_to=date_to,
+        sources=DEFAULT_EXTERNAL_SOURCES,
+        periods=DEFAULT_EXTERNAL_PERIODS,
+        allow_source_failures=DEFAULT_ALLOW_SOURCE_FAILURES,
+        collect_script_hash=collect_script_hash,
+    )
+
+    if emit_run_dir:
+        emit_dir(emit_run_dir, external_run.source_dir)
+    return external_run
+
+
+def run_collect_base(args: argparse.Namespace) -> int:
+    date_to = validate_date_to(
+        args.date_to or dt.datetime.now(dt.timezone.utc).date().isoformat()
+    )
+
+    root = repo_root()
+    os.chdir(root)
+    paths = build_paths(root)
+    runner = prepare_runner(paths, args.runner)
+
+    ref = args.ref or DEFAULT_BASE_REF
+    if is_worktree_alias(ref):
+        die("collect base requires a commit ref, not the working tree")
+    raw_run = collect_raw_artifact("base", commit_source(ref, paths), paths, date_to, runner, args.emit_run_dir)
+
+    log(f"Done: {raw_run.run_dir}")
+    return 0
+
+
+def run_collect_target(args: argparse.Namespace) -> int:
+    date_to = resolve_date_to(args.date_to)
+
+    root = repo_root()
+    os.chdir(root)
+    paths = build_paths(root)
+    runner = prepare_runner(paths, args.runner)
+
+    ref = args.ref or default_target_ref(paths)
+    raw_run = collect_raw_artifact("target", source_from_ref(ref, paths), paths, date_to, runner, args.emit_run_dir)
+
+    log(f"Done: {raw_run.run_dir}")
+    return 0
+
+
+def run_collect_external(args: argparse.Namespace) -> int:
+    date_to = resolve_date_to(args.date_to)
+
+    root = repo_root()
+    os.chdir(root)
+    paths = build_paths(root)
+    runner = prepare_runner(paths, args.runner)
+
+    ref = args.ref or default_target_ref(paths)
+    external_run = collect_external_artifact(
+        source_from_ref(ref, paths),
+        paths,
+        date_to,
+        runner,
+        args.emit_run_dir,
+    )
+
+    log(f"Done: {external_run.source_dir}")
+    return 0
+
+
+def choose_version_refs(positional: Sequence[str], paths: Paths) -> tuple[str, str]:
+    if len(positional) > 2:
+        die("version expects at most two positional refs")
+    if len(positional) == 0:
+        return DEFAULT_BASE_REF, default_target_ref(paths)
+    if len(positional) == 1:
+        if is_worktree_alias(positional[0]):
+            return DEFAULT_BASE_REF, "worktree"
+        return positional[0], default_target_ref(paths)
+    return positional[0], positional[1]
+
+
+def build_version_report_from_runs(
+    base_run: RawRun,
+    target_run: RawRun,
+    paths: Paths,
+    runner: Runner,
+    date_to: str | None,
+    emit_comparison_dir: str | None,
+) -> int:
+    if not base_run.cache_key or not target_run.cache_key:
+        die("raw run metadata is missing cache_key")
+    date_to = resolve_metadata_date(date_to, [base_run.date_to, target_run.date_to])
+
+    paths.comparisons_root.mkdir(parents=True, exist_ok=True)
+    comparison = make_comparison_run(
+        base_run,
+        target_run,
+        paths,
+        hash_file(paths.compare_src),
+    )
+
+    log(f"Cache root: {paths.cache_root}")
+    log(f"Pinned date_to: {date_to}")
+    log(f"R runner: {runner.name}")
+    log(f"Base source: {base_run.source.ref} ({base_run.source.short_sha})")
+    log(f"Target source: {target_run.source.ref} ({target_run.source.short_sha})")
+    log(f"Base run hash: {base_run.run_hash}")
+    log(f"Target run hash: {target_run.run_hash}")
+    log(f"Report hash: {comparison.report_hash}")
+
+    build_comparison_report(comparison, base_run, target_run, paths, date_to, runner)
+    if emit_comparison_dir:
+        emit_dir(emit_comparison_dir, comparison.comparison_dir)
+
+    log(f"Done: {comparison.comparison_dir}")
+    return 0
+
+
+def run_version(args: argparse.Namespace) -> int:
+    root = repo_root()
+    os.chdir(root)
+    paths = build_paths(root)
+    require_files([paths.compare_src])
+    runner = prepare_runner(paths, args.runner)
+
+    artifact_mode = args.base_run_dir is not None or args.target_run_dir is not None
+    if artifact_mode:
+        if args.base_run_dir is None or args.target_run_dir is None:
+            die("version artifact mode requires both --base-run-dir and --target-run-dir")
+        if args.refs:
+            die("version artifact mode does not accept positional refs")
+        return build_version_report_from_runs(
+            load_raw_run(Path(args.base_run_dir)),
+            load_raw_run(Path(args.target_run_dir)),
+            paths,
+            runner,
+            args.date_to,
+            args.emit_comparison_dir,
+        )
+
+    date_to = resolve_date_to(args.date_to)
+    base_ref, target_ref = choose_version_refs(args.refs, paths)
+    if is_worktree_alias(base_ref):
+        die("base ref cannot be the working tree")
+
+    base_source = commit_source(base_ref, paths)
+    target_source = source_from_ref(target_ref, paths)
+    if base_source.source_id == target_source.source_id:
+        die(f"base and target resolve to the same source: {base_source.short_sha}")
+
+    base_run = collect_raw_artifact("base", base_source, paths, date_to, runner)
+    target_run = collect_raw_artifact("target", target_source, paths, date_to, runner)
+    return build_version_report_from_runs(
+        base_run,
+        target_run,
+        paths,
+        runner,
+        date_to,
+        args.emit_comparison_dir,
+    )
+
+
+def build_external_report_from_runs(
+    target_run: RawRun,
+    external_run: ExternalSourceRun,
+    paths: Paths,
+    runner: Runner,
+    date_to: str | None,
+    emit_comparison_dir: str | None,
+) -> int:
+    if not target_run.cache_key or not external_run.cache_key:
+        die("comparison input metadata is missing cache_key")
+    date_to = resolve_metadata_date(date_to, [target_run.date_to, external_run.date_to])
+
+    paths.external_comparisons_root.mkdir(parents=True, exist_ok=True)
+    comparison = make_external_comparison_run(
+        target_run,
+        external_run,
+        paths,
+        hash_file(paths.external_compare_src),
+    )
+
+    log(f"Cache root: {paths.cache_root}")
+    log(f"Pinned date_to: {date_to}")
+    log(f"R runner: {runner.name}")
+    log(f"Target source: {target_run.source.ref} ({target_run.source.short_sha})")
+    log(f"Target run hash: {target_run.run_hash}")
+    log(f"External source hash: {external_run.run_hash}")
+    log(f"Report hash: {comparison.report_hash}")
+
+    build_external_report(comparison, target_run, external_run, paths, date_to, runner)
+    if emit_comparison_dir:
+        emit_dir(emit_comparison_dir, comparison.comparison_dir)
+
+    log(f"Done: {comparison.comparison_dir}")
+    return 0
+
+
+def run_external(args: argparse.Namespace) -> int:
+    root = repo_root()
+    os.chdir(root)
+    paths = build_paths(root)
+    require_files([paths.external_compare_src])
+    runner = prepare_runner(paths, args.runner)
+
+    artifact_mode = args.target_run_dir is not None or args.external_run_dir is not None
+    if artifact_mode:
+        if args.target_run_dir is None or args.external_run_dir is None:
+            die("external artifact mode requires both --target-run-dir and --external-run-dir")
+        if args.target is not None:
+            die("external artifact mode does not accept a positional target")
+        return build_external_report_from_runs(
+            load_raw_run(Path(args.target_run_dir)),
+            load_external_run(Path(args.external_run_dir)),
+            paths,
+            runner,
+            args.date_to,
+            args.emit_comparison_dir,
+        )
+
+    date_to = resolve_date_to(args.date_to)
+    target_ref = args.target or default_target_ref(paths)
+    target_source = source_from_ref(target_ref, paths)
+    target_run = collect_raw_artifact("target", target_source, paths, date_to, runner)
+    external_run = collect_external_artifact(target_source, paths, date_to, runner)
+    return build_external_report_from_runs(
+        target_run,
+        external_run,
+        paths,
+        runner,
+        date_to,
+        args.emit_comparison_dir,
+    )
+
+
+def add_runner_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--runner",
+        choices=("auto", "rscript", "rr"),
+        default=default_runner_env(),
+        help="R execution mode. Defaults to auto.",
+    )
+
+
+def parse_args(argv: Sequence[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Collect and compare get_co2() outputs.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Subcommands:\n"
+            "  version   compare get_co2 output across versions or refs\n"
+            "  external  compare get_co2 output against external sources\n"
+            "  collect   collect cached artifacts for CI/advanced split runs\n\n"
+            "Artifacts:\n"
+            "  .tmp/comparison/ref_runs/\n"
+            "  .tmp/comparison/external_sources/\n"
+            "  .tmp/comparison/comparisons/\n"
+            "  .tmp/comparison/external_comparisons/"
+        ),
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    collect = subparsers.add_parser(
+        "collect",
+        description=(
+            "Collect and cache artifacts for CI or advanced split runs. "
+            "Most local runs should use the version or external commands instead."
+        ),
+    )
+    collect_subparsers = collect.add_subparsers(dest="collect_command", required=True)
+
+    collect_base = collect_subparsers.add_parser(
+        "base",
+        description="Collect a base get_co2 raw artifact for CI/advanced split runs.",
+    )
+    collect_base.add_argument(
+        "--ref",
+        help="Commit ref to collect. Defaults to master.",
+    )
+    collect_base.add_argument("--date-to", dest="date_to", help="Pin collection end date.")
+    collect_base.add_argument(
+        "--emit-run-dir",
+        dest="emit_run_dir",
+        help="Write absolute collection artifact directory path to this file on success.",
+    )
+    add_runner_arg(collect_base)
+    collect_base.set_defaults(func=run_collect_base)
+
+    collect_target = collect_subparsers.add_parser(
+        "target",
+        description="Collect a target get_co2 raw artifact for CI/advanced split runs.",
+    )
+    collect_target.add_argument(
+        "--ref",
+        help="Commit ref or worktree alias to collect. Defaults to worktree-if-dirty/HEAD.",
+    )
+    collect_target.add_argument("--date-to", dest="date_to", help="Pin collection end date.")
+    collect_target.add_argument(
+        "--emit-run-dir",
+        dest="emit_run_dir",
+        help="Write absolute collection artifact directory path to this file on success.",
+    )
+    add_runner_arg(collect_target)
+    collect_target.set_defaults(func=run_collect_target)
+
+    collect_external = collect_subparsers.add_parser(
+        "external",
+        description="Collect external-source artifacts for CI/advanced split runs.",
+    )
+    collect_external.add_argument(
+        "--ref",
+        help="Target commit ref or worktree alias. Defaults to worktree-if-dirty/HEAD.",
+    )
+    collect_external.add_argument("--date-to", dest="date_to", help="Pin collection end date.")
+    collect_external.add_argument(
+        "--emit-run-dir",
+        dest="emit_run_dir",
+        help="Write absolute collection artifact directory path to this file on success.",
+    )
+    add_runner_arg(collect_external)
+    collect_external.set_defaults(func=run_collect_external)
+
+    version = subparsers.add_parser(
+        "version",
+        description=(
+            "Compare get_co2 output across versions. With refs, collect missing cached "
+            "runs automatically. With run dirs, build from pre-collected CI artifacts."
+        ),
+    )
+    version.add_argument("refs", nargs="*", metavar="ref")
+    version.add_argument("--base-run-dir", help="Collected base raw run directory.")
+    version.add_argument("--target-run-dir", help="Collected target raw run directory.")
+    version.add_argument("--date-to", dest="date_to", help="Pin or validate comparison date_to.")
+    version.add_argument(
+        "--emit-comparison-dir",
+        dest="emit_comparison_dir",
+        help="Write absolute comparison directory path to this file on success.",
+    )
+    add_runner_arg(version)
+    version.set_defaults(func=run_version)
+
+    external = subparsers.add_parser(
+        "external",
+        description=(
+            "Compare get_co2 output against external sources. With a target ref, collect "
+            "missing cached artifacts automatically. With run dirs, build from CI artifacts."
+        ),
+    )
+    external.add_argument("target", nargs="?", metavar="target")
+    external.add_argument(
+        "--target-run-dir",
+        help="Collected target get_co2 raw run directory.",
+    )
+    external.add_argument(
+        "--external-run-dir",
+        help="Collected external source directory.",
+    )
+    external.add_argument("--date-to", dest="date_to", help="Pin or validate comparison date_to.")
+    external.add_argument(
+        "--emit-comparison-dir",
+        dest="emit_comparison_dir",
+        help="Write absolute comparison directory path to this file on success.",
+    )
+    add_runner_arg(external)
+    external.set_defaults(func=run_external)
+
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except CompareError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
