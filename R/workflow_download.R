@@ -10,7 +10,7 @@ download_co2 <- function(
     # weather or not to invalidate it
     use_cache = TRUE,
     refresh_cache = !use_cache,
-    cache_folder = "cache",
+    cache_folder = creaco2tracker_cache_dir(),
     region = iso2s,
     version = version
   ) %>%
@@ -51,7 +51,7 @@ download_gas_demand <- function(
     # weather or not to invalidate it
     use_cache = TRUE,
     refresh_cache = !use_cache,
-    cache_folder = "cache"
+    cache_folder = creaco2tracker_cache_dir()
   ) %>%
     select_if_exists(region_id, date, fuel, sector, unit, frequency, value) %>%
     rename(iso2 = region_id)
@@ -83,7 +83,7 @@ download_corrected_demand <- function(
     # weather or not to invalidate it
     use_cache = TRUE,
     refresh_cache = !use_cache,
-    cache_folder = "cache"
+    cache_folder = creaco2tracker_cache_dir()
   ) %>%
     select_if_exists(region_id, date, fuel, sector, unit, frequency, value)
 }

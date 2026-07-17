@@ -84,7 +84,7 @@ get_weather <- function(
     # weather or not to invalidate it
     use_cache = TRUE,
     refresh_cache = !use_cache,
-    cache_folder = "cache",
+    cache_folder = creaco2tracker_cache_dir(),
     verbose = verbose
   )
 

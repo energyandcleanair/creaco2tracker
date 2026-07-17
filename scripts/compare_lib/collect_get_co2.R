@@ -58,7 +58,8 @@ run_collect <- function(opts) {
   }
 
   dir.create(dirname(output), recursive = TRUE, showWarnings = FALSE)
-  dir.create("cache", recursive = TRUE, showWarnings = FALSE)
+  cache_dir <- Sys.getenv("CREACO2TRACKER_CACHE_DIR", unset = "cache")
+  dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
 
   message("[collect_get_co2.R] Loading package at ", sha)
   devtools::load_all(".", quiet = TRUE)

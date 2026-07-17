@@ -5,6 +5,10 @@ Live charts are available on [CREA's website](https://energyandcleanair.org/prod
 
 Latest methodology document is available [here](https://energyandcleanair.org/wp/wp-content/uploads/2026/01/CO2-methodology.pdf)
 
+For more details about the documentation for surpporting code:
+- [Revision analysis](./doc/revision-analysis.md)
+- [External comparison](./doc/external.md)
+
 ## Recommended Development Setup
 
 Open this repository in the provided VS Code dev container.

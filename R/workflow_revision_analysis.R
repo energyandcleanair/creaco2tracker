@@ -36,6 +36,15 @@ REV_ANALYSIS_DATA_COLLECTION_RETRY_DELAY_SECONDS <- 300
 #' @param include_country_detail_charts Whether to render the per-country and
 #'   per-component detail charts under `charts/details`. Skip this to make the
 #'   analysis faster.
+#' @param use_cache Whether source data may be reused from the configured package
+#'   cache. Point `options(creaco2tracker.cache_dir = ...)` at an empty directory
+#'   for a fresh, isolated cache that can be reused within one analysis.
+#' @param reuse_run_cache Whether completed vintage runs in `output_folder/run_cache`
+#'   may be reused. When false, vintage cache files are neither read nor written.
+#' @param min_year Earliest source year to retain in each vintage run. Defaults
+#'   to the first validation year. Use one earlier year for year-on-year analysis.
+#' @param render_diagnostic_charts Whether to render the standard revision-analysis
+#'   charts. Tables and return values are still produced when false.
 #'
 #' @return A list with vintage metadata, raw CO2 outputs, the canonical vintage
 #'   revision comparison table, debugging summaries, outlier rows, and summary
@@ -44,13 +53,21 @@ REV_ANALYSIS_DATA_COLLECTION_RETRY_DELAY_SECONDS <- 300
 validate_get_co2_revision_analysis <- function(
   output_folder = NULL,
   validation_years = REV_ANALYSIS_VALIDATION_YEARS,
-  include_country_detail_charts = FALSE
+  include_country_detail_charts = FALSE,
+  use_cache = REV_ANALYSIS_USE_CACHE,
+  reuse_run_cache = REV_ANALYSIS_REUSE_RUN_CACHE,
+  min_year = NULL,
+  render_diagnostic_charts = TRUE
 ) {
   .with_revision_analysis_stacktrace(
     .validate_get_co2_revision_analysis_impl(
       output_folder = output_folder,
       validation_years = validation_years,
-      include_country_detail_charts = include_country_detail_charts
+      include_country_detail_charts = include_country_detail_charts,
+      use_cache = use_cache,
+      reuse_run_cache = reuse_run_cache,
+      min_year = min_year,
+      render_diagnostic_charts = render_diagnostic_charts
     ),
     entrypoint = "validate_get_co2_revision_analysis"
   )
@@ -60,13 +77,26 @@ validate_get_co2_revision_analysis <- function(
 .validate_get_co2_revision_analysis_impl <- function(
   output_folder = NULL,
   validation_years = REV_ANALYSIS_VALIDATION_YEARS,
-  include_country_detail_charts = TRUE
+  include_country_detail_charts = TRUE,
+  use_cache = REV_ANALYSIS_USE_CACHE,
+  reuse_run_cache = REV_ANALYSIS_REUSE_RUN_CACHE,
+  min_year = NULL,
+  render_diagnostic_charts = TRUE
 ) {
   analysis_plan <- .get_co2_revision_analysis_year_plan(
     validation_years = validation_years
   )
   run_plan <- .get_co2_revision_analysis_run_plan(analysis_plan)
-  comparison_min_year <- min(analysis_plan$validation_year)
+  first_validation_year <- min(analysis_plan$validation_year)
+  comparison_min_year <- if (is.null(min_year)) {
+    first_validation_year
+  } else {
+    as.integer(min_year)
+  }
+  if (length(comparison_min_year) != 1 || is.na(comparison_min_year) ||
+      comparison_min_year > first_validation_year) {
+    stop("min_year must be one year no later than the first validation year.", call. = FALSE)
+  }
 
   if (is.null(output_folder)) {
     year_label <- if (nrow(analysis_plan) == 1) {
@@ -103,7 +133,9 @@ validate_get_co2_revision_analysis <- function(
       date_to = vintage_date,
       output_folder = output_folder,
       run_name = paste0("vintage_", vintage_date),
-      min_year = comparison_min_year
+      min_year = comparison_min_year,
+      use_cache = use_cache,
+      reuse_run_cache = reuse_run_cache
     )
   })
   all_run_co2 <- bind_rows(all_runs)
@@ -155,7 +187,8 @@ validate_get_co2_revision_analysis <- function(
     reference_vintage_co2 = reference_vintage_co2,
     output_folder = output_folder,
     analysis_plan = analysis_plan,
-    include_country_detail_charts = include_country_detail_charts
+    include_country_detail_charts = include_country_detail_charts,
+    render_diagnostic_charts = render_diagnostic_charts
   )
 
   list(
@@ -233,7 +266,9 @@ validate_get_co2_revision_analysis <- function(
   date_to,
   output_folder,
   run_name,
-  min_year
+  min_year,
+  use_cache = REV_ANALYSIS_USE_CACHE,
+  reuse_run_cache = REV_ANALYSIS_REUSE_RUN_CACHE
 ) {
   attempt <- 1L
   repeat {
@@ -251,7 +286,9 @@ validate_get_co2_revision_analysis <- function(
           data_masking = masking,
           output_folder = output_folder,
           run_name = run_name,
-          min_year = min_year
+          min_year = min_year,
+          use_cache = use_cache,
+          reuse_run_cache = reuse_run_cache
         )
       },
       error = identity
@@ -284,17 +321,24 @@ validate_get_co2_revision_analysis <- function(
   data_masking,
   output_folder,
   run_name,
-  min_year
+  min_year,
+  use_cache = REV_ANALYSIS_USE_CACHE,
+  reuse_run_cache = REV_ANALYSIS_REUSE_RUN_CACHE
 ) {
-  cache_path <- .get_co2_revision_analysis_run_cache_path(
-    output_folder = output_folder,
-    run_name = run_name,
-    date_to = date_to,
-    data_masking = data_masking,
-    min_year = min_year
-  )
+  cache_path <- if (isTRUE(reuse_run_cache)) {
+    .get_co2_revision_analysis_run_cache_path(
+      output_folder = output_folder,
+      run_name = run_name,
+      date_to = date_to,
+      data_masking = data_masking,
+      min_year = min_year,
+      use_cache = use_cache
+    )
+  } else {
+    NULL
+  }
 
-  if (REV_ANALYSIS_REUSE_RUN_CACHE && file.exists(cache_path)) {
+  if (!is.null(cache_path) && file.exists(cache_path)) {
     log_info(paste0("Reading cached get_co2 revision-analysis run from ", cache_path))
     co2 <- cache_parquet_read(cache_path)
     co2$vintage_month <- as.Date(vintage_month)
@@ -311,7 +355,7 @@ validate_get_co2_revision_analysis <- function(
     list(
       diagnostics_folder = diagnostics_folder,
       downscale_daily = REV_ANALYSIS_DOWNSCALE_DAILY,
-      use_cache = REV_ANALYSIS_USE_CACHE,
+      use_cache = use_cache,
       iso2s = get_eu_iso2s(include_eu = TRUE),
       min_year = min_year,
       date_to = date_to,
@@ -323,7 +367,9 @@ validate_get_co2_revision_analysis <- function(
 
   co2 <- do.call(get_co2, args)
   co2$vintage_month <- as.Date(vintage_month)
-  cache_parquet_write(co2, cache_path)
+  if (!is.null(cache_path)) {
+    cache_parquet_write(co2, cache_path)
+  }
   co2
 }
 
@@ -333,7 +379,8 @@ validate_get_co2_revision_analysis <- function(
   run_name,
   date_to,
   data_masking,
-  min_year
+  min_year,
+  use_cache = REV_ANALYSIS_USE_CACHE
 ) {
   cache_dir <- file.path(output_folder, "run_cache")
   create_dir(cache_dir)
@@ -344,6 +391,7 @@ validate_get_co2_revision_analysis <- function(
     iso2s = get_eu_iso2s(include_eu = TRUE),
     downscale_daily = REV_ANALYSIS_DOWNSCALE_DAILY,
     min_year = min_year,
+    use_cache = use_cache,
     ncv_source = REV_ANALYSIS_NCV_SOURCE,
     fill_mode = REV_ANALYSIS_FILL_MODE,
     co2_diagnostics = REV_ANALYSIS_CO2_DIAGNOSTICS

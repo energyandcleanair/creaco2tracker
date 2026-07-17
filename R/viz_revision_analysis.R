@@ -4,7 +4,8 @@ plot_get_co2_revision_analysis_validation <- function(
   reference_vintage_co2,
   output_folder,
   analysis_plan,
-  include_country_detail_charts = TRUE
+  include_country_detail_charts = TRUE,
+  render_diagnostic_charts = TRUE
 ) {
   tables_dir <- file.path(output_folder, "tables")
   summary_dir <- file.path(output_folder, "charts", "summary")
@@ -87,24 +88,28 @@ plot_get_co2_revision_analysis_validation <- function(
     h1_revision_summary
   )
 
-  summary_plot_paths <- .plot_get_co2_revision_analysis_summary_charts(
-    lag_summary = lag_summary,
-    stage_summary = stage_summary,
-    country_summary = country_summary,
-    country_component_summary = country_component_summary,
-    trend_direction_agreement = trend_direction_agreement,
-    following_year_revision_summary = following_year_revision_summary,
-    following_year_revision_mean = following_year_revision_mean,
-    h1_revision_summary = h1_revision_summary,
-    h1_revision_mean = h1_revision_mean,
-    comparison_internal = comparison_internal,
-    output_dir = summary_dir,
-    width = REV_ANALYSIS_PLOT_WIDTH,
-    height = REV_ANALYSIS_PLOT_HEIGHT,
-    dpi = REV_ANALYSIS_PLOT_DPI,
-    top_n = REV_ANALYSIS_TOP_N
-  )
-  if (isTRUE(include_country_detail_charts)) {
+  summary_plot_paths <- if (isTRUE(render_diagnostic_charts)) {
+    .plot_get_co2_revision_analysis_summary_charts(
+      lag_summary = lag_summary,
+      stage_summary = stage_summary,
+      country_summary = country_summary,
+      country_component_summary = country_component_summary,
+      trend_direction_agreement = trend_direction_agreement,
+      following_year_revision_summary = following_year_revision_summary,
+      following_year_revision_mean = following_year_revision_mean,
+      h1_revision_summary = h1_revision_summary,
+      h1_revision_mean = h1_revision_mean,
+      comparison_internal = comparison_internal,
+      output_dir = summary_dir,
+      width = REV_ANALYSIS_PLOT_WIDTH,
+      height = REV_ANALYSIS_PLOT_HEIGHT,
+      dpi = REV_ANALYSIS_PLOT_DPI,
+      top_n = REV_ANALYSIS_TOP_N
+    )
+  } else {
+    character()
+  }
+  if (isTRUE(render_diagnostic_charts) && isTRUE(include_country_detail_charts)) {
     .plot_get_co2_revision_analysis_detail_charts(
       comparison_internal = comparison_internal,
       country_summary = country_summary,

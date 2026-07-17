@@ -218,7 +218,13 @@ mask_incomplete_iea_years <- function(data, min_prior_share = 0.2, lookback_year
     select(-prior_typical_mt)
 }
 
-normalise_iea_carbon_emissions <- function(source_id, source, region, date_to) {
+normalise_iea_carbon_emissions <- function(
+  source_id,
+  source,
+  region,
+  date_to,
+  use_cache = TRUE
+) {
   max_year <- year(date_to)
   if (as.Date(paste0(max_year, "-12-31")) > date_to) {
     max_year <- max_year - 1L
@@ -232,7 +238,7 @@ normalise_iea_carbon_emissions <- function(source_id, source, region, date_to) {
     year_from = 1990,
     year_to = max_year,
     iso2 = countries,
-    use_cache = TRUE
+    use_cache = use_cache
   )
   required_cols <- c("iso2", "year", "product_raw", "flow_raw", "unit", "value")
   missing_cols <- setdiff(required_cols, names(raw))
@@ -285,8 +291,9 @@ normalise_iea_carbon_emissions <- function(source_id, source, region, date_to) {
 
 download_carbonmonitor_raw <- function() {
   url <- "https://datas.carbonmonitor.org/API/downloadFullDataset.php?source=carbon_eu"
-  filepath <- "data/CM_EU.csv"
-  if (!file.exists(filepath)) {
+  filepath <- file.path(creaco2tracker_cache_dir(), "external", "CM_EU.csv")
+  use_cache <- getOption("creaco2tracker.external_source_cache", TRUE)
+  if (!isTRUE(use_cache) || !file.exists(filepath)) {
     dir.create(dirname(filepath), showWarnings = FALSE, recursive = TRUE)
     download.file(url, filepath)
   }
@@ -299,7 +306,13 @@ is_carbonmonitor_bunker_sector <- function(sector) {
   str_detect(sector_key, "bunker|aviation|shipping|maritime|marine")
 }
 
-normalise_carbonmonitor_monthly <- function(source_id, source, region, exclude_bunkers = FALSE) {
+normalise_carbonmonitor_monthly <- function(
+  source_id,
+  source,
+  region,
+  exclude_bunkers = FALSE,
+  use_cache = TRUE
+) {
   country_lookup <- c(
     "AUSTRIA" = "AT",
     "BELGIUM" = "BE",
@@ -380,8 +393,20 @@ normalise_carbonmonitor_monthly <- function(source_id, source, region, exclude_b
     )
 }
 
-normalise_carbonmonitor_annual <- function(source_id, source, region, exclude_bunkers = FALSE) {
-  normalise_carbonmonitor_monthly(source_id, source, region, exclude_bunkers) %>%
+normalise_carbonmonitor_annual <- function(
+  source_id,
+  source,
+  region,
+  exclude_bunkers = FALSE,
+  use_cache = TRUE
+) {
+  normalise_carbonmonitor_monthly(
+    source_id,
+    source,
+    region,
+    exclude_bunkers,
+    use_cache = use_cache
+  ) %>%
     group_by(source_id, source, iso2, year) %>%
     summarise(
       value_mt = sum(value_mt, na.rm = TRUE),
@@ -401,7 +426,13 @@ normalise_carbonmonitor_annual <- function(source_id, source, region, exclude_bu
     )
 }
 
-collect_one_source_period <- function(source_row, period, region, date_to = Sys.Date()) {
+collect_one_source_period <- function(
+  source_row,
+  period,
+  region,
+  date_to = Sys.Date(),
+  use_cache = TRUE
+) {
   source_id <- source_row$source_id[[1]]
   source <- source_row$source[[1]]
 
@@ -439,10 +470,17 @@ collect_one_source_period <- function(source_row, period, region, date_to = Sys.
       source_id,
       source,
       region,
-      exclude_bunkers = source_id == "carbon-monitor-excl-bunkers"
+      exclude_bunkers = source_id == "carbon-monitor-excl-bunkers",
+      use_cache = use_cache
     )
   } else if (period == "annual" && source_id == "iea-carbon-emissions") {
-    normalise_iea_carbon_emissions(source_id, source, region, date_to)
+    normalise_iea_carbon_emissions(
+      source_id,
+      source,
+      region,
+      date_to,
+      use_cache = use_cache
+    )
   } else if (period == "annual") {
     normalise_annual_validation_source(source_id, source, region)
   } else if (source_id %in% c("carbon-monitor", "carbon-monitor-excl-bunkers")) {
@@ -450,7 +488,8 @@ collect_one_source_period <- function(source_row, period, region, date_to = Sys.
       source_id,
       source,
       region,
-      exclude_bunkers = source_id == "carbon-monitor-excl-bunkers"
+      exclude_bunkers = source_id == "carbon-monitor-excl-bunkers",
+      use_cache = use_cache
     )
   } else {
     empty_external()
@@ -470,9 +509,12 @@ collect_external_sources <- function(
   sources,
   periods,
   allow_source_failures,
-  date_to = Sys.Date()
+  date_to = Sys.Date(),
+  use_cache = TRUE
 ) {
   region <- get_eu_iso2s(include_eu = TRUE)
+  old_cache_option <- options(creaco2tracker.external_source_cache = use_cache)
+  on.exit(options(old_cache_option), add = TRUE)
 
   results <- list()
   statuses <- list()
@@ -482,7 +524,13 @@ collect_external_sources <- function(
     source_row <- sources[i, ]
     for (period in periods) {
       result <- tryCatch(
-        collect_one_source_period(source_row, period, region, date_to),
+        collect_one_source_period(
+          source_row,
+          period,
+          region,
+          date_to,
+          use_cache = use_cache
+        ),
         error = function(e) {
           list(
             data = empty_external(),
@@ -532,7 +580,8 @@ run_collect <- function(opts) {
 
   dir.create(dirname(output), recursive = TRUE, showWarnings = FALSE)
   dir.create(dirname(source_status), recursive = TRUE, showWarnings = FALSE)
-  dir.create("cache", recursive = TRUE, showWarnings = FALSE)
+  cache_dir <- Sys.getenv("CREACO2TRACKER_CACHE_DIR", unset = "cache")
+  dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
 
   message("[collect_external_co2_sources.R] Loading package at ", sha)
   devtools::load_all(".", quiet = TRUE)

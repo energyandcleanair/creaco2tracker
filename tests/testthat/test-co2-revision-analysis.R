@@ -1070,9 +1070,14 @@ test_that(
     on.exit(unlink(output_folder, recursive = TRUE), add = TRUE)
 
     include_country_detail_charts_arg <- NULL
+    render_diagnostic_charts_arg <- NULL
+    use_cache_args <- logical()
+    min_year_args <- integer()
 
     local_mocked_bindings(
-      get_co2 = function(date_to, ...) {
+      get_co2 = function(date_to, use_cache, min_year, ...) {
+        use_cache_args <<- c(use_cache_args, use_cache)
+        min_year_args <<- c(min_year_args, min_year)
         month_seq <- seq.Date(
           from = as.Date("2024-01-01"),
           to = lubridate::floor_date(as.Date(date_to), "month"),
@@ -1100,8 +1105,13 @@ test_that(
           )
         )
       },
-      plot_get_co2_revision_analysis_validation = function(..., include_country_detail_charts) {
+      plot_get_co2_revision_analysis_validation = function(
+        ...,
+        include_country_detail_charts,
+        render_diagnostic_charts
+      ) {
         include_country_detail_charts_arg <<- include_country_detail_charts
+        render_diagnostic_charts_arg <<- render_diagnostic_charts
         list(
           vintage_revision_comparison = tibble(example = 1),
           debug_revision_summary = tibble(example = 2),
@@ -1115,10 +1125,18 @@ test_that(
     validate_get_co2_revision_analysis(
       output_folder = output_folder,
       validation_years = 2024,
-      include_country_detail_charts = FALSE
+      include_country_detail_charts = FALSE,
+      use_cache = FALSE,
+      reuse_run_cache = FALSE,
+      min_year = 2023,
+      render_diagnostic_charts = FALSE
     )
 
     expect_false(include_country_detail_charts_arg)
+    expect_false(render_diagnostic_charts_arg)
+    expect_true(all(!use_cache_args))
+    expect_true(all(min_year_args == 2023L))
+    expect_false(dir.exists(file.path(output_folder, "run_cache")))
   }
 )
 
