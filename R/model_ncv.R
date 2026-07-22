@@ -300,56 +300,9 @@ add_ncv_iea_shared <- function(x, diagnostics_folder = NULL, use_cache = TRUE, .
   x_with_ncv
 }
 
-
-# New function to get SIEC fuel mapping
-get_siec_ipcc_fuel_mapping <- function() {
-  tribble(
-    ~siec, ~fuel,
-    SIEC_HARD_COAL, "Anthracite",
-    SIEC_BROWN_COAL, "Lignite",
-    SIEC_BROWN_COAL_BRIQUETTES, "Brown Coal Briquettes",
-    SIEC_CRUDE_OIL, "Crude Oil",
-    SIEC_NATURAL_GAS, "Natural Gas",
-    SIEC_COKE_OVEN_COKE, "Coke Oven Coke and Lignite Coke",
-    SIEC_OIL_PRODUCTS, "Other Petroleum Products",
-    SIEC_ROAD_DIESEL, "Diesel Oil",
-    SIEC_GASOIL_DIESEL, "Gas Oil",
-    SIEC_AVIATION_GASOLINE, "Aviation Gasoline",
-    SIEC_MOTOR_GASOLINE_XBIO, "Motor Gasoline",
-    SIEC_FUEL_OIL, "Residual Fuel Oil",
-    SIEC_HEATING_GASOIL, "Gas Oil",
-    SIEC_KEROSENE_XBIO, "Jet Kerosene"
-  )
-}
-
-
-get_ipcc_data <- function() {
-  read_csv(get_data_filepath("EFDB_output.csv"))
-}
-
-get_ipcc_ncv <- function() {
-  get_ipcc_data() %>%
-    filter(grepl("2006", `Type of parameter`)) %>%
-    filter(
-      Unit %in% ("TJ/Gg"),
-      Description == "Net Calorific Value (NCV)"
-    ) %>%
-    mutate(ncv_kjkg = as.numeric(Value) * 1e3) %>%
-    select(fuel = `Fuel 2006`, ncv_kjkg)
-}
-
-
 add_ncv_ipcc <- function(x, diagnostics_folder = NULL, ...) {
-  # Get IPCC data
-  ipcc <- get_ipcc_ncv()
-
-  # Get SIEC fuel mapping
-  siec_fuel <- get_siec_ipcc_fuel_mapping()
-
-  # Map SIEC codes to IPCC fuels
-  ncvs <- siec_fuel %>%
-    left_join(ipcc, by = "fuel") %>%
-    select(-c(fuel))
+  ncvs <- get_ipcc_ncv() %>%
+    select(siec, ncv_kjkg)
 
   # Write diagnostics if folder is provided
   if (!is_null_or_empty(diagnostics_folder)) {
