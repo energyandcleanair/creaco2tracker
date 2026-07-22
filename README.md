@@ -28,60 +28,156 @@ The container configuration lives in `.devcontainer/` and sets up the project li
 ### CO2
 `get_co2()` builds a consistent monthly CO2 time series using Eurostat fossil fuel and external proxy datasets, then optionally downscales to daily and applies post-processing/validation.
 
+
+#### Monthly pipeline
+
 1. Gather inputs: Eurostat fossil fuel consumption (annual + monthly), industrial production, ENTSOE+EMBER power generation, and gas demand based on ENTSOG (optionally scaled to Eurostat). Building `eurostat_cons` is the main step where much of the sector/fuel attribution logic happens.
 2. Convert energy to CO2 using NCV choices and IPCC emission factors to produce monthly emissions by fuel and sector.
 3. Project and impute missing/recent months with proxy models and EU‑level heuristics, then forecast remaining gaps with uncertainty bounds and reconcile sector totals.
-4. Optionally downscale monthly values to daily using power and gas proxies.
-5. Post‑process outputs (split gas, recombine fuels like peat → coal, add totals, validate, add region names, apply filters).
+4. Post‑process outputs (split gas, recombine fuels like peat → coal, add totals, validate, add region names, apply filters).
 
 ```mermaid
 flowchart TB
   classDef input fill:#edf2ff,stroke:#4263eb,stroke-width:1px,color:#111827
   classDef process fill:#fff4e6,stroke:#f08c00,stroke-width:1px,color:#111827
   classDef data fill:#e6fcf5,stroke:#0ca678,stroke-width:1px,color:#111827
+  classDef modelled fill:#fff4e6,stroke:#e67700,stroke-width:2px,color:#111827
   classDef output fill:#f3f0ff,stroke:#7048e8,stroke-width:2px,color:#111827
 
-  entsoe[(ENTSOE daily<br/>power generation)] --> blend_power{{Blend and correct<br/>power generation}}
-  ember[(EMBER monthly/yearly<br/>power generation)] --> blend_power
-  blend_power --> power_daily[Daily power generation]
+  subgraph power_stage["Power generation"]
+    direction TB
 
-  entsog[(ENTSOG gas flows)] --> estimate_gas{{Estimate and correct<br/>gas demand}}
-  agsi[(AGSI storage)] --> estimate_gas
-  eurostat_gas[(Eurostat monthly gas<br/>for gas-demand correction)] --> estimate_gas
-  estimate_gas --> gas_daily[Daily gas demand]
+    entsoe[(ENTSO-E daily<br/>power generation)]
+    ember[(EMBER monthly/yearly<br/>power generation)]
+    blend_power{{Blend and correct<br/>power generation}}
+    power_daily[Daily power generation]
 
-  indprod[(Eurostat industrial<br/>production)] --> industry_proxy[Industry proxy]
+    entsoe --> blend_power
+    ember --> blend_power
+    blend_power --> power_daily
+  end
 
-  eurostat_energy[(Eurostat energy<br/>oil, solid fuels, gas)] --> build_cons{{Build Eurostat consumption<br/>and sector/fuel mapping}}
-  power_daily --> build_cons
-  build_cons --> eurostat_cons[Monthly consumption<br/>by sector/fuel]
+  subgraph gas_stage["Gas demand"]
+    direction TB
 
-  eurostat_cons --> convert_co2{{Convert energy to CO2}}
-  ncv[(NCV values<br/>IEA or IPCC)] --> convert_co2
-  factors[(IPCC emission factors)] --> convert_co2
-  convert_co2 --> co2_unprojected[Monthly CO2 from<br/>reported consumption]
+    entsog[(ENTSOG gas flows)]
+    agsi[(AGSI storage)]
+    eurostat_gas[(Eurostat monthly gas<br/>for gas-demand correction)]
+    estimate_gas{{Estimate and correct<br/>gas demand}}
+    gas_daily[Daily gas demand]
 
-  co2_unprojected --> project{{Project, impute,<br/>forecast, reconcile}}
-  power_daily --> project
-  industry_proxy --> project
-  gas_daily --> project
-  project --> co2_monthly[Monthly CO2 by sector/fuel<br/>with uncertainty]
+    entsog --> estimate_gas
+    agsi --> estimate_gas
+    eurostat_gas --> estimate_gas
+    estimate_gas --> gas_daily
+  end
 
-  co2_monthly --> downscale{{Optional daily downscale}}
-  gas_daily --> downscale
-  power_daily --> downscale
-  downscale --> co2_daily[Daily CO2 by sector/fuel]
+  subgraph industry_stage["Industry proxy"]
+    direction TB
 
-  co2_monthly --> finalize{{Split gas, recombine fuels,<br/>add totals, validate, label}}
-  co2_daily --> finalize
-  finalize --> get_co2_output["Monthly or daily<br/>get_co2() emissions table"]
+    indprod[(Eurostat industrial<br/>production)]
+    industry_proxy[Industry proxy]
+
+    indprod --> industry_proxy
+  end
+
+  subgraph stable_stage["Reported consumption and emissions"]
+    direction TB
+
+    eurostat_energy[(Eurostat energy<br/>oil, solid fuels, gas)]
+    build_cons{{Build Eurostat consumption<br/>and sector/fuel mapping}}
+    eurostat_cons[Monthly consumption<br/>by sector/fuel]
+
+    ncv[(NCV values<br/>IEA or IPCC)]
+    factors[(IPCC emission factors)]
+    convert_co2{{Convert energy to CO2}}
+    co2_unprojected[Monthly CO2 from<br/>reported consumption]
+
+    eurostat_energy --> build_cons
+    build_cons --> eurostat_cons
+    eurostat_cons --> convert_co2
+    ncv --> convert_co2
+    factors --> convert_co2
+    convert_co2 --> co2_unprojected
+  end
+
+  subgraph model_stage["Imputation and forecasting"]
+    direction TB
+
+    project{{Project, impute,<br/>forecast, reconcile}}
+    co2_monthly[Monthly CO2 by sector/fuel<br/>with uncertainty]
+
+    project --> co2_monthly
+  end
+
+  subgraph final_stage["Monthly output preparation"]
+    direction TB
+
+    finalize{{Split gas, recombine fuels,<br/>add totals, validate, label}}
+    get_co2_output["Monthly get_co2()<br/>emissions table"]
+
+    finalize --> get_co2_output
+  end
+
+  power_stage --> stable_stage
+
+  stable_stage --> model_stage
+  power_stage --> model_stage
+  industry_stage --> model_stage
+  gas_stage --> model_stage
+
+  model_stage --> final_stage
 
   class eurostat_energy,eurostat_gas,entsoe,ember,entsog,agsi,indprod,ncv,factors input
-  class blend_power,estimate_gas,build_cons,convert_co2,project,downscale,finalize process
-  class power_daily,gas_daily,industry_proxy,eurostat_cons,co2_unprojected,co2_monthly,co2_daily data
+  class blend_power,estimate_gas,build_cons,convert_co2,project,finalize process
+  class power_daily,gas_daily,industry_proxy,eurostat_cons,co2_unprojected data
+  class co2_monthly modelled
   class get_co2_output output
+
+  style power_stage fill:#f8f9ff,stroke:#4263eb,stroke-width:1px,color:#111827
+  style gas_stage fill:#f8f9ff,stroke:#4263eb,stroke-width:1px,color:#111827
+  style industry_stage fill:#f8f9ff,stroke:#4263eb,stroke-width:1px,color:#111827
+  style stable_stage fill:#f4fff8,stroke:#0ca678,stroke-width:2px,color:#111827
+  style model_stage fill:#fffbea,stroke:#f08c00,stroke-width:2px,color:#111827
+  style final_stage fill:#faf5ff,stroke:#7048e8,stroke-width:2px,color:#111827
 ```
 
+#### Downscaling
+
+This shows the optional downscaling of monthly values to daily using power and gas proxies.
+
+```mermaid
+flowchart TB
+  classDef input fill:#edf2ff,stroke:#4263eb,stroke-width:1px,color:#111827
+  classDef process fill:#fff4e6,stroke:#f08c00,stroke-width:1px,color:#111827
+  classDef modelled fill:#fff4e6,stroke:#e67700,stroke-width:2px,color:#111827
+  classDef downscaled fill:#e7f5ff,stroke:#1c7ed6,stroke-width:2px,color:#111827
+  classDef output fill:#f3f0ff,stroke:#7048e8,stroke-width:2px,color:#111827
+
+  co2_monthly[Monthly CO2 by sector/fuel<br/>with uncertainty]
+  power_daily[Daily power generation]
+  gas_daily[Daily gas demand]
+
+  downscale{{Allocate monthly emissions<br/>to individual days}}
+  co2_daily[Daily CO2 by sector/fuel]
+
+  finalize{{Split gas, recombine fuels,<br/>add totals, validate, label}}
+  get_co2_output["Daily get_co2()<br/>emissions table"]
+
+  co2_monthly --> downscale
+  power_daily --> downscale
+  gas_daily --> downscale
+
+  downscale --> co2_daily
+  co2_daily --> finalize
+  finalize --> get_co2_output
+
+  class power_daily,gas_daily input
+  class downscale,finalize process
+  class co2_monthly modelled
+  class co2_daily downscaled
+  class get_co2_output output
+```
 ### Weather-controlled CO2
 `get_weather_corrected_co2()` takes the output of `get_co2()` and adjusts emissions for weather‑driven effects in demand and the power mix. It returns a corrected CO2 series plus the correction factors used.
 
