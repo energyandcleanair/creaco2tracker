@@ -289,18 +289,6 @@ normalise_iea_carbon_emissions <- function(
     distinct(source_id, period, iso2, date, .keep_all = TRUE)
 }
 
-download_carbonmonitor_raw <- function() {
-  url <- "https://datas.carbonmonitor.org/API/downloadFullDataset.php?source=carbon_eu"
-  filepath <- file.path(creaco2tracker_cache_dir(), "external", "CM_EU.csv")
-  use_cache <- getOption("creaco2tracker.external_source_cache", TRUE)
-  if (!isTRUE(use_cache) || !file.exists(filepath)) {
-    dir.create(dirname(filepath), showWarnings = FALSE, recursive = TRUE)
-    download.file(url, filepath)
-  }
-
-  suppressWarnings(read_csv(filepath, col_types = cols()))
-}
-
 is_carbonmonitor_bunker_sector <- function(sector) {
   sector_key <- str_squish(str_to_lower(coalesce(sector, "")))
   str_detect(sector_key, "bunker|aviation|shipping|maritime|marine")
@@ -345,7 +333,7 @@ normalise_carbonmonitor_monthly <- function(
     "EU27 & UK" = "EU28"
   )
 
-  raw <- download_carbonmonitor_raw() %>%
+  raw <- load_carbonmonitor_raw() %>%
     distinct(country, date, sector, .keep_all = TRUE) %>%
     mutate(country_key = str_squish(str_to_upper(country))) %>%
     {

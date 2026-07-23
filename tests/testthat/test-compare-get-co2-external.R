@@ -93,7 +93,7 @@ test_that("external source collector aggregates complete Carbon Monitor annual r
     testthat::test_path("..", "..", "scripts", "compare_lib", "collect_external_co2_sources.R"),
     envir = collector_env
   )
-  collector_env$download_carbonmonitor_raw <- function() {
+  collector_env$load_carbonmonitor_raw <- function() {
     days <- seq(as.Date("2023-01-01"), as.Date("2023-12-31"), by = "day")
     tibble(
       country = rep("GERMANY", each = length(days) * 3),
@@ -127,7 +127,7 @@ test_that("external source collector maps Carbon Monitor uppercase countries", {
     testthat::test_path("..", "..", "scripts", "compare_lib", "collect_external_co2_sources.R"),
     envir = collector_env
   )
-  collector_env$download_carbonmonitor_raw <- function() {
+  collector_env$load_carbonmonitor_raw <- function() {
     days <- seq(as.Date("2023-01-01"), as.Date("2023-01-31"), by = "day")
     tibble(
       country = rep(c("GERMANY", "EU27 & UK", "UNITED KINGDOM"), each = length(days)),
@@ -154,7 +154,7 @@ test_that("external source collector can exclude Carbon Monitor bunker sectors",
     testthat::test_path("..", "..", "scripts", "compare_lib", "collect_external_co2_sources.R"),
     envir = collector_env
   )
-  collector_env$download_carbonmonitor_raw <- function() {
+  collector_env$load_carbonmonitor_raw <- function() {
     days <- seq(as.Date("2023-01-01"), as.Date("2023-01-31"), by = "day")
     tibble(
       country = rep("GERMANY", each = length(days) * 3),
