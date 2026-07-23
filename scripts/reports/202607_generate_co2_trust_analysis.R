@@ -20,8 +20,8 @@ TRUST_CACHE_DIR <- file.path(
 )
 TRUST_SETTLING_THRESHOLDS_PCT <- c(0.5, 1, 2)
 TRUST_TREND_THRESHOLDS_PP <- c(0.5, 1, 2)
-TRUST_PLOT_WIDTH <- 11
-TRUST_PLOT_HEIGHT <- 6.2
+TRUST_PLOT_WIDTH <- 12.5
+TRUST_PLOT_HEIGHT <- 5.8
 TRUST_PLOT_DPI <- 320
 
 
@@ -421,7 +421,7 @@ trust_plot_external <- function(plot_data, source_status, path) {
     scale_x_continuous(expand = expansion(mult = 0.01)) +
     scale_y_continuous(labels = label_number(big.mark = ",")) +
     labs(
-      title = "EU emissions datasets show the same broad direction",
+      title = "EU emissions datasets show the same broad direction (1990-2024)",
       subtitle = "Annual fossil CO2 emissions (MtCO2) | EU27 | CREA and Global Carbon Budget emphasised",
       x = NULL,
       y = NULL,
@@ -502,10 +502,14 @@ trust_plot_external_trends <- function(plot_data, path) {
       labels = focus_labels,
       name = NULL
     ) +
-    scale_x_continuous(expand = expansion(mult = 0.01)) +
+    scale_x_continuous(
+      limits = c(TRUST_COMPARISON_MIN_YEAR, TRUST_COMPARISON_MAX_YEAR),
+      breaks = c(1990L, 2000L, 2010L, 2020L, 2024L),
+      expand = expansion(mult = 0.01)
+    ) +
     scale_y_continuous(labels = label_number(suffix = "%", accuracy = 1)) +
     labs(
-      title = "EU emissions datasets show similar annual changes",
+      title = "EU emissions datasets show similar annual changes (1990-2024)",
       subtitle = paste0(
         "Year-on-year change (% of previous year) | EU27 | ",
         "CREA and Global Carbon Budget emphasised"
@@ -581,7 +585,10 @@ trust_plot_level_revisions <- function(level_revisions, path) {
     scale_x_discrete(labels = vintage_labels) +
     scale_y_continuous(labels = label_number(suffix = "%", accuracy = 0.1)) +
     labs(
-      title = "CREA's estimates converge in the months after each reporting period",
+      title = paste0(
+        "CREA's estimates converge in the months after each reporting period ",
+        "(2020-2024)"
+      ),
       subtitle = "How much each estimate differs from the later reference (%) | EU27 | Median red, individual years grey",
       x = "Time (months) after the reporting period ended",
       y = NULL,
