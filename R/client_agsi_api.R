@@ -1,226 +1,112 @@
-.agsi_retry_delay_seconds <- function(
-  retry_number,
-  initial_delay_seconds = 1,
-  backoff_multiplier = 2,
-  max_delay_seconds = 70
-) {
-  min(
-    initial_delay_seconds * backoff_multiplier^(retry_number - 1),
-    max_delay_seconds
+AGSI_COUNTRY_DAILY_URL <- paste0(
+  "https://storage.googleapis.com/crea-aq-data-agsi-public/agsi/current/",
+  "request_version%3D1/country_daily.parquet"
+)
+
+AGSI_COUNTRY_DAILY_CACHE_FILENAME <- "agsi_country_daily.parquet"
+
+
+.agsi_validate_bundle <- function(filepath) {
+  dataset <- arrow::open_dataset(filepath, format = "parquet")
+  required_columns <- c("country_code", "gas_day", "net_withdrawal")
+  missing_columns <- setdiff(required_columns, dataset$schema$names)
+
+  if (length(missing_columns) > 0) {
+    stop(
+      paste0(
+        "AGSI country-daily parquet is missing required columns: ",
+        paste(missing_columns, collapse = ", ")
+      ),
+      call. = FALSE
+    )
+  }
+
+  invisible(filepath)
+}
+
+
+.agsi_download_bundle <- function(filepath, url = AGSI_COUNTRY_DAILY_URL) {
+  status <- utils::download.file(
+    url = url,
+    destfile = filepath,
+    mode = "wb",
+    quiet = TRUE
   )
-}
 
-.agsi_json_field_has_value <- function(value) {
-  if (is.null(value) || length(value) == 0) {
-    return(FALSE)
+  if (!identical(status, 0L)) {
+    stop(
+      paste0("Failed to download AGSI country-daily parquet; status ", status),
+      call. = FALSE
+    )
   }
 
-  value <- unlist(value, use.names = FALSE)
-  any(!is.na(value) & nzchar(as.character(value)))
-}
-
-.agsi_response_error_message <- function(parsed_response) {
-  error_value <- parsed_response$error
-  if (!.agsi_json_field_has_value(error_value)) {
-    return(NULL)
-  }
-
-  message_parts <- c(parsed_response$message, error_value)
-  message_parts <- unlist(message_parts, use.names = FALSE)
-  message_parts <- as.character(message_parts[!is.na(message_parts) & nzchar(message_parts)])
-
-  paste(unique(message_parts), collapse = "; ")
+  invisible(filepath)
 }
 
 
-.fetch_agsi_storage_change_with_retry <- function(
-  url,
-  api_key,
-  iso2,
-  date_from,
-  date_to,
-  max_attempts = 9,
-  initial_delay_seconds = 1,
-  backoff_multiplier = 2,
-  max_delay_seconds = 70
-) {
-  for (attempt in seq_len(max_attempts)) {
-    http_response <- tryCatch(
-      httr::GET(url, httr::add_headers("x-key" = api_key), httr::accept_json()),
-      error = function(e) e
+.agsi_build_bundle_query <- function(filepath, date_from, date_to, iso2) {
+  date_from <- as.Date(date_from)
+  date_to <- as.Date(date_to)
+
+  arrow::open_dataset(filepath, format = "parquet") %>%
+    filter(
+      .data$country_code %in% iso2,
+      .data$gas_day >= date_from,
+      .data$gas_day <= date_to
+    ) %>%
+    select(
+      iso2 = "country_code",
+      date = "gas_day",
+      value_gwh = "net_withdrawal"
     )
+}
 
-    if (inherits(http_response, "error")) {
-      if (attempt == max_attempts) {
-        warning(glue::glue(
-          "AGSI request failed for {iso2} from {date_from} to {date_to} on ",
-          "final attempt {attempt}/{max_attempts}: {conditionMessage(http_response)}"
-        ))
-        return(tibble())
-      }
 
-      delay_seconds <- .agsi_retry_delay_seconds(
-        retry_number = attempt,
-        initial_delay_seconds = initial_delay_seconds,
-        backoff_multiplier = backoff_multiplier,
-        max_delay_seconds = max_delay_seconds
-      )
-
-      log_warn(paste0(
-        "AGSI request failed for {iso2} from {date_from} to {date_to} on ",
-        "attempt {attempt}/{max_attempts}: {conditionMessage(http_response)}. ",
-        "Retrying in {delay_seconds}s."
-      ))
-      Sys.sleep(delay_seconds)
-      next
-    }
-
-    status <- httr::status_code(http_response)
-    response_text <- httr::content(http_response, "text", encoding = "UTF-8")
-
-    if (!identical(status, 200L)) {
-      if (attempt == max_attempts) {
-        warning(glue::glue(
-          "AGSI request returned HTTP {status} for {iso2} from {date_from} to {date_to} ",
-          "on final attempt {attempt}/{max_attempts}."
-        ))
-        return(tibble())
-      }
-
-      delay_seconds <- .agsi_retry_delay_seconds(
-        retry_number = attempt,
-        initial_delay_seconds = initial_delay_seconds,
-        backoff_multiplier = backoff_multiplier,
-        max_delay_seconds = max_delay_seconds
-      )
-
-      log_warn(paste0(
-        "AGSI request returned HTTP {status} for {iso2} from {date_from} to {date_to} ",
-        "on attempt {attempt}/{max_attempts}. Retrying in {delay_seconds}s."
-      ))
-      Sys.sleep(delay_seconds)
-      next
-    }
-
-    parsed_response <- tryCatch(
-      jsonlite::fromJSON(response_text),
-      error = function(e) e
-    )
-
-    if (inherits(parsed_response, "error")) {
-      warning(glue::glue(
-        "Unable to parse AGSI response for {iso2} from {date_from} to {date_to}: ",
-        "{conditionMessage(parsed_response)}"
-      ))
-      return(tibble())
-    }
-
-    error_message <- .agsi_response_error_message(parsed_response)
-    if (!is.null(error_message)) {
-      stop(glue::glue(
-        "AGSI response returned error for {iso2} from {date_from} to {date_to}: ",
-        "{error_message}"
-      ), call. = FALSE)
-    }
-
-    data <- parsed_response$data
-    if (is.null(data)) {
-      return(tibble())
-    }
-
-    data <- tryCatch(
-      as_tibble(data),
-      error = function(e) e
-    )
-
-    if (inherits(data, "error")) {
-      warning(glue::glue(
-        "AGSI response data is not tabular for {iso2} from {date_from} to {date_to}: ",
-        "{conditionMessage(data)}"
-      ))
-      return(tibble())
-    }
-
-    return(data)
-  }
-
-  tibble()
+.agsi_query_bundle <- function(filepath, date_from, date_to, iso2) {
+  .agsi_build_bundle_query(
+    filepath = filepath,
+    date_from = date_from,
+    date_to = date_to,
+    iso2 = iso2
+  ) %>%
+    collect()
 }
 
 
 agsi.get_storage_change <- function(date_from, date_to, iso2, use_cache = TRUE, verbose = FALSE) {
-  pbapply::pblapply(iso2, function(iso2) {
-    log_info("Getting storage change data for {iso2} from {date_from} to {date_to}")
+  log_info("Getting AGSI storage change data from {date_from} to {date_to}")
 
-    MAX_PAGE_SIZE <- as.integer(100000)
-
-    url <- glue(
-      "https://agsi.gie.eu/api",
-      "?country={iso2}",
-      "&from={date_from}",
-      "&to={date_to}",
-      "&page=1",
-      "&size={MAX_PAGE_SIZE}"
+  bundle_path <- if (use_cache) {
+    file.path(
+      creaco2tracker_cache_dir(),
+      AGSI_COUNTRY_DAILY_CACHE_FILENAME
     )
-
-    log_debug("AGSI request URL: {url}")
-
-    cache_key <- list(date_from = date_from, date_to = date_to, iso2 = iso2, url = url)
-    cache_schema_version <- "v1_parquet_cache"
-
-    data <- cache_parquet_get_or_fetch(
-      cache_prefix = "agsi_storage_change",
-      cache_key = cache_key,
-      use_cache = use_cache,
-      cache_schema_version = cache_schema_version,
-      fetch_fun = function() {
-        # Add api key in header only for network calls.
-        api_key <- Sys.getenv("AGSI_API_KEY")
-        if (api_key == "") {
-          stop(glue::glue(
-            "AGSI_API_KEY not set; cannot request AGSI storage data for ",
-            "{iso2} from {date_from} to {date_to}"
-          ), call. = FALSE)
-        }
-
-        log_debug("AGSI_API_KEY is set; requesting AGSI response for {iso2}")
-        .fetch_agsi_storage_change_with_retry(
-          url = url,
-          api_key = api_key,
-          iso2 = iso2,
-          date_from = date_from,
-          date_to = date_to
-        )
-      }
+  } else {
+    file.path(
+      tempdir(),
+      AGSI_COUNTRY_DAILY_CACHE_FILENAME
     )
+  }
 
-    if (nrow(data) == 0 || !"netWithdrawal" %in% names(data)) {
-      log_info("No data for {iso2} from {date_from} to {date_to}")
-      return(NULL)
-    }
-    # Add a check for the size is near the limit of 100,000 records (let's do one extra)
-    if (nrow(data) >= MAX_PAGE_SIZE - 1) {
-      warning(
-        glue(
-          "Data for {iso2} from {date_from} to {date_to}",
-          " may be truncated ({MAX_PAGE_SIZE} record limit)"
-        )
+  cache_file_get_or_refresh(
+    filepath = bundle_path,
+    populate_fun = .agsi_download_bundle,
+    consume_fun = function(filepath) {
+      .agsi_query_bundle(
+        filepath = filepath,
+        date_from = date_from,
+        date_to = date_to,
+        iso2 = iso2
       )
-    }
-
-    data %>%
-      select(
-        iso2 = code,
-        date = gasDayStart,
-        value_gwh = netWithdrawal
-      ) %>%
-      mutate(
-        date = lubridate::date(date),
-        value_gwh = suppressWarnings(as.numeric(value_gwh)),
-        value_m3 = value_gwh * 1e6 / gcv_kwh_m3,
-        type = "storage_drawdown"
-      ) %>%
-      tibble()
-  }) %>%
-    bind_rows()
+    },
+    use_cache = use_cache,
+    is_fresh_fun = cache_file_modified_today,
+    validate_fun = .agsi_validate_bundle
+  ) %>%
+    mutate(
+      value_gwh = suppressWarnings(as.numeric(.data$value_gwh)),
+      value_m3 = .data$value_gwh * 1e6 / gcv_kwh_m3,
+      type = "storage_drawdown"
+    ) %>%
+    tibble()
 }
