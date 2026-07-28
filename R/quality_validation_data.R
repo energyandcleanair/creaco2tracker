@@ -105,9 +105,10 @@ load_carbonmonitor <- function(source_name, region, ...) {
     add_iso2("country") %>%
     # Add EU values
     {
+      carbon_monitor <- .
       bind_rows(
-        .,
-        . %>%
+        carbon_monitor,
+        carbon_monitor %>%
           filter(iso2 %in% get_eu_iso2s()) %>%
           group_by(date, sector) %>%
           summarise(value = sum(value, na.rm = TRUE), .groups = "drop") %>%

@@ -819,7 +819,7 @@ validate_co2_monthly <- function(co2, folder = "diagnostics") {
     ungroup()
 
 
-  ggplot(
+  plt <- ggplot(
     data = bind_rows(
       co2_validate %>%
         filter(
