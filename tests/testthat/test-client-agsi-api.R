@@ -138,6 +138,7 @@ test_that("agsi.get_storage_change retries non-200 responses and succeeds", {
   )
 
   call_count <- 0L
+  sleep_times <- numeric()
 
   local_mocked_bindings(
     GET = function(url, ...) {
@@ -163,6 +164,7 @@ test_that("agsi.get_storage_change retries non-200 responses and succeeds", {
 
   local_mocked_bindings(
     Sys.sleep = function(time) {
+      sleep_times <<- c(sleep_times, time)
       invisible(time)
     },
     .package = "base"
@@ -178,6 +180,7 @@ test_that("agsi.get_storage_change retries non-200 responses and succeeds", {
   )
 
   expect_equal(call_count, 3L)
+  expect_equal(sleep_times, c(1, 2))
   expect_equal(result$iso2, "DE")
   expect_equal(result$date, as.Date("2023-01-02"))
   expect_equal(result$value_gwh, 11.3505)
@@ -207,6 +210,7 @@ test_that("agsi.get_storage_change returns empty result after non-200 retries ar
   )
 
   call_count <- 0L
+  sleep_times <- numeric()
 
   local_mocked_bindings(
     GET = function(url, ...) {
@@ -224,6 +228,7 @@ test_that("agsi.get_storage_change returns empty result after non-200 retries ar
 
   local_mocked_bindings(
     Sys.sleep = function(time) {
+      sleep_times <<- c(sleep_times, time)
       invisible(time)
     },
     .package = "base"
@@ -241,7 +246,8 @@ test_that("agsi.get_storage_change returns empty result after non-200 retries ar
     "HTTP 503"
   )
 
-  expect_equal(call_count, 4L)
+  expect_equal(call_count, 9L)
+  expect_equal(sleep_times, c(1, 2, 4, 8, 16, 32, 64, 70))
   expect_equal(nrow(result), 0)
 })
 

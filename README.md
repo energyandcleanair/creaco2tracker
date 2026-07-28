@@ -5,6 +5,10 @@ Live charts are available on [CREA's website](https://energyandcleanair.org/prod
 
 Latest methodology document is available [here](https://energyandcleanair.org/wp/wp-content/uploads/2026/01/CO2-methodology.pdf)
 
+For more details about the documentation for surpporting code:
+- [Revision analysis](./doc/revision-analysis.md)
+- [External comparison](./doc/external.md)
+
 ## Recommended Development Setup
 
 Open this repository in the provided VS Code dev container.
@@ -24,36 +28,156 @@ The container configuration lives in `.devcontainer/` and sets up the project li
 ### CO2
 `get_co2()` builds a consistent monthly CO2 time series using Eurostat fossil fuel and external proxy datasets, then optionally downscales to daily and applies post-processing/validation.
 
+
+#### Monthly pipeline
+
 1. Gather inputs: Eurostat fossil fuel consumption (annual + monthly), industrial production, ENTSOE+EMBER power generation, and gas demand based on ENTSOG (optionally scaled to Eurostat). Building `eurostat_cons` is the main step where much of the sector/fuel attribution logic happens.
 2. Convert energy to CO2 using NCV choices and IPCC emission factors to produce monthly emissions by fuel and sector.
 3. Project and impute missing/recent months with proxy models and EU‑level heuristics, then forecast remaining gaps with uncertainty bounds and reconcile sector totals.
-4. Optionally downscale monthly values to daily using power and gas proxies.
-5. Post‑process outputs (split gas, recombine fuels like peat → coal, add totals, validate, add region names, apply filters).
+4. Post‑process outputs (split gas, recombine fuels like peat → coal, add totals, validate, add region names, apply filters).
 
 ```mermaid
-flowchart LR
-  
-  B[ENTSOE daily power] --> D[Power generation]
-  D --> C
-  B2[EMBER monthly & yearly power] --> D
-  E[ENTSOG gas flows] --> F[Gas demand]
-  E2[AGSI Storage] --> F
-  E3[EUROSTAT Gas] --> F
-  G[EUROSTAT Industrial Production] --> H[Industry proxy]
-  A[Eurostat annual & monthly energy] --> C[Consumption <br> sector/fuel mapping]
-  C --> I[CO2 conversion]
-  N["NCV values<br/>(IEA or IPCC)"] --> I
-  O[IPCC emission factors] --> I
-  D --> J[Projection & imputation]
-  F --> J
-  H --> J
-  I --> J
-  J --> K[Monthly CO2 by sector/fuel\n+ uncertainty]
-  K --> L["Daily downscale (optional)"]
-  K2[ENTSOG] --> L
-  K3[ENTSOE] --> L
+flowchart TB
+  classDef input fill:#edf2ff,stroke:#4263eb,stroke-width:1px,color:#111827
+  classDef process fill:#fff4e6,stroke:#f08c00,stroke-width:1px,color:#111827
+  classDef data fill:#e6fcf5,stroke:#0ca678,stroke-width:1px,color:#111827
+  classDef modelled fill:#fff4e6,stroke:#e67700,stroke-width:2px,color:#111827
+  classDef output fill:#f3f0ff,stroke:#7048e8,stroke-width:2px,color:#111827
+
+  subgraph power_stage["Power generation"]
+    direction TB
+
+    entsoe[(ENTSO-E daily<br/>power generation)]
+    ember[(EMBER monthly/yearly<br/>power generation)]
+    blend_power{{Blend and correct<br/>power generation}}
+    power_daily[Daily power generation]
+
+    entsoe --> blend_power
+    ember --> blend_power
+    blend_power --> power_daily
+  end
+
+  subgraph gas_stage["Gas demand"]
+    direction TB
+
+    entsog[(ENTSOG gas flows)]
+    agsi[(AGSI storage)]
+    eurostat_gas[(Eurostat monthly gas<br/>for gas-demand correction)]
+    estimate_gas{{Estimate and correct<br/>gas demand}}
+    gas_daily[Daily gas demand]
+
+    entsog --> estimate_gas
+    agsi --> estimate_gas
+    eurostat_gas --> estimate_gas
+    estimate_gas --> gas_daily
+  end
+
+  subgraph industry_stage["Industry proxy"]
+    direction TB
+
+    indprod[(Eurostat industrial<br/>production)]
+    industry_proxy[Industry proxy]
+
+    indprod --> industry_proxy
+  end
+
+  subgraph stable_stage["Reported consumption and emissions"]
+    direction TB
+
+    eurostat_energy[(Eurostat energy<br/>oil, solid fuels, gas)]
+    build_cons{{Build Eurostat consumption<br/>and sector/fuel mapping}}
+    eurostat_cons[Monthly consumption<br/>by sector/fuel]
+
+    ncv[(NCV values<br/>IEA or IPCC)]
+    factors[(IPCC emission factors)]
+    convert_co2{{Convert energy to CO2}}
+    co2_unprojected[Monthly CO2 from<br/>reported consumption]
+
+    eurostat_energy --> build_cons
+    build_cons --> eurostat_cons
+    eurostat_cons --> convert_co2
+    ncv --> convert_co2
+    factors --> convert_co2
+    convert_co2 --> co2_unprojected
+  end
+
+  subgraph model_stage["Imputation and forecasting"]
+    direction TB
+
+    project{{Project, impute,<br/>forecast, reconcile}}
+    co2_monthly[Monthly CO2 by sector/fuel<br/>with uncertainty]
+
+    project --> co2_monthly
+  end
+
+  subgraph final_stage["Monthly output preparation"]
+    direction TB
+
+    finalize{{Split gas, recombine fuels,<br/>add totals, validate, label}}
+    get_co2_output["Monthly get_co2()<br/>emissions table"]
+
+    finalize --> get_co2_output
+  end
+
+  power_stage --> stable_stage
+
+  stable_stage --> model_stage
+  power_stage --> model_stage
+  industry_stage --> model_stage
+  gas_stage --> model_stage
+
+  model_stage --> final_stage
+
+  class eurostat_energy,eurostat_gas,entsoe,ember,entsog,agsi,indprod,ncv,factors input
+  class blend_power,estimate_gas,build_cons,convert_co2,project,finalize process
+  class power_daily,gas_daily,industry_proxy,eurostat_cons,co2_unprojected data
+  class co2_monthly modelled
+  class get_co2_output output
+
+  style power_stage fill:#f8f9ff,stroke:#4263eb,stroke-width:1px,color:#111827
+  style gas_stage fill:#f8f9ff,stroke:#4263eb,stroke-width:1px,color:#111827
+  style industry_stage fill:#f8f9ff,stroke:#4263eb,stroke-width:1px,color:#111827
+  style stable_stage fill:#f4fff8,stroke:#0ca678,stroke-width:2px,color:#111827
+  style model_stage fill:#fffbea,stroke:#f08c00,stroke-width:2px,color:#111827
+  style final_stage fill:#faf5ff,stroke:#7048e8,stroke-width:2px,color:#111827
 ```
 
+#### Downscaling
+
+This shows the optional downscaling of monthly values to daily using power and gas proxies.
+
+```mermaid
+flowchart TB
+  classDef input fill:#edf2ff,stroke:#4263eb,stroke-width:1px,color:#111827
+  classDef process fill:#fff4e6,stroke:#f08c00,stroke-width:1px,color:#111827
+  classDef modelled fill:#fff4e6,stroke:#e67700,stroke-width:2px,color:#111827
+  classDef downscaled fill:#e7f5ff,stroke:#1c7ed6,stroke-width:2px,color:#111827
+  classDef output fill:#f3f0ff,stroke:#7048e8,stroke-width:2px,color:#111827
+
+  co2_monthly[Monthly CO2 by sector/fuel<br/>with uncertainty]
+  power_daily[Daily power generation]
+  gas_daily[Daily gas demand]
+
+  downscale{{Allocate monthly emissions<br/>to individual days}}
+  co2_daily[Daily CO2 by sector/fuel]
+
+  finalize{{Split gas, recombine fuels,<br/>add totals, validate, label}}
+  get_co2_output["Daily get_co2()<br/>emissions table"]
+
+  co2_monthly --> downscale
+  power_daily --> downscale
+  gas_daily --> downscale
+
+  downscale --> co2_daily
+  co2_daily --> finalize
+  finalize --> get_co2_output
+
+  class power_daily,gas_daily input
+  class downscale,finalize process
+  class co2_monthly modelled
+  class co2_daily downscaled
+  class get_co2_output output
+```
 ### Weather-controlled CO2
 `get_weather_corrected_co2()` takes the output of `get_co2()` and adjusts emissions for weather‑driven effects in demand and the power mix. It returns a corrected CO2 series plus the correction factors used.
 
@@ -141,16 +265,16 @@ Rule fields:
 - Matching rows are masked by removing them from the source table, simulating unavailable data as absent rows.
 
 For the default publication-lag revision-analysis setup, use `data_masking_as_of()` or the
-2025 CO2 revision-analysis workflow:
+historical CO2 revision-analysis workflow:
 
 ```r
 results <- validate_get_co2_revision_analysis()
 ```
 
-This runs `get_co2()` at each 2025 month-end for all EU countries plus the EU aggregate,
-using the default as-of masks, and compares each vintage month with the reference vintage
-month `2026-03-01`. Outputs are written by default to
-`diagnostics/get_co2_revision_analysis_2025`.
+This runs `get_co2()` at each unique month-end needed to validate 2020 through 2024 for
+all EU countries plus the EU aggregate, using the default as-of masks. Each validation
+year is compared with the January vintage two years later. Outputs are written by default
+to `diagnostics/get_co2_revision_analysis_2020_2024`.
 
 Key outputs:
 - `tables/vintage_revision_comparison.csv`: One row per comparable estimate with lag buckets,
@@ -158,19 +282,13 @@ Key outputs:
 - `tables/debug_revision_summary.csv`: Lag-bucket and maturity-stage summaries for totals,
   country totals, and country-components.
 - `tables/revision_outliers.csv`: Largest absolute revisions, sorted by tonnes CO2.
-- `tables/country_component_chart_inventory.csv`: Every generated country-component chart path.
+- `tables/following_year_absolute_revision_by_year.csv` and
+  `tables/following_year_absolute_revision_mean.csv`: Inputs for the historical
+  following-year revision charts.
 - `charts/summary/`: Aggregate debugging charts by lag bucket, data maturity, and gross
-  revision contribution.
-- `charts/aggregate_timeseries/` and `charts/country_component/`: Milestone-vintage time
-  series and full country-component debugging charts.
-
-
-## TO DO
-[ ] scale monthly power generation data to yearly values (the latter is more accurate and can be significantly different)
-
-[ ] <span style="color:red">Align weather‑correction models between Weather‑controlled CO2 and Demand components.</span>
-
-[ ] Bring over benchmarks and some of Lauri's analysis from [2025 study](https://github.com/energyandcleanair/202511_2025_eu_emissions)
+  revision contribution, plus following-year absolute, year-share, and raw-revision charts.
+- `charts/details/`: Country and country-component revision heatmaps and maturity-stage
+  debugging charts.
 
 
 ## Running Scripts

@@ -19,29 +19,46 @@ detotalise_co2 <- function(x) {
   # sector should NOT be in group cols
   group_by_cols <- intersect(names(x), c("iso2", "geo", "date", "fuel", "estimate", "unit"))
 
-  # Deduct other from total and other sectors
+  # Deduct known sectors from totals. If every disaggregated sector is known,
+  # the residual is others. If some disaggregated sectors are missing, keep the
+  # residual explicit as unknown instead of folding it into others.
   filler <- x %>%
     filter(sector != SECTOR_OTHERS) %>%
     mutate(factor = ifelse(sector == SECTOR_ALL, 1, -1)) %>%
     group_by_at(group_by_cols) %>%
     filter(
-      any(sector == SECTOR_ALL),
-      !any(sector == SECTOR_OTHERS)
+      any(sector == SECTOR_ALL & !is.na(value)),
+      any(sector != SECTOR_ALL & !is.na(value))
     ) %>%
     summarise(
-      value_deducted = sum(value * factor),
-      sector = SECTOR_OTHERS,
+      value_deducted = sum_or_na(value * factor),
+      sector = if_else(
+        any(sector != SECTOR_ALL & is.na(value)),
+        SECTOR_UNKNOWN,
+        SECTOR_OTHERS
+      ),
       .groups = "drop"
     ) %>%
     arrange(desc(date))
 
   y <- x %>%
     full_join(filler) %>%
-    mutate(value = coalesce(value, value_deducted)) %>%
+    mutate(
+      value = if_else(
+        sector %in% c(SECTOR_OTHERS, SECTOR_UNKNOWN) & !is.na(value_deducted),
+        value_deducted,
+        value
+      )
+    ) %>%
     select(-value_deducted) %>%
     group_by(iso2, fuel, date) %>%
     # Remove total if there is another sector
-    filter(!(sector == SECTOR_ALL & any(sector == SECTOR_OTHERS & !is.na(value)))) %>%
+    filter(
+      !(
+        sector == SECTOR_ALL &
+          any(sector %in% c(SECTOR_OTHERS, SECTOR_UNKNOWN) & !is.na(value))
+      )
+    ) %>%
     ungroup()
 
   return(y)

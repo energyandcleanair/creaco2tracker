@@ -226,3 +226,99 @@ test_that(
     expect_equal_ignore_order(result, test_data)
   }
 )
+
+test_that(
+  "detotalise_co2 fills missing others placeholders from all and known sectors",
+  {
+    test_data <- tibble(
+      iso2 = "EU",
+      geo = "EU",
+      unit = "t",
+      date = as.Date("2023-06-01"),
+      fuel = "oil",
+      sector = c(
+        "all",
+        "electricity",
+        "transport_domestic",
+        "transport_international_aviation",
+        "others"
+      ),
+      value = c(100, 10, 30, 5, NA_real_),
+      estimate = "central"
+    )
+
+    result <- detotalise_co2(test_data)
+
+    res <- result %>%
+      filter(date == as.Date("2023-06-01")) %>%
+      arrange(sector)
+
+    expect_false("all" %in% res$sector)
+    expect_equal(
+      res %>% filter(sector == "others") %>% pull(value),
+      55
+    )
+  }
+)
+
+test_that(
+  "detotalise_co2 overwrites inconsistent others when all and sectors coexist",
+  {
+    test_data <- tibble(
+      iso2 = "EU",
+      geo = "EU",
+      unit = "t",
+      date = as.Date("2023-06-01"),
+      fuel = "oil",
+      sector = c(
+        "all",
+        "electricity",
+        "transport_domestic",
+        "transport_international_aviation",
+        "others"
+      ),
+      value = c(100, 0, 68, 10, 0),
+      estimate = "central"
+    )
+
+    result <- detotalise_co2(test_data)
+
+    expect_false("all" %in% result$sector)
+    expect_equal(
+      result %>% filter(sector == "others") %>% pull(value),
+      22
+    )
+    expect_equal(sum(result$value), 100)
+  }
+)
+
+test_that(
+  "detotalise_co2 keeps residual unknown when some disaggregated sectors are missing",
+  {
+    test_data <- tibble(
+      iso2 = "CY",
+      geo = "CY",
+      unit = "t",
+      date = as.Date("2023-01-01"),
+      fuel = "oil",
+      sector = c(
+        "all",
+        "electricity",
+        "transport_domestic",
+        "transport_international_aviation"
+      ),
+      value = c(100, 10, 30, NA_real_),
+      estimate = "central"
+    )
+
+    result <- detotalise_co2(test_data)
+
+    expect_false("all" %in% result$sector)
+    expect_equal(
+      result %>% filter(sector == SECTOR_UNKNOWN) %>% pull(value),
+      60
+    )
+    expect_false(SECTOR_OTHERS %in% result$sector)
+    expect_no_error(validate_co2_no_sector_all_for_non_total_fuels(result))
+  }
+)

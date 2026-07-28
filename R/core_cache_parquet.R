@@ -1,7 +1,31 @@
+creaco2tracker_cache_dir <- function() {
+  option_value <- getOption("creaco2tracker.cache_dir")
+  env_value <- Sys.getenv("CREACO2TRACKER_CACHE_DIR", unset = "")
+
+  cache_dir <- if (!is.null(option_value)) {
+    option_value
+  } else if (nzchar(env_value)) {
+    env_value
+  } else {
+    "cache"
+  }
+
+  if (!is.character(cache_dir) || length(cache_dir) != 1 || !nzchar(cache_dir)) {
+    stop(
+      "The creaco2tracker cache directory must be one non-empty path.",
+      call. = FALSE
+    )
+  }
+
+  path.expand(cache_dir)
+}
+
+
 cache_parquet_path <- function(cache_prefix, cache_hash, use_cache = TRUE) {
   if (use_cache) {
-    create_dir("cache")
-    file.path("cache", paste0(cache_prefix, "_", cache_hash, ".parquet"))
+    cache_dir <- creaco2tracker_cache_dir()
+    create_dir(cache_dir)
+    file.path(cache_dir, paste0(cache_prefix, "_", cache_hash, ".parquet"))
   } else {
     tempfile(
       pattern = paste0(cache_prefix, "_", cache_hash, "_"),

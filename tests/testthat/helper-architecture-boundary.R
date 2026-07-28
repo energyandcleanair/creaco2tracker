@@ -7,6 +7,7 @@ architecture_get_boundary_config <- function() {
     quality = "^quality_[a-z0-9_]+\\.R$",
     viz = "^viz_[a-z0-9_]+\\.R$",
     core = "^core_[a-z0-9_]+\\.R$",
+    data = "^data_[a-z0-9_]+\\.R$",
     research = "^research_[a-z0-9_]+\\.R$"
   )
 

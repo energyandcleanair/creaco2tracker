@@ -91,16 +91,16 @@ load_gcb <- function(source_name, region, ...) {
   return(gcb)
 }
 
+# Load raw Carbon Monitor data
+load_carbonmonitor_raw <- function() {
+  # Carbon Monitor EU snapshot from https://datas.carbonmonitor.org
+  filepath <- get_data_filepath("CM_EU.csv.gz")
+  suppressWarnings(read_csv(filepath, col_types = cols()))
+}
+
 # Load Carbon Monitor data
 load_carbonmonitor <- function(source_name, region, ...) {
-  url <- "https://datas.carbonmonitor.org/API/downloadFullDataset.php?source=carbon_eu"
-  filepath <- "data/CM_EU.csv"
-  if (!file.exists(filepath)) {
-    dir.create(dirname(filepath), showWarnings = FALSE, recursive = TRUE)
-    download.file(url, filepath)
-  }
-
-  suppressWarnings(read_csv(filepath, col_types = cols())) %>%
+  load_carbonmonitor_raw() %>%
     distinct(country, date, sector, .keep_all = TRUE) %>%
     add_iso2("country") %>%
     # Add EU values
@@ -132,17 +132,10 @@ load_carbonmonitor <- function(source_name, region, ...) {
 
 # Load PRIMAP data
 load_primap <- function(source_name, region, version = "2.6", ...) {
-  filepath <- "data/Guetschow_et_al_2024a-PRIMAP-hist_v2.6_final_13-Sep-2024.csv"
-  url <- paste0(
-    "https://zenodo.org/records/13752654/files/Guetschow_et_",
-    "al_2024a-PRIMAP-hist_v2.6_final_13-Sep-2024.csv?downloa",
-    "d=1"
+  # PRIMAP-hist v2.6 snapshot from https://zenodo.org/records/13752654
+  filepath <- get_data_filepath(
+    "Guetschow_et_al_2024a-PRIMAP-hist_v2.6_final_13-Sep-2024.csv.gz"
   )
-
-  if (!file.exists(filepath)) {
-    dir.create(dirname(filepath), showWarnings = FALSE, recursive = TRUE)
-    download.file(url, filepath)
-  }
 
   with_mineral <- !grepl("excl", source_name, ignore.case = TRUE)
 

@@ -75,7 +75,9 @@ source_catalog <- function() {
     "unfccc", "UNFCCC", TRUE, FALSE,
     "pik", "PIK", TRUE, FALSE,
     "global-carbon-budget-2025", "Global Carbon Budget 2025", TRUE, FALSE,
-    "carbon-monitor", "Carbon Monitor", FALSE, TRUE,
+    "iea-carbon-emissions", "IEA Energy Balance CO2", TRUE, FALSE,
+    "carbon-monitor", "Carbon Monitor", TRUE, TRUE,
+    "carbon-monitor-excl-bunkers", "Carbon Monitor (excl. aviation and shipping)", TRUE, TRUE,
     "primap-energy-and-industry", "PRIMAP Energy and Industry", TRUE, FALSE,
     "primap-energy-and-industry-excl-mineral-industry",
     "PRIMAP Energy and Industry (excl. Mineral industry)", TRUE, FALSE
@@ -166,18 +168,139 @@ normalise_annual_validation_source <- function(source_id, source, region) {
     distinct(source_id, period, iso2, date, .keep_all = TRUE)
 }
 
-download_carbonmonitor_raw <- function() {
-  url <- "https://datas.carbonmonitor.org/API/downloadFullDataset.php?source=carbon_eu"
-  filepath <- "data/CM_EU.csv"
-  if (!file.exists(filepath)) {
-    dir.create(dirname(filepath), showWarnings = FALSE, recursive = TRUE)
-    download.file(url, filepath)
-  }
-
-  suppressWarnings(read_csv(filepath, col_types = cols()))
+iea_co2_factors <- function() {
+  factors <- get_ipcc_emission_factors()
+  tibble::tribble(
+    ~product_raw, ~siec,
+    "COAL", SIEC_HARD_COAL,
+    "NATURAL_GAS", SIEC_NATURAL_GAS,
+    "OIL_TOTAL", SIEC_CRUDE_OIL
+  ) %>%
+    left_join(factors, by = "siec") %>%
+    select(product_raw, co2_factor_t_per_TJ)
 }
 
-normalise_carbonmonitor_monthly <- function(source_id, source, region) {
+iea_combustion_flow_weights <- function() {
+  tibble::tribble(
+    ~flow_raw, ~flow_weight,
+    "TFC", 1,
+    "TOTENGY", -1,
+    "MAINELEC", -1,
+    "MAINCHP", -1,
+    "MAINHEAT", -1,
+    "AUTOELEC", -1,
+    "AUTOCHP", -1,
+    "NE_TOT", -1
+  )
+}
+
+mask_incomplete_iea_years <- function(data, min_prior_share = 0.2, lookback_years = 5L) {
+  data %>%
+    arrange(iso2, year) %>%
+    group_by(iso2) %>%
+    mutate(
+      prior_typical_mt = map_dbl(seq_along(value_mt), function(i) {
+        prior <- value_mt[seq_len(i - 1L)]
+        prior <- tail(prior[!is.na(prior) & prior > 0], lookback_years)
+        if (length(prior) == 0) {
+          NA_real_
+        } else {
+          median(prior)
+        }
+      }),
+      value_mt = if_else(
+        !is.na(prior_typical_mt) & value_mt < min_prior_share * prior_typical_mt,
+        NA_real_,
+        value_mt
+      )
+    ) %>%
+    ungroup() %>%
+    select(-prior_typical_mt)
+}
+
+normalise_iea_carbon_emissions <- function(
+  source_id,
+  source,
+  region,
+  date_to,
+  use_cache = TRUE
+) {
+  max_year <- year(date_to)
+  if (as.Date(paste0(max_year, "-12-31")) > date_to) {
+    max_year <- max_year - 1L
+  }
+  if (max_year < 1990) {
+    return(empty_external())
+  }
+
+  countries <- setdiff(region, "EU")
+  raw <- iea.get_balance(
+    year_from = 1990,
+    year_to = max_year,
+    iso2 = countries,
+    use_cache = use_cache
+  )
+  required_cols <- c("iso2", "year", "product_raw", "flow_raw", "unit", "value")
+  missing_cols <- setdiff(required_cols, names(raw))
+  if (length(missing_cols) > 0) {
+    stop("IEA balance output is missing required column(s): ", paste(missing_cols, collapse = ", "))
+  }
+
+  normalized <- raw %>%
+    mutate(across(c(iso2, product_raw, flow_raw, unit), as.character)) %>%
+    filter(
+      iso2 %in% countries,
+      !is.na(year),
+      !is.na(value),
+      unit == "TJ"
+    ) %>%
+    inner_join(iea_co2_factors(), by = "product_raw") %>%
+    inner_join(iea_combustion_flow_weights(), by = "flow_raw") %>%
+    mutate(value_mt = value * flow_weight * co2_factor_t_per_TJ / 1e6) %>%
+    group_by(iso2, year) %>%
+    summarise(value_mt = sum(value_mt, na.rm = TRUE), .groups = "drop") %>%
+    mask_incomplete_iea_years()
+
+  if (nrow(normalized) == 0) {
+    stop("IEA balance output did not contain usable annual fossil-fuel combustion rows.")
+  }
+
+  eu_rows <- empty_external()
+  if ("EU" %in% region) {
+    eu_rows <- normalized %>%
+      group_by(year) %>%
+      summarise(value_mt = sum_or_na(value_mt), .groups = "drop") %>%
+      mutate(iso2 = "EU")
+  }
+
+  normalized %>%
+    bind_rows(eu_rows) %>%
+    filter(iso2 %in% region) %>%
+    transmute(
+      source_id = source_id,
+      source = source,
+      period = "annual",
+      iso2 = iso2,
+      date = as.Date(paste0(year, "-01-01")),
+      year = as.integer(year),
+      value_mt = value_mt,
+      unit = "Mt"
+    ) %>%
+    distinct(source_id, period, iso2, date, .keep_all = TRUE)
+}
+
+is_carbonmonitor_bunker_sector <- function(sector) {
+  sector_key <- str_squish(str_to_lower(coalesce(sector, "")))
+  str_detect(sector_key, "bunker|aviation|shipping|maritime|marine")
+}
+
+normalise_carbonmonitor_monthly <- function(
+  source_id,
+  source,
+  region,
+  exclude_bunkers = FALSE,
+  use_cache = TRUE
+) {
   country_lookup <- c(
     "AUSTRIA" = "AT",
     "BELGIUM" = "BE",
@@ -210,9 +333,16 @@ normalise_carbonmonitor_monthly <- function(source_id, source, region) {
     "EU27 & UK" = "EU28"
   )
 
-  raw <- download_carbonmonitor_raw() %>%
+  raw <- load_carbonmonitor_raw() %>%
     distinct(country, date, sector, .keep_all = TRUE) %>%
-    mutate(country_key = str_squish(str_to_upper(country)))
+    mutate(country_key = str_squish(str_to_upper(country))) %>%
+    {
+      if (exclude_bunkers) {
+        filter(., !is_carbonmonitor_bunker_sector(sector))
+      } else {
+        .
+      }
+    }
 
   country_rows <- raw %>%
     mutate(iso2 = recode(country_key, !!!country_lookup, .default = NA_character_)) %>%
@@ -251,7 +381,46 @@ normalise_carbonmonitor_monthly <- function(source_id, source, region) {
     )
 }
 
-collect_one_source_period <- function(source_row, period, region) {
+normalise_carbonmonitor_annual <- function(
+  source_id,
+  source,
+  region,
+  exclude_bunkers = FALSE,
+  use_cache = TRUE
+) {
+  normalise_carbonmonitor_monthly(
+    source_id,
+    source,
+    region,
+    exclude_bunkers,
+    use_cache = use_cache
+  ) %>%
+    group_by(source_id, source, iso2, year) %>%
+    summarise(
+      value_mt = sum(value_mt, na.rm = TRUE),
+      n_months = n_distinct(date),
+      .groups = "drop"
+    ) %>%
+    filter(n_months == 12) %>%
+    transmute(
+      source_id = source_id,
+      source = source,
+      period = "annual",
+      iso2 = iso2,
+      date = as.Date(paste0(year, "-01-01")),
+      year = as.integer(year),
+      value_mt = value_mt,
+      unit = "Mt"
+    )
+}
+
+collect_one_source_period <- function(
+  source_row,
+  period,
+  region,
+  date_to = Sys.Date(),
+  use_cache = TRUE
+) {
   source_id <- source_row$source_id[[1]]
   source <- source_row$source[[1]]
 
@@ -281,10 +450,35 @@ collect_one_source_period <- function(source_row, period, region) {
     ))
   }
 
-  data <- if (period == "annual") {
+  data <- if (period == "annual" && source_id %in% c(
+    "carbon-monitor",
+    "carbon-monitor-excl-bunkers"
+  )) {
+    normalise_carbonmonitor_annual(
+      source_id,
+      source,
+      region,
+      exclude_bunkers = source_id == "carbon-monitor-excl-bunkers",
+      use_cache = use_cache
+    )
+  } else if (period == "annual" && source_id == "iea-carbon-emissions") {
+    normalise_iea_carbon_emissions(
+      source_id,
+      source,
+      region,
+      date_to,
+      use_cache = use_cache
+    )
+  } else if (period == "annual") {
     normalise_annual_validation_source(source_id, source, region)
-  } else if (source_id == "carbon-monitor") {
-    normalise_carbonmonitor_monthly(source_id, source, region)
+  } else if (source_id %in% c("carbon-monitor", "carbon-monitor-excl-bunkers")) {
+    normalise_carbonmonitor_monthly(
+      source_id,
+      source,
+      region,
+      exclude_bunkers = source_id == "carbon-monitor-excl-bunkers",
+      use_cache = use_cache
+    )
   } else {
     empty_external()
   }
@@ -299,8 +493,16 @@ collect_one_source_period <- function(source_row, period, region) {
   )
 }
 
-collect_external_sources <- function(sources, periods, allow_source_failures) {
+collect_external_sources <- function(
+  sources,
+  periods,
+  allow_source_failures,
+  date_to = Sys.Date(),
+  use_cache = TRUE
+) {
   region <- get_eu_iso2s(include_eu = TRUE)
+  old_cache_option <- options(creaco2tracker.external_source_cache = use_cache)
+  on.exit(options(old_cache_option), add = TRUE)
 
   results <- list()
   statuses <- list()
@@ -310,7 +512,13 @@ collect_external_sources <- function(sources, periods, allow_source_failures) {
     source_row <- sources[i, ]
     for (period in periods) {
       result <- tryCatch(
-        collect_one_source_period(source_row, period, region),
+        collect_one_source_period(
+          source_row,
+          period,
+          region,
+          date_to,
+          use_cache = use_cache
+        ),
         error = function(e) {
           list(
             data = empty_external(),
@@ -360,7 +568,8 @@ run_collect <- function(opts) {
 
   dir.create(dirname(output), recursive = TRUE, showWarnings = FALSE)
   dir.create(dirname(source_status), recursive = TRUE, showWarnings = FALSE)
-  dir.create("cache", recursive = TRUE, showWarnings = FALSE)
+  cache_dir <- Sys.getenv("CREACO2TRACKER_CACHE_DIR", unset = "cache")
+  dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
 
   message("[collect_external_co2_sources.R] Loading package at ", sha)
   devtools::load_all(".", quiet = TRUE)
@@ -378,7 +587,8 @@ run_collect <- function(opts) {
   collected <- collect_external_sources(
     sources = sources,
     periods = periods,
-    allow_source_failures = allow_source_failures
+    allow_source_failures = allow_source_failures,
+    date_to = date_to
   )
 
   write_csv(collected$data, output, na = "")

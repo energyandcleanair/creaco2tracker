@@ -23,34 +23,102 @@ test_that("external source collector exposes the normalized schema and defaults"
       "unfccc",
       "pik",
       "global-carbon-budget-2025",
+      "iea-carbon-emissions",
       "carbon-monitor",
+      "carbon-monitor-excl-bunkers",
       "primap-energy-and-industry",
       "primap-energy-and-industry-excl-mineral-industry"
     )
   )
   carbon_monitor <- collector_env$source_catalog() %>%
     filter(source_id == "carbon-monitor")
-  expect_false(carbon_monitor$annual)
+  expect_true(carbon_monitor$annual)
   expect_true(carbon_monitor$monthly)
+
+  carbon_monitor_excl_bunkers <- collector_env$source_catalog() %>%
+    filter(source_id == "carbon-monitor-excl-bunkers")
+  expect_true(carbon_monitor_excl_bunkers$annual)
+  expect_true(carbon_monitor_excl_bunkers$monthly)
 })
 
-test_that("external source collector skips unsupported Carbon Monitor annual rows", {
+test_that("external source collector derives IEA annual carbon emissions", {
   collector_env <- new.env(parent = globalenv())
   sys.source(
     testthat::test_path("..", "..", "scripts", "compare_lib", "collect_external_co2_sources.R"),
     envir = collector_env
   )
+  collector_env$iea.get_balance <- function(year_from, year_to, iso2, use_cache) {
+    expect_equal(year_from, 1990)
+    expect_equal(year_to, 2024)
+    expect_equal(iso2, c("DE", "FR"))
+    expect_true(use_cache)
+
+    tibble(
+      iso2 = c("DE", "DE", "DE", "DE", "DE", "FR", "FR", "DE", "FR"),
+      year = c(rep(2023L, 7), 2024L, 2024L),
+      product_raw = c(
+        "NATURAL_GAS", "NATURAL_GAS", "COAL", "OIL_TOTAL",
+        "TOTAL", "NATURAL_GAS", "NATURAL_GAS", "NATURAL_GAS", "NATURAL_GAS"
+      ),
+      flow_raw = c("TFC", "NE_TOT", "MAINELEC", "TFC", "TFC", "TFC", "TFC", "TFC", "TFC"),
+      unit = c("TJ", "TJ", "TJ", "TJ", "TJ", "TJ", "KTOE", "TJ", "TJ"),
+      value = c(1e6, 1e5, -1e6, 1e6, 999, 2e6, 100, 1, 1)
+    )
+  }
+
+  iea <- collector_env$source_catalog() %>%
+    filter(source_id == "iea-carbon-emissions")
+
+  annual <- collector_env$collect_one_source_period(
+    iea,
+    "annual",
+    c("DE", "FR", "EU"),
+    as.Date("2025-06-30")
+  )
+
+  expect_equal(annual$status$status, "ok")
+  expect_equal(
+    annual$data %>% arrange(iso2, year) %>% select(iso2, year, value_mt),
+    tibble(
+      iso2 = c("DE", "DE", "EU", "EU", "FR", "FR"),
+      year = c(2023L, 2024L, 2023L, 2024L, 2023L, 2024L),
+      value_mt = c(215.966, NA, 327.446, NA, 111.48, NA)
+    )
+  )
+})
+
+test_that("external source collector aggregates complete Carbon Monitor annual rows", {
+  collector_env <- new.env(parent = globalenv())
+  sys.source(
+    testthat::test_path("..", "..", "scripts", "compare_lib", "collect_external_co2_sources.R"),
+    envir = collector_env
+  )
+  collector_env$load_carbonmonitor_raw <- function() {
+    days <- seq(as.Date("2023-01-01"), as.Date("2023-12-31"), by = "day")
+    tibble(
+      country = rep("GERMANY", each = length(days) * 3),
+      date = rep(format(days, "%d/%m/%Y"), times = 3),
+      sector = rep(c("Power", "International Aviation", "Shipping"), each = length(days)),
+      value = c(rep(1, length(days)), rep(10, length(days)), rep(100, length(days)))
+    )
+  }
 
   carbon_monitor <- collector_env$source_catalog() %>%
     filter(source_id == "carbon-monitor")
-  result <- collector_env$collect_one_source_period(
-    carbon_monitor,
+  carbon_monitor_excl_bunkers <- collector_env$source_catalog() %>%
+    filter(source_id == "carbon-monitor-excl-bunkers")
+
+  annual_raw <- collector_env$collect_one_source_period(carbon_monitor, "annual", c("DE"))
+  annual_excl_bunkers <- collector_env$collect_one_source_period(
+    carbon_monitor_excl_bunkers,
     "annual",
-    c("DE", "EU")
+    c("DE")
   )
 
-  expect_equal(nrow(result$data), 0)
-  expect_equal(result$status$status, "skipped")
+  expect_equal(annual_raw$data$value_mt, 40515)
+  expect_equal(annual_excl_bunkers$data$value_mt, 365)
+  expect_equal(annual_raw$status$status, "ok")
+  expect_equal(annual_excl_bunkers$status$status, "ok")
 })
 
 test_that("external source collector maps Carbon Monitor uppercase countries", {
@@ -59,7 +127,7 @@ test_that("external source collector maps Carbon Monitor uppercase countries", {
     testthat::test_path("..", "..", "scripts", "compare_lib", "collect_external_co2_sources.R"),
     envir = collector_env
   )
-  collector_env$download_carbonmonitor_raw <- function() {
+  collector_env$load_carbonmonitor_raw <- function() {
     days <- seq(as.Date("2023-01-01"), as.Date("2023-01-31"), by = "day")
     tibble(
       country = rep(c("GERMANY", "EU27 & UK", "UNITED KINGDOM"), each = length(days)),
@@ -78,6 +146,38 @@ test_that("external source collector maps Carbon Monitor uppercase countries", {
 
   expect_equal(monthly$iso2, c("DE", "EU"))
   expect_equal(monthly$value_mt, c(31, 248))
+})
+
+test_that("external source collector can exclude Carbon Monitor bunker sectors", {
+  collector_env <- new.env(parent = globalenv())
+  sys.source(
+    testthat::test_path("..", "..", "scripts", "compare_lib", "collect_external_co2_sources.R"),
+    envir = collector_env
+  )
+  collector_env$load_carbonmonitor_raw <- function() {
+    days <- seq(as.Date("2023-01-01"), as.Date("2023-01-31"), by = "day")
+    tibble(
+      country = rep("GERMANY", each = length(days) * 3),
+      date = rep(format(days, "%d/%m/%Y"), times = 3),
+      sector = rep(c("Power", "International Aviation", "Shipping"), each = length(days)),
+      value = c(rep(1, length(days)), rep(10, length(days)), rep(100, length(days)))
+    )
+  }
+
+  monthly_raw <- collector_env$normalise_carbonmonitor_monthly(
+    "carbon-monitor",
+    "Carbon Monitor",
+    c("DE")
+  )
+  monthly_excl_bunkers <- collector_env$normalise_carbonmonitor_monthly(
+    "carbon-monitor-excl-bunkers",
+    "Carbon Monitor (excl. aviation and shipping)",
+    c("DE"),
+    exclude_bunkers = TRUE
+  )
+
+  expect_equal(monthly_raw$value_mt, 3441)
+  expect_equal(monthly_excl_bunkers$value_mt, 31)
 })
 
 test_that("external comparison filters only complete periods", {

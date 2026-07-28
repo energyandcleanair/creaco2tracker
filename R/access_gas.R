@@ -21,7 +21,8 @@ gas_data_access_get_entsog_flow <- function(
     split_by = "year",
     verbose = verbose,
     use_cache = TRUE,
-    refresh_cache = !use_cache
+    refresh_cache = !use_cache,
+    cache_folder = creaco2tracker_cache_dir()
   ) %>%
     apply_source_data_mask(
       source_name = "entsog_flow_raw",

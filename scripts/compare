@@ -21,12 +21,12 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
 
-CACHE_ROOT = Path(".tmp/comparison")
+CACHE_ROOT = Path(".compare")
 SUPPORT_DIR = Path("scripts/compare_lib")
 RAW_CACHE_VERSION = 3
 REPORT_CACHE_VERSION = 3
-EXTERNAL_SOURCE_CACHE_VERSION = 1
-EXTERNAL_REPORT_CACHE_VERSION = 1
+EXTERNAL_SOURCE_CACHE_VERSION = 4
+EXTERNAL_REPORT_CACHE_VERSION = 4
 REF_RUN_DIR_HASH_LEN = 7
 COMPARISON_DIR_HASH_LEN = 7
 EXTERNAL_SOURCE_DIR_HASH_LEN = 7
@@ -1507,10 +1507,10 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
             "  external  compare get_co2 output against external sources\n"
             "  collect   collect cached artifacts for CI/advanced split runs\n\n"
             "Artifacts:\n"
-            "  .tmp/comparison/ref_runs/\n"
-            "  .tmp/comparison/external_sources/\n"
-            "  .tmp/comparison/comparisons/\n"
-            "  .tmp/comparison/external_comparisons/"
+            f"  {CACHE_ROOT}/ref_runs/\n"
+            f"  {CACHE_ROOT}/external_sources/\n"
+            f"  {CACHE_ROOT}/comparisons/\n"
+            f"  {CACHE_ROOT}/external_comparisons/"
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)

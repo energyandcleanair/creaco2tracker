@@ -25,6 +25,7 @@ DATA_MASKING_HISTORICAL_DEFAULTS <- "historical_defaults"
 SECTOR_ELEC <- "electricity"
 SECTOR_ALL <- "all"
 SECTOR_OTHERS <- "others"
+SECTOR_UNKNOWN <- "unknown"
 
 SECTOR_TRANSPORT <- "transport"
 SECTOR_TRANSPORT_DOMESTIC <- "transport_domestic"
