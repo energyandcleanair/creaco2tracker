@@ -573,9 +573,7 @@ run_collect <- function(opts) {
 
   message("[collect_external_co2_sources.R] Loading package at ", sha)
   devtools::load_all(".", quiet = TRUE)
-  if (requireNamespace("logger", quietly = TRUE)) {
-    logger::log_threshold(logger::TRACE)
-  }
+  logger::log_threshold(logger::TRACE)
 
   message(
     "[collect_external_co2_sources.R] Collecting sources: ",

@@ -63,9 +63,7 @@ run_collect <- function(opts) {
 
   message("[collect_get_co2.R] Loading package at ", sha)
   devtools::load_all(".", quiet = TRUE)
-  if (requireNamespace("logger", quietly = TRUE)) {
-    logger::log_threshold(logger::TRACE)
-  }
+  logger::log_threshold(logger::TRACE)
   message("[collect_get_co2.R] Running get_co2(date_to = ", date_to, ")")
   get_co2_args <- list()
   get_co2_formals <- names(formals(get_co2))
