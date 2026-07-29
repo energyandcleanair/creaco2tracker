@@ -111,7 +111,6 @@ test_that("EMBER installed-capacity client matches known German monthly results"
 
 test_that("AGSI storage-change client matches known German daily results", {
   skip_if_client_integration_disabled()
-  skip_if_client_envvar_missing("AGSI_API_KEY")
 
   workdir <- client_integration_workdir()
   on.exit(cleanup_client_integration_workdir(workdir), add = TRUE)
