@@ -24,6 +24,41 @@ AGSI_COUNTRY_DAILY_CACHE_FILENAME <- "agsi_country_daily.parquet"
   invisible(filepath)
 }
 
+.agsi_check_recent_values <- function(
+  data,
+  date_to,
+  days = 3,
+  reference_date = lubridate::today()
+) {
+  date_to <- as.Date(date_to)
+  reference_date <- as.Date(reference_date)
+  recent_date_from <- reference_date - lubridate::days(days)
+
+  if (length(date_to) != 1 || is.na(date_to) || date_to < recent_date_from) {
+    return(invisible(data))
+  }
+
+  has_recent_values <- nrow(data) > 0 &&
+    all(c("date", "value_gwh") %in% names(data)) &&
+    any(
+      !is.na(data$date) &
+        data$date >= recent_date_from &
+        !is.na(data$value_gwh)
+    )
+
+  if (!has_recent_values) {
+    stop(
+      paste0(
+        "AGSI storage data has no values since ", recent_date_from,
+        "; the latest value must be within ", days, " days of ", reference_date, "."
+      ),
+      call. = FALSE
+    )
+  }
+
+  invisible(data)
+}
+
 
 .agsi_download_bundle <- function(filepath, url = AGSI_COUNTRY_DAILY_URL) {
   status <- utils::download.file(
@@ -88,7 +123,7 @@ agsi.get_storage_change <- function(date_from, date_to, iso2, use_cache = TRUE, 
     )
   }
 
-  cache_file_get_or_refresh(
+  data <- cache_file_get_or_refresh(
     filepath = bundle_path,
     populate_fun = .agsi_download_bundle,
     consume_fun = function(filepath) {
@@ -109,4 +144,7 @@ agsi.get_storage_change <- function(date_from, date_to, iso2, use_cache = TRUE, 
       type = "storage_drawdown"
     ) %>%
     tibble()
+
+  .agsi_check_recent_values(data = data, date_to = date_to)
+  data
 }

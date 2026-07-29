@@ -83,6 +83,41 @@ test_that("agsi.get_storage_change filters and maps the parquet bundle", {
   expect_false(file.exists(file.path(cache_dir, AGSI_COUNTRY_DAILY_CACHE_FILENAME)))
 })
 
+test_that("AGSI current-period data must contain values from the last three days", {
+  reference_date <- as.Date("2026-07-29")
+  fresh_data <- tibble(
+    date = reference_date - 3,
+    value_gwh = 0
+  )
+  stale_data <- tibble(
+    date = reference_date - 4,
+    value_gwh = 1
+  )
+
+  expect_invisible(
+    .agsi_check_recent_values(
+      data = fresh_data,
+      date_to = reference_date,
+      reference_date = reference_date
+    )
+  )
+  expect_error(
+    .agsi_check_recent_values(
+      data = stale_data,
+      date_to = reference_date,
+      reference_date = reference_date
+    ),
+    "no values since 2026-07-26"
+  )
+  expect_invisible(
+    .agsi_check_recent_values(
+      data = stale_data,
+      date_to = as.Date("2023-01-03"),
+      reference_date = reference_date
+    )
+  )
+})
+
 test_that("AGSI bundle filters remain lazy until collection", {
   source_path <- tempfile(fileext = ".parquet")
   write_agsi_bundle(source_path)
