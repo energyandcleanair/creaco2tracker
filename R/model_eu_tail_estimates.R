@@ -9,7 +9,9 @@
 #'   country sums agree closely enough and enough countries are available in the
 #'   tail month;
 #' - seasonal year-over-year adjustments use a recent YoY ratio when a holdout
-#'   backtest shows that ratio beats a one-step Holt-Winters forecast.
+#'   backtest shows that ratio beats a one-step Holt-Winters forecast. Daily
+#'   inputs preserve their current within-month shape and scale it to the
+#'   coverage-matched seasonal target.
 #'
 #' The submodels return candidate replacement rows rather than mutating `co2`.
 #' Non-total fuel adjustments are applied first and fuel totals are recomputed.
@@ -242,8 +244,10 @@ select_eu_tail_country_sum_adjustments <- function(
 #'   times `improvement_margin`.
 #'
 #' For selected groups, the proposed tail values are prior-year EU values
-#' multiplied by the accepted recent YoY ratio. These candidates only replace
-#' non-total EU rows; totals are recomputed later by
+#' multiplied by the accepted recent YoY ratio. For daily input, this defines a
+#' target over the same available days in the prior year, and the current daily
+#' profile is scaled to that target. These candidates only replace non-total EU
+#' rows; totals are recomputed later by
 #' `apply_selected_eu_tail_adjustments()`.
 #'
 #' @param co2 CO2 data with `iso2`, `date`, `fuel`, `sector`, `estimate`,
@@ -270,6 +274,10 @@ select_eu_tail_seasonal_yoy_adjustments <- function(
   if (!all(required_cols %in% names(co2)) || !"EU" %in% co2$iso2) {
     return(empty_eu_tail_adjustments())
   }
+
+  input_dates <- sort(unique(as.Date(co2$date)))
+  input_months <- lubridate::floor_date(input_dates, "month")
+  is_daily <- any(duplicated(input_months))
 
   co2_work <- co2 %>%
     mutate(date = lubridate::floor_date(as.Date(date), "month"))
@@ -376,6 +384,95 @@ select_eu_tail_seasonal_yoy_adjustments <- function(
 
   if (nrow(selected_groups) == 0) {
     return(empty_eu_tail_adjustments())
+  }
+
+  if (is_daily) {
+    daily_eu <- co2 %>%
+      filter(iso2 == "EU", fuel != FUEL_TOTAL) %>%
+      mutate(
+        date = as.Date(date),
+        .month = lubridate::floor_date(date, "month"),
+        .year = lubridate::year(date),
+        .month_number = lubridate::month(date),
+        .day = lubridate::day(date)
+      )
+
+    target_profiles <- daily_eu %>%
+      filter(.month %in% tail_dates) %>%
+      inner_join(selected_groups, by = c("fuel", "sector", "unit"))
+
+    prior_profiles <- daily_eu %>%
+      transmute(
+        .target_year = .year + 1L,
+        .month_number,
+        .day,
+        fuel,
+        sector,
+        estimate,
+        unit,
+        .prior_value = value
+      )
+
+    target_profiles <- target_profiles %>%
+      left_join(
+        prior_profiles,
+        by = c(
+          ".year" = ".target_year",
+          ".month_number",
+          ".day",
+          "fuel",
+          "sector",
+          "estimate",
+          "unit"
+        ),
+        relationship = "many-to-one"
+      )
+
+    scale_factors <- target_profiles %>%
+      group_by(.month, fuel, sector, estimate, unit) %>%
+      summarise(
+        .n_days = n(),
+        .n_current = sum(!is.na(value)),
+        .n_comparable = sum(!is.na(.prior_value)),
+        .current_sum = sum_or_na(value),
+        .prior_sum = sum_or_na(.prior_value),
+        .seasonal_ratio = first(.seasonal_ratio),
+        .groups = "drop"
+      ) %>%
+      mutate(
+        .target_sum = .prior_sum * .seasonal_ratio,
+        .scale_factor = .target_sum / .current_sum
+      ) %>%
+      filter(
+        .n_current == .n_days,
+        .n_comparable == .n_days,
+        is.finite(.current_sum),
+        .current_sum > 0,
+        is.finite(.target_sum),
+        .target_sum > 0,
+        is.finite(.scale_factor),
+        .scale_factor > 0
+      ) %>%
+      select(.month, fuel, sector, estimate, unit, .scale_factor)
+
+    return(
+      target_profiles %>%
+        inner_join(
+          scale_factors,
+          by = c(".month", "fuel", "sector", "estimate", "unit")
+        ) %>%
+        transmute(
+          iso2,
+          date,
+          fuel,
+          sector,
+          estimate,
+          unit,
+          value = value * .scale_factor,
+          adjustment_model = "seasonal_yoy",
+          adjustment_priority = 10L
+        )
+    )
   }
 
   co2_work %>%

@@ -362,6 +362,28 @@ make_eu_tail_seasonal_fixture <- function(tail_values, holdout_value = 130) {
   }))
 }
 
+expand_eu_tail_seasonal_fixture_daily <- function(co2) {
+  bind_rows(lapply(seq_len(nrow(co2)), function(i) {
+    row <- co2[i, ]
+    dates <- seq.Date(
+      row$date,
+      lubridate::ceiling_date(row$date, "month") - lubridate::days(1),
+      by = "day"
+    )
+    weights <- seq_along(dates)
+
+    tibble(
+      iso2 = row$iso2,
+      date = dates,
+      fuel = row$fuel,
+      sector = row$sector,
+      estimate = row$estimate,
+      unit = row$unit,
+      value = row$value * weights / sum(weights)
+    )
+  }))
+}
+
 test_that("stabilise_eu_tail_estimates applies selected seasonal-YoY tail adjustments", {
   co2 <- make_eu_tail_seasonal_fixture(tail_values = c(95, 95))
 
@@ -384,6 +406,161 @@ test_that("stabilise_eu_tail_estimates applies selected seasonal-YoY tail adjust
       pull(value),
     c(120, 132)
   )
+})
+
+test_that("daily seasonal-YoY adjustments scale the current shape without a first-day spike", {
+  co2 <- make_eu_tail_seasonal_fixture(tail_values = c(95, 95)) %>%
+    expand_eu_tail_seasonal_fixture_daily()
+
+  result <- stabilise_eu_tail_estimates(
+    co2,
+    tail_months = 2,
+    seasonal_min_history_points = 12
+  )
+
+  before <- co2 %>%
+    filter(
+      estimate == "central",
+      lubridate::floor_date(date, "month") == as.Date("2024-11-01")
+    ) %>%
+    arrange(date)
+  after <- result %>%
+    filter(
+      estimate == "central",
+      fuel == FUEL_OIL,
+      lubridate::floor_date(date, "month") == as.Date("2024-11-01")
+    ) %>%
+    arrange(date)
+
+  expect_equal(after$value / before$value, rep(after$value[[1]] / before$value[[1]], 30))
+  expect_equal(sum(after$value), 120)
+  expect_lt(after$value[[1]], sum(after$value))
+
+  adjusted_sums <- result %>%
+    filter(
+      fuel == FUEL_OIL,
+      date >= as.Date("2024-11-01")
+    ) %>%
+    mutate(month = lubridate::floor_date(date, "month")) %>%
+    group_by(month, estimate) %>%
+    summarise(value = sum(value), .groups = "drop")
+
+  expect_equal(sort(unique(adjusted_sums$estimate)), c("central", "lower", "upper"))
+  expect_equal(adjusted_sums$value, rep(c(120, 132), each = 3))
+
+  daily_totals <- result %>%
+    filter(estimate == "central", date >= as.Date("2024-11-01")) %>%
+    select(date, fuel, value) %>%
+    tidyr::pivot_wider(names_from = fuel, values_from = value)
+  expect_equal(daily_totals$total, daily_totals$oil)
+})
+
+test_that("daily seasonal-YoY adjustments match partial-month coverage", {
+  co2 <- make_eu_tail_seasonal_fixture(tail_values = c(95, 95)) %>%
+    expand_eu_tail_seasonal_fixture_daily() %>%
+    filter(
+      lubridate::floor_date(date, "month") != as.Date("2024-12-01") |
+        lubridate::day(date) <= 10
+    )
+
+  adjustments <- select_eu_tail_seasonal_yoy_adjustments(
+    co2,
+    tail_months = 2,
+    min_history_points = 12
+  )
+
+  expected_december <- co2 %>%
+    filter(
+      estimate == "central",
+      lubridate::floor_date(date, "month") == as.Date("2023-12-01"),
+      lubridate::day(date) <= 10
+    ) %>%
+    summarise(value = sum(value) * 1.2) %>%
+    pull(value)
+  actual_december <- adjustments %>%
+    filter(
+      estimate == "central",
+      lubridate::floor_date(date, "month") == as.Date("2024-12-01")
+    ) %>%
+    summarise(value = sum(value)) %>%
+    pull(value)
+
+  expect_equal(nrow(adjustments %>% filter(date >= as.Date("2024-12-01"))), 30)
+  expect_equal(actual_december, expected_december)
+})
+
+test_that("daily seasonal-YoY adjustments skip incomplete and zero profiles", {
+  co2 <- make_eu_tail_seasonal_fixture(tail_values = c(95, 95)) %>%
+    expand_eu_tail_seasonal_fixture_daily() %>%
+    filter(date != as.Date("2023-11-15"))
+
+  missing_comparable <- select_eu_tail_seasonal_yoy_adjustments(
+    co2,
+    tail_months = 2,
+    min_history_points = 12
+  )
+
+  expect_false(any(
+    lubridate::floor_date(missing_comparable$date, "month") == as.Date("2024-11-01")
+  ))
+  expect_true(any(
+    lubridate::floor_date(missing_comparable$date, "month") == as.Date("2024-12-01")
+  ))
+
+  zero_profile <- make_eu_tail_seasonal_fixture(tail_values = c(95, 95)) %>%
+    expand_eu_tail_seasonal_fixture_daily() %>%
+    mutate(
+      value = if_else(
+        lubridate::floor_date(date, "month") == as.Date("2024-11-01"),
+        0,
+        value
+      )
+    )
+  zero_adjustments <- select_eu_tail_seasonal_yoy_adjustments(
+    zero_profile,
+    tail_months = 2,
+    min_history_points = 12
+  )
+
+  expect_false(any(
+    lubridate::floor_date(zero_adjustments$date, "month") == as.Date("2024-11-01")
+  ))
+  expect_true(any(
+    lubridate::floor_date(zero_adjustments$date, "month") == as.Date("2024-12-01")
+  ))
+})
+
+test_that("daily seasonal-YoY adjustments skip leap days without a comparable date", {
+  dates <- seq.Date(as.Date("2022-03-01"), as.Date("2024-02-01"), by = "month")
+  values <- rep(100, length(dates))
+  values[dates %in% as.Date(c("2023-10-01", "2023-11-01"))] <- 120
+  values[dates == as.Date("2023-12-01")] <- 130
+  values[dates %in% as.Date(c("2024-01-01", "2024-02-01"))] <- 95
+  co2 <- bind_rows(lapply(c("central", "lower", "upper"), function(estimate) {
+    tibble(
+      iso2 = "EU",
+      date = dates,
+      fuel = FUEL_OIL,
+      sector = SECTOR_TRANSPORT_DOMESTIC,
+      estimate,
+      unit = "t",
+      value = values
+    )
+  })) %>%
+    expand_eu_tail_seasonal_fixture_daily()
+
+  adjustments <- select_eu_tail_seasonal_yoy_adjustments(
+    co2,
+    tail_months = 2,
+    min_history_points = 12
+  )
+
+  expect_true(any(
+    lubridate::floor_date(adjustments$date, "month") == as.Date("2024-01-01")
+  ))
+  expect_false(any(
+    lubridate::floor_date(adjustments$date, "month") == as.Date("2024-02-01")
+  ))
 })
 
 test_that("seasonal-YoY submodel selects no tail adjustments when backtest is worse", {
