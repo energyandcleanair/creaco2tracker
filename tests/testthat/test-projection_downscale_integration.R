@@ -292,3 +292,34 @@ test_that(
     )
   }
 )
+
+test_that("downscale_daily drops monthly rows beyond daily proxy coverage", {
+  co2_monthly <- tibble(
+    iso2 = "EU",
+    date = as.Date(c("2025-01-01", "2025-02-01")),
+    fuel = FUEL_COAL,
+    sector = SECTOR_ELEC,
+    estimate = "central",
+    unit = "t",
+    value = c(31, 28)
+  )
+  pwr_generation <- create_pwr_generation_mock(
+    date_min = as.Date("2025-01-01"),
+    date_max = as.Date("2025-01-31"),
+    fuels = FUEL_COAL
+  )
+  gas_demand <- create_gas_demand_mock(
+    date_min = as.Date("2025-01-01"),
+    date_max = as.Date("2025-01-31")
+  )
+
+  result <- downscale_daily(
+    co2_monthly,
+    pwr_generation = pwr_generation,
+    gas_demand = gas_demand,
+    cut_latest_days = 0
+  )
+
+  expect_false(any(is.na(result$date)))
+  expect_equal(max(result$date), as.Date("2025-01-31"))
+})
