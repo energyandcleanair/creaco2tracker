@@ -38,7 +38,9 @@ downscale_daily <- function(co2, pwr_generation, gas_demand, cut_latest_days = 3
   co2_daily_flat <- co2 %>%
     group_by(iso2, fuel, sector, estimate) %>%
     rename(month = date) %>%
-    full_join(
+    # The daily calendar is constrained by proxy coverage. Retaining a monthly
+    # CO2 row beyond that calendar would produce a row with an NA daily date.
+    right_join(
       tibble(date = dts_daily, month = dts_daily %>% "day<-"(1)),
       relationship = "many-to-many",
       by = "month"
