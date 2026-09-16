@@ -97,14 +97,6 @@ get_eurostat_cons <- function(
     apply_seasonal_adjustment(cons_yearly, cons_monthly)
   })
 
-  cons_monthly <- log_timed_stage("impute_missing_coal_monthly", {
-    apply_coal_annual_imputation(
-      cons_monthly = cons_monthly,
-      cons_yearly_monthly = cons_yearly_monthly,
-      pwr_generation = pwr_generation
-    )
-  })
-
   # Combine monthly and yearly data with cutoff filtering
   cons_combined <- log_timed_stage("combine_monthly_yearly_with_cutoff", {
     combine_monthly_yearly_with_cutoff(cons_yearly_monthly, cons_monthly)
