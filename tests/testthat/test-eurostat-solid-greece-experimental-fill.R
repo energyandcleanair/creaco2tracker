@@ -1,7 +1,7 @@
 library(testthat)
 library(dplyr)
 
-test_that("apply_greece_lignite_experimental_fill backfills missing Greece 2025 lignite", {
+test_that("coal annual imputation backfills a fully missing Greek lignite year", {
   cons_monthly <- tibble::tribble(
     ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
     "EU", SECTOR_ALL, as.Date("2025-01-01"), "TJ", SIEC_BROWN_COAL, FUEL_COAL, 100,
@@ -20,9 +20,7 @@ test_that("apply_greece_lignite_experimental_fill backfills missing Greece 2025 
     .package = "creaco2tracker"
   )
 
-  out <- apply_greece_lignite_experimental_fill(
-    cons_monthly, cons_yearly_monthly, tibble()
-  )
+  out <- apply_coal_annual_imputation(cons_monthly, cons_yearly_monthly, tibble())
 
   gr_val <- out %>%
     filter(
@@ -46,7 +44,7 @@ test_that("apply_greece_lignite_experimental_fill backfills missing Greece 2025 
 })
 
 
-test_that("apply_greece_lignite_experimental_fill keeps existing monthly Greece values", {
+test_that("coal annual imputation keeps a partially reported series unchanged", {
   cons_monthly <- tibble::tribble(
     ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
     "GR", SECTOR_ALL, as.Date("2025-01-01"), "TJ", SIEC_BROWN_COAL, FUEL_COAL, 25,
@@ -65,9 +63,7 @@ test_that("apply_greece_lignite_experimental_fill keeps existing monthly Greece 
     .package = "creaco2tracker"
   )
 
-  out <- apply_greece_lignite_experimental_fill(
-    cons_monthly, cons_yearly_monthly, tibble()
-  )
+  out <- apply_coal_annual_imputation(cons_monthly, cons_yearly_monthly, tibble())
 
   gr_val <- out %>%
     filter(iso2 == "GR", time == as.Date("2025-01-01"), siec == SIEC_BROWN_COAL) %>%
@@ -76,7 +72,7 @@ test_that("apply_greece_lignite_experimental_fill keeps existing monthly Greece 
 })
 
 
-test_that("Greek lignite fill follows complete Ember-calibrated coal profile", {
+test_that("coal annual imputation follows a complete Ember-calibrated coal profile", {
   months <- seq(as.Date("2025-01-01"), as.Date("2025-12-01"), by = "month")
   cons_monthly <- tibble::tibble(
     iso2 = "EU", sector = SECTOR_ALL, time = months, unit = "TJ",
@@ -96,7 +92,7 @@ test_that("Greek lignite fill follows complete Ember-calibrated coal profile", {
     .package = "creaco2tracker"
   )
 
-  out <- apply_greece_lignite_experimental_fill(
+  out <- apply_coal_annual_imputation(
     cons_monthly, cons_yearly_monthly, pwr_generation
   )
 
@@ -104,6 +100,42 @@ test_that("Greek lignite fill follows complete Ember-calibrated coal profile", {
   expect_equal(sum(gr$values), 120)
   expect_equal(gr$values[[1]], 120 * 2 / 13)
   expect_equal(gr$values[[2]], 120 / 13)
+})
+
+
+test_that("coal annual imputation applies to Sweden as well as Greece", {
+  months <- seq(as.Date("2025-01-01"), as.Date("2025-12-01"), by = "month")
+  cons_yearly_monthly <- tibble::tibble(
+    iso2 = "SE", sector = SECTOR_ALL, time = months, unit = "TJ",
+    siec = SIEC_HARD_COAL, fuel = FUEL_COAL, values = 10
+  )
+  pwr_generation <- tibble::tibble(
+    iso2 = "SE", source = "Coal", date = months, value_mwh = 1
+  )
+
+  out <- apply_coal_annual_imputation(tibble(), cons_yearly_monthly, pwr_generation)
+
+  sweden <- out %>% filter(iso2 == "SE")
+  expect_equal(nrow(sweden), 12)
+  expect_equal(sum(sweden$values), 120)
+})
+
+
+test_that("coal annual bounds check flags a material annual mismatch", {
+  months <- seq(as.Date("2025-01-01"), as.Date("2025-12-01"), by = "month")
+  monthly <- tibble::tibble(
+    iso2 = "SE", sector = SECTOR_ALL, time = months, unit = "TJ",
+    siec = SIEC_HARD_COAL, fuel = FUEL_COAL, values = 11, source = "monthly"
+  )
+  annual <- tibble::tibble(
+    iso2 = "SE", sector = SECTOR_ALL, time = as.Date("2025-01-01"), unit = "TJ",
+    siec = SIEC_HARD_COAL, fuel = FUEL_COAL, values = 120
+  )
+
+  result <- check_coal_annual_bounds(monthly, annual, diagnostics_folder = NULL)
+
+  expect_false(result$within_bounds[[1]])
+  expect_equal(result$difference[[1]], 12)
 })
 
 

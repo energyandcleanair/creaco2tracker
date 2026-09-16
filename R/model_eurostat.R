@@ -97,8 +97,8 @@ get_eurostat_cons <- function(
     apply_seasonal_adjustment(cons_yearly, cons_monthly)
   })
 
-  cons_monthly <- log_timed_stage("experimental_fill_greece_lignite_monthly", {
-    apply_greece_lignite_experimental_fill(
+  cons_monthly <- log_timed_stage("impute_missing_coal_monthly", {
+    apply_coal_annual_imputation(
       cons_monthly = cons_monthly,
       cons_yearly_monthly = cons_yearly_monthly,
       pwr_generation = pwr_generation
@@ -108,6 +108,14 @@ get_eurostat_cons <- function(
   # Combine monthly and yearly data with cutoff filtering
   cons_combined <- log_timed_stage("combine_monthly_yearly_with_cutoff", {
     combine_monthly_yearly_with_cutoff(cons_yearly_monthly, cons_monthly)
+  })
+
+  log_timed_stage("check_coal_annual_bounds", {
+    check_coal_annual_bounds(
+      cons_combined = cons_combined,
+      cons_yearly = cons_yearly,
+      diagnostics_folder = diagnostics_folder
+    )
   })
 
   if (!is_null_or_empty(diagnostics_folder)) {
@@ -159,49 +167,55 @@ get_eurostat_cons <- function(
 }
 
 
-apply_greece_lignite_experimental_fill <- function(
+apply_coal_annual_imputation <- function(
   cons_monthly,
   cons_yearly_monthly,
   pwr_generation
 ) {
-  target_from <- as.Date("2025-01-01")
-  target_to <- as.Date("2025-12-01")
-
   target_keys <- c("iso2", "sector", "time", "unit", "siec", "fuel")
+  annual_keys <- c("iso2", "sector", "year", "unit", "siec", "fuel")
   target_series <- cons_yearly_monthly %>%
     filter(
-      iso2 == "GR",
-      siec == SIEC_BROWN_COAL,
-      time >= target_from,
-      time <= target_to
-    )
+      fuel == FUEL_COAL
+    ) %>%
+    mutate(year = lubridate::year(time))
 
   if (nrow(target_series) == 0) {
     return(cons_monthly)
   }
 
-  existing_monthly <- cons_monthly %>%
-    filter(
-      iso2 == "GR",
-      siec == SIEC_BROWN_COAL,
-      time >= target_from,
-      time <= target_to,
-      !is.na(values)
-    ) %>%
-    select(all_of(target_keys))
+  observed_annual_keys <- if (nrow(cons_monthly) == 0) {
+    target_series %>% select(all_of(annual_keys)) %>% slice(0)
+  } else {
+    cons_monthly %>%
+      filter(
+        fuel == FUEL_COAL,
+        !is.na(values)
+      ) %>%
+      mutate(year = lubridate::year(time)) %>%
+      distinct(across(all_of(annual_keys)))
+  }
 
+  # Impute only fully absent annual series. Replacing isolated missing months
+  # would mix the annual allocation with reported months and could violate the
+  # annual balance.
   to_fill <- target_series %>%
-    anti_join(existing_monthly, by = target_keys)
+    anti_join(observed_annual_keys, by = annual_keys) %>%
+    select(-year)
 
   if (nrow(to_fill) == 0) {
     return(cons_monthly)
   }
 
-  to_fill <- allocate_greece_lignite_with_coal_profile(to_fill, pwr_generation)
+  to_fill <- allocate_coal_with_generation_profile(to_fill, pwr_generation)
 
-  cons_monthly_filled <- cons_monthly %>%
-    anti_join(to_fill %>% select(all_of(target_keys)), by = target_keys) %>%
-    bind_rows(to_fill)
+  cons_monthly_filled <- if (nrow(cons_monthly) == 0) {
+    to_fill
+  } else {
+    cons_monthly %>%
+      anti_join(to_fill %>% select(all_of(target_keys)), by = target_keys) %>%
+      bind_rows(to_fill)
+  }
 
   eu_iso2s <- get_eu_iso2s(include_eu = FALSE)
   affected_groups <- to_fill %>%
@@ -212,7 +226,7 @@ apply_greece_lignite_experimental_fill <- function(
     filter(iso2 %in% eu_iso2s) %>%
     inner_join(affected_groups, by = c("sector", "time", "unit", "siec", "fuel")) %>%
     group_by(sector, time, unit, siec, fuel) %>%
-    summarise(values = sum(values, na.rm = TRUE), .groups = "drop") %>%
+    summarise(values = sum_or_na(values), .groups = "drop") %>%
     mutate(iso2 = "EU") %>%
     select(all_of(target_keys), values)
 
@@ -225,29 +239,29 @@ apply_greece_lignite_experimental_fill <- function(
 }
 
 
-#' Allocate Greek annual brown-coal consumption using the coal-generation profile
+#' Allocate annual coal consumption using the coal-generation profile
 #'
-#' Uses the monthly coal generation delivered by `get_power_generation()`, which
+#' Uses monthly coal generation delivered by `get_power_generation()`, which
 #' is calibrated to Ember's monthly series. The profile is used only for years
 #' with all twelve coal-generation months; otherwise the seasonal allocation
 #' already present in `cons_yearly_monthly` is retained.
 #'
 #' @keywords internal
-allocate_greece_lignite_with_coal_profile <- function(to_fill, pwr_generation) {
+allocate_coal_with_generation_profile <- function(to_fill, pwr_generation) {
   if (nrow(to_fill) == 0 || is.null(pwr_generation) || nrow(pwr_generation) == 0) {
     return(to_fill)
   }
 
   coal_profile <- pwr_generation %>%
-    filter(iso2 == "GR", source == "Coal", !is.na(value_mwh)) %>%
+    filter(source == "Coal", !is.na(value_mwh)) %>%
     mutate(time = lubridate::floor_date(date, "month"), year = lubridate::year(time)) %>%
-    group_by(year, time) %>%
+    group_by(iso2, year, time) %>%
     summarise(coal_generation = sum(value_mwh), .groups = "drop") %>%
-    group_by(year) %>%
+    group_by(iso2, year) %>%
     filter(n() == 12, sum(coal_generation) > 0) %>%
     mutate(coal_share = coal_generation / sum(coal_generation)) %>%
     ungroup() %>%
-    select(time, coal_share)
+    select(iso2, time, coal_share)
 
   if (nrow(coal_profile) == 0) return(to_fill)
 
@@ -259,13 +273,77 @@ allocate_greece_lignite_with_coal_profile <- function(to_fill, pwr_generation) {
 
   allocated <- to_fill %>%
     rename(fallback_value = values) %>%
-    left_join(coal_profile, by = "time") %>%
+    left_join(coal_profile, by = c("iso2", "time")) %>%
     mutate(year = lubridate::year(time)) %>%
     left_join(annual_values, by = c(annual_keys, "year")) %>%
     mutate(values = coalesce(annual_value * coal_share, fallback_value)) %>%
     select(-year, -coal_share, -annual_value, -fallback_value)
 
   allocated
+}
+
+
+#' Check monthly coal consumption against annual Eurostat balances
+#'
+#' The check reports every complete monthly coal series that has a matching
+#' annual balance. It warns about differences greater than `relative_tolerance`
+#' and writes the comparison to the Eurostat diagnostics directory.
+#'
+#' @keywords internal
+check_coal_annual_bounds <- function(
+  cons_combined,
+  cons_yearly,
+  diagnostics_folder = NULL,
+  relative_tolerance = 0.05
+) {
+  series_keys <- c("iso2", "sector", "unit", "siec", "fuel", "year")
+  annual <- cons_yearly %>%
+    filter(fuel == FUEL_COAL, !is.na(values)) %>%
+    mutate(year = lubridate::year(time)) %>%
+    group_by(across(all_of(series_keys))) %>%
+    summarise(annual_value = sum_or_na(values), .groups = "drop")
+
+  monthly <- cons_combined %>%
+    filter(fuel == FUEL_COAL, !is.na(values)) %>%
+    mutate(year = lubridate::year(time)) %>%
+    group_by(across(all_of(series_keys))) %>%
+    summarise(
+      month_count = n_distinct(time),
+      monthly_value = sum(values),
+      monthly_source_months = sum(source == "monthly"),
+      .groups = "drop"
+    ) %>%
+    filter(month_count == 12)
+
+  reconciliation <- monthly %>%
+    inner_join(annual, by = series_keys) %>%
+    mutate(
+      difference = monthly_value - annual_value,
+      relative_difference = if_else(
+        annual_value == 0,
+        abs(difference),
+        difference / abs(annual_value)
+      ),
+      within_bounds = abs(difference) <= pmax(abs(annual_value) * relative_tolerance, 1e-6)
+    )
+
+  if (!is_null_or_empty(diagnostics_folder)) {
+    readr::write_csv(
+      reconciliation,
+      file.path(diagnostics_folder, "coal_annual_reconciliation.csv")
+    )
+  }
+
+  out_of_bounds <- reconciliation %>% filter(!within_bounds)
+  if (nrow(out_of_bounds) > 0) {
+    log_warn(paste0(
+      "Coal monthly totals differ from annual balances by more than ",
+      round(relative_tolerance * 100), "% for ", nrow(out_of_bounds),
+      " complete country-sector series. See coal_annual_reconciliation.csv."
+    ))
+  }
+
+  reconciliation
 }
 
 
