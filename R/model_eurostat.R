@@ -37,6 +37,8 @@ get_eurostat_cons <- function(
   cons_raw_solid <- cons_sources$solid
   cons_raw_gas <- cons_sources$gas
 
+  write_coal_gap_diagnostics(cons_raw_solid$monthly, diagnostics_folder)
+
   # Check siec is complete and unique.
   # That all iso2s are included
   check_siec_siec_code <- function(x) {
@@ -55,7 +57,7 @@ get_eurostat_cons <- function(
   aggregate <- function(x) {
     x %>%
       group_by(iso2, sector, time, unit, siec, fuel) %>%
-      summarise_at("values", sum, na.rm = TRUE) %>%
+      summarise(values = sum_or_na(values), .groups = "drop") %>%
       ungroup()
   }
 
@@ -64,7 +66,7 @@ get_eurostat_cons <- function(
     list(
       oil = process_oil_monthly(cons_raw_oil$monthly),
       solid = process_solid_monthly(cons_raw_solid$monthly, pwr_generation = pwr_generation) %>%
-        eurostat_split_elec_others(),
+        eurostat_split_solid_elec_others(),
       gas = process_gas_monthly(cons_raw_gas$monthly, pwr_generation = pwr_generation) %>%
         eurostat_split_elec_others()
     ) %>%
@@ -77,7 +79,8 @@ get_eurostat_cons <- function(
   cons_yearly <- log_timed_stage("process_eurostat_yearly", {
     list(
       oil = process_oil_yearly(cons_raw_oil$yearly),
-      solid = process_solid_yearly(cons_raw_solid$yearly) %>% eurostat_split_elec_others(),
+      solid = process_solid_yearly(cons_raw_solid$yearly) %>%
+        eurostat_split_solid_elec_others(),
       gas = process_gas_yearly(cons_raw_gas$yearly, pwr_generation = pwr_generation) %>%
         eurostat_split_elec_others()
     ) %>%
@@ -159,122 +162,6 @@ get_eurostat_cons <- function(
 }
 
 
-apply_coal_annual_imputation <- function(
-  cons_monthly,
-  cons_yearly_monthly,
-  pwr_generation
-) {
-  target_keys <- c("iso2", "sector", "time", "unit", "siec", "fuel")
-  annual_keys <- c("iso2", "sector", "year", "unit", "siec", "fuel")
-  target_series <- cons_yearly_monthly %>%
-    filter(
-      fuel == FUEL_COAL
-    ) %>%
-    mutate(year = lubridate::year(time))
-
-  if (nrow(target_series) == 0) {
-    return(cons_monthly)
-  }
-
-  observed_annual_keys <- if (nrow(cons_monthly) == 0) {
-    target_series %>% select(all_of(annual_keys)) %>% slice(0)
-  } else {
-    cons_monthly %>%
-      filter(
-        fuel == FUEL_COAL,
-        !is.na(values)
-      ) %>%
-      mutate(year = lubridate::year(time)) %>%
-      distinct(across(all_of(annual_keys)))
-  }
-
-  # Impute only fully absent annual series. Replacing isolated missing months
-  # would mix the annual allocation with reported months and could violate the
-  # annual balance.
-  to_fill <- target_series %>%
-    anti_join(observed_annual_keys, by = annual_keys) %>%
-    select(-year)
-
-  if (nrow(to_fill) == 0) {
-    return(cons_monthly)
-  }
-
-  to_fill <- allocate_coal_with_generation_profile(to_fill, pwr_generation)
-
-  cons_monthly_filled <- if (nrow(cons_monthly) == 0) {
-    to_fill
-  } else {
-    cons_monthly %>%
-      anti_join(to_fill %>% select(all_of(target_keys)), by = target_keys) %>%
-      bind_rows(to_fill)
-  }
-
-  eu_iso2s <- get_eu_iso2s(include_eu = FALSE)
-  affected_groups <- to_fill %>%
-    select(sector, time, unit, siec, fuel) %>%
-    distinct()
-
-  eu_rebuilt <- cons_monthly_filled %>%
-    filter(iso2 %in% eu_iso2s) %>%
-    inner_join(affected_groups, by = c("sector", "time", "unit", "siec", "fuel")) %>%
-    group_by(sector, time, unit, siec, fuel) %>%
-    summarise(values = sum_or_na(values), .groups = "drop") %>%
-    mutate(iso2 = "EU") %>%
-    select(all_of(target_keys), values)
-
-  cons_monthly_filled %>%
-    anti_join(
-      eu_rebuilt %>% select(all_of(target_keys)),
-      by = target_keys
-    ) %>%
-    bind_rows(eu_rebuilt)
-}
-
-
-#' Allocate annual coal consumption using the coal-generation profile
-#'
-#' Uses monthly coal generation delivered by `get_power_generation()`, which
-#' is calibrated to Ember's monthly series. The profile is used only for years
-#' with all twelve coal-generation months; otherwise the seasonal allocation
-#' already present in `cons_yearly_monthly` is retained.
-#'
-#' @keywords internal
-allocate_coal_with_generation_profile <- function(to_fill, pwr_generation) {
-  if (nrow(to_fill) == 0 || is.null(pwr_generation) || nrow(pwr_generation) == 0) {
-    return(to_fill)
-  }
-
-  coal_profile <- pwr_generation %>%
-    filter(source == "Coal", !is.na(value_mwh)) %>%
-    mutate(time = lubridate::floor_date(date, "month"), year = lubridate::year(time)) %>%
-    group_by(iso2, year, time) %>%
-    summarise(coal_generation = sum(value_mwh), .groups = "drop") %>%
-    group_by(iso2, year) %>%
-    filter(n() == 12, sum(coal_generation) > 0) %>%
-    mutate(coal_share = coal_generation / sum(coal_generation)) %>%
-    ungroup() %>%
-    select(iso2, time, coal_share)
-
-  if (nrow(coal_profile) == 0) return(to_fill)
-
-  annual_keys <- c("iso2", "sector", "unit", "siec", "fuel")
-  annual_values <- to_fill %>%
-    mutate(year = lubridate::year(time)) %>%
-    group_by(across(all_of(c(annual_keys, "year")))) %>%
-    summarise(annual_value = sum(values), .groups = "drop")
-
-  allocated <- to_fill %>%
-    rename(fallback_value = values) %>%
-    left_join(coal_profile, by = c("iso2", "time")) %>%
-    mutate(year = lubridate::year(time)) %>%
-    left_join(annual_values, by = c(annual_keys, "year")) %>%
-    mutate(values = coalesce(annual_value * coal_share, fallback_value)) %>%
-    select(-year, -coal_share, -annual_value, -fallback_value)
-
-  allocated
-}
-
-
 #' Check monthly coal consumption against annual Eurostat balances
 #'
 #' The check reports every complete monthly coal series that has a matching
@@ -311,12 +198,21 @@ check_coal_annual_bounds <- function(
     inner_join(annual, by = series_keys) %>%
     mutate(
       difference = monthly_value - annual_value,
+      zero_denominator = annual_value == 0,
       relative_difference = if_else(
-        annual_value == 0,
-        abs(difference),
+        zero_denominator,
+        NA_real_,
         difference / abs(annual_value)
       ),
-      within_bounds = abs(difference) <= pmax(abs(annual_value) * relative_tolerance, 1e-6)
+      source = case_when(
+        monthly_source_months == 12 ~ "monthly",
+        monthly_source_months == 0 ~ "yearly",
+        TRUE ~ "mixed"
+      ),
+      within_bounds = case_when(
+        zero_denominator ~ abs(difference) <= 1e-6,
+        TRUE ~ abs(relative_difference) <= relative_tolerance
+      )
     )
 
   if (!is_null_or_empty(diagnostics_folder)) {
