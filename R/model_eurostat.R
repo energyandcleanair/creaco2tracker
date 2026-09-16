@@ -97,6 +97,14 @@ get_eurostat_cons <- function(
     apply_seasonal_adjustment(cons_yearly, cons_monthly)
   })
 
+  cons_monthly <- log_timed_stage("experimental_fill_greece_lignite_monthly", {
+    apply_greece_lignite_experimental_fill(
+      cons_monthly = cons_monthly,
+      cons_yearly_monthly = cons_yearly_monthly,
+      pwr_generation = pwr_generation
+    )
+  })
+
   # Combine monthly and yearly data with cutoff filtering
   cons_combined <- log_timed_stage("combine_monthly_yearly_with_cutoff", {
     combine_monthly_yearly_with_cutoff(cons_yearly_monthly, cons_monthly)
@@ -148,6 +156,116 @@ get_eurostat_cons <- function(
 
 
   return(cons)
+}
+
+
+apply_greece_lignite_experimental_fill <- function(
+  cons_monthly,
+  cons_yearly_monthly,
+  pwr_generation
+) {
+  target_from <- as.Date("2025-01-01")
+  target_to <- as.Date("2025-12-01")
+
+  target_keys <- c("iso2", "sector", "time", "unit", "siec", "fuel")
+  target_series <- cons_yearly_monthly %>%
+    filter(
+      iso2 == "GR",
+      siec == SIEC_BROWN_COAL,
+      time >= target_from,
+      time <= target_to
+    )
+
+  if (nrow(target_series) == 0) {
+    return(cons_monthly)
+  }
+
+  existing_monthly <- cons_monthly %>%
+    filter(
+      iso2 == "GR",
+      siec == SIEC_BROWN_COAL,
+      time >= target_from,
+      time <= target_to,
+      !is.na(values)
+    ) %>%
+    select(all_of(target_keys))
+
+  to_fill <- target_series %>%
+    anti_join(existing_monthly, by = target_keys)
+
+  if (nrow(to_fill) == 0) {
+    return(cons_monthly)
+  }
+
+  to_fill <- allocate_greece_lignite_with_coal_profile(to_fill, pwr_generation)
+
+  cons_monthly_filled <- cons_monthly %>%
+    anti_join(to_fill %>% select(all_of(target_keys)), by = target_keys) %>%
+    bind_rows(to_fill)
+
+  eu_iso2s <- get_eu_iso2s(include_eu = FALSE)
+  affected_groups <- to_fill %>%
+    select(sector, time, unit, siec, fuel) %>%
+    distinct()
+
+  eu_rebuilt <- cons_monthly_filled %>%
+    filter(iso2 %in% eu_iso2s) %>%
+    inner_join(affected_groups, by = c("sector", "time", "unit", "siec", "fuel")) %>%
+    group_by(sector, time, unit, siec, fuel) %>%
+    summarise(values = sum(values, na.rm = TRUE), .groups = "drop") %>%
+    mutate(iso2 = "EU") %>%
+    select(all_of(target_keys), values)
+
+  cons_monthly_filled %>%
+    anti_join(
+      eu_rebuilt %>% select(all_of(target_keys)),
+      by = target_keys
+    ) %>%
+    bind_rows(eu_rebuilt)
+}
+
+
+#' Allocate Greek annual brown-coal consumption using the coal-generation profile
+#'
+#' Uses the monthly coal generation delivered by `get_power_generation()`, which
+#' is calibrated to Ember's monthly series. The profile is used only for years
+#' with all twelve coal-generation months; otherwise the seasonal allocation
+#' already present in `cons_yearly_monthly` is retained.
+#'
+#' @keywords internal
+allocate_greece_lignite_with_coal_profile <- function(to_fill, pwr_generation) {
+  if (nrow(to_fill) == 0 || is.null(pwr_generation) || nrow(pwr_generation) == 0) {
+    return(to_fill)
+  }
+
+  coal_profile <- pwr_generation %>%
+    filter(iso2 == "GR", source == "Coal", !is.na(value_mwh)) %>%
+    mutate(time = lubridate::floor_date(date, "month"), year = lubridate::year(time)) %>%
+    group_by(year, time) %>%
+    summarise(coal_generation = sum(value_mwh), .groups = "drop") %>%
+    group_by(year) %>%
+    filter(n() == 12, sum(coal_generation) > 0) %>%
+    mutate(coal_share = coal_generation / sum(coal_generation)) %>%
+    ungroup() %>%
+    select(time, coal_share)
+
+  if (nrow(coal_profile) == 0) return(to_fill)
+
+  annual_keys <- c("iso2", "sector", "unit", "siec", "fuel")
+  annual_values <- to_fill %>%
+    mutate(year = lubridate::year(time)) %>%
+    group_by(across(all_of(c(annual_keys, "year")))) %>%
+    summarise(annual_value = sum(values), .groups = "drop")
+
+  allocated <- to_fill %>%
+    rename(fallback_value = values) %>%
+    left_join(coal_profile, by = "time") %>%
+    mutate(year = lubridate::year(time)) %>%
+    left_join(annual_values, by = c(annual_keys, "year")) %>%
+    mutate(values = coalesce(annual_value * coal_share, fallback_value)) %>%
+    select(-year, -coal_share, -annual_value, -fallback_value)
+
+  allocated
 }
 
 

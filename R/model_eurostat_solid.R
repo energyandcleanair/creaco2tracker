@@ -193,7 +193,7 @@ process_solid_yearly <- function(x) {
       )
     ) %>%
     group_by(iso2, time, siec, sector, fuel, unit) %>%
-    summarise(values = sum(values * factor, na.rm = TRUE), .groups = "drop")
+    summarise(values = sum_or_na(values * factor), .groups = "drop")
 
   return(result)
 }
