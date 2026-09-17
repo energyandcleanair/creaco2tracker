@@ -46,6 +46,10 @@ mock_weather_function_wind <- function(mock_data) {
 test_that(
   "get_weather_corrected_wind with multiple countries and varying weather",
   {
+    local_mocked_bindings(
+      plot_corrected_vs_ember = function(...) invisible(NULL),
+      plot_wind_power_curve = function(...) invisible(NULL)
+    )
     library(testthat)
     library(dplyr)
     library(lubridate)

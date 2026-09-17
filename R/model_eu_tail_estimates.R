@@ -70,7 +70,10 @@ stabilise_eu_tail_estimates <- function(
   )
 
   adjustments <- bind_rows(seasonal_yoy_adjustments, country_sum_adjustments)
-  apply_selected_eu_tail_adjustments(co2, adjustments)
+  result <- apply_selected_eu_tail_adjustments(co2, adjustments)
+  attr(result, "eu_tail_country_coverage") <- attr(country_sum_adjustments, "country_coverage")
+  attr(result, "eu_tail_adjustments") <- adjustments
+  result
 }
 
 #' Return an empty EU-tail adjustment table
@@ -103,6 +106,9 @@ empty_eu_tail_adjustments <- function() {
 #' central estimate and the member-country central sum have at least
 #' `min_points` overlapping observations and the maximum relative difference is
 #' no larger than `max_rel_diff`.
+#'
+#' Coal and all-fuel totals require unique, finite contributions from every EU
+#' member state. An incomplete country sum cannot replace an available EU value.
 #'
 #' For eligible groups, the selector proposes adjustments in the latest
 #' `tail_months` where at least `min_countries` member countries have non-missing
@@ -142,17 +148,20 @@ select_eu_tail_country_sum_adjustments <- function(
     )
 
   group_cols <- c("fuel", "sector", "unit")
+  members <- get_eu_iso2s(include_eu = FALSE)
 
   eu_central <- co2_work %>%
     filter(iso2 == "EU", estimate == "central") %>%
     select(.row_id, date, .month, all_of(group_cols), eu_value = value)
 
   country_sums_central <- co2_work %>%
-    filter(iso2 %in% get_eu_iso2s(include_eu = FALSE), estimate == "central") %>%
+    filter(iso2 %in% members, estimate == "central") %>%
     group_by(date, .month, across(all_of(group_cols))) %>%
     summarise(
-      country_sum = sum_or_na(value),
-      n_countries = sum(!is.na(value)),
+      n_countries = n_distinct(iso2[is.finite(value)]),
+      complete_members = n() == length(members) && n_countries == length(members),
+      country_sum = if (first(fuel) %in% c(FUEL_COAL, FUEL_TOTAL) &&
+        !complete_members) NA_real_ else sum_or_na(value),
       .groups = "drop"
     )
 
@@ -164,6 +173,11 @@ select_eu_tail_country_sum_adjustments <- function(
       .is_tail_month = .month >= .tail_start
     ) %>%
     ungroup()
+  coverage <- central_check_data %>% transmute(
+    date, fuel, sector, unit, eu_value, country_sum, n_countries, complete_members,
+    requires_complete_members = fuel %in% c(FUEL_COAL, FUEL_TOTAL),
+    is_tail_month = .is_tail_month
+  )
 
   replace_keys <- central_check_data %>%
     group_by(across(all_of(group_cols))) %>%
@@ -199,19 +213,24 @@ select_eu_tail_country_sum_adjustments <- function(
     ungroup()
 
   if (nrow(replace_keys) == 0) {
-    return(empty_eu_tail_adjustments())
+    result <- empty_eu_tail_adjustments()
+    attr(result, "country_coverage") <- coverage
+    return(result)
   }
 
-  co2_work %>%
-    filter(iso2 %in% get_eu_iso2s(include_eu = FALSE)) %>%
+  result <- co2_work %>%
+    filter(iso2 %in% members) %>%
     semi_join(replace_keys, by = c("date", group_cols)) %>%
     group_by(date, across(all_of(c(group_cols, "estimate")))) %>%
     summarise(
-      .replacement_value = sum_or_na(value),
-      .replacement_countries = sum(!is.na(value)),
+      .replacement_countries = n_distinct(iso2[is.finite(value)]),
+      .complete_members = n() == length(members) &&
+        .replacement_countries == length(members),
+      .replacement_value = if (first(fuel) %in% c(FUEL_COAL, FUEL_TOTAL) &&
+        !.complete_members) NA_real_ else sum_or_na(value),
       .groups = "drop"
     ) %>%
-    filter(.replacement_countries >= min_countries) %>%
+    filter(.replacement_countries >= min_countries, !is.na(.replacement_value)) %>%
     transmute(
       iso2 = "EU",
       date,
@@ -223,6 +242,8 @@ select_eu_tail_country_sum_adjustments <- function(
       adjustment_model = "country_sum",
       adjustment_priority = 20L
     )
+  attr(result, "country_coverage") <- coverage
+  result
 }
 
 #' Select EU-tail adjustments from recent seasonal YoY ratios

@@ -239,7 +239,7 @@ recombine_fuels <- function(co2) {
     ) %>%
     group_by(across(c(-value))) %>%
     summarise(
-      value = sum_or_na(value),
+      value = if (any(is.na(value))) NA_real_ else sum(value),
       .groups = "drop"
     )
 }
@@ -257,10 +257,20 @@ add_total_co2 <- function(co2) {
     group_by(iso2, date, unit) %>%
     summarise(
       # First calculate central value and std dev
-      central_value = sum_or_na(value[estimate == "central"]),
+      central_value = if (any(is.na(value[estimate == "central"]))) {
+        NA_real_
+      } else {
+        sum(value[estimate == "central"])
+      },
       # Convert confidence intervals to standard deviations
-      std_dev = sum_or_na((value[estimate == "upper"] - value[estimate == "central"])^2) %>%
-        sqrt(),
+      std_dev = if (
+        any(is.na(value[estimate == "upper"])) ||
+          any(is.na(value[estimate == "central"]))
+      ) {
+        NA_real_
+      } else {
+        sqrt(sum((value[estimate == "upper"] - value[estimate == "central"])^2))
+      },
       .groups = "drop"
     ) %>%
     # Create three rows for each group with the different estimates
@@ -293,13 +303,22 @@ combine_coke_coal <- function(co2) {
     group_by_at(group_by_cols) %>%
     summarise(
       # First calculate central value and std dev
-      central_value = sum(value[estimate == "central"], na.rm = TRUE),
-      std_dev = sqrt(
-        sum(
+      central_value = if (any(is.na(value[estimate == "central"]))) {
+        NA_real_
+      } else {
+        sum(value[estimate == "central"])
+      },
+      std_dev = if (
+        any(is.na(value[estimate == "upper"])) ||
+          any(is.na(value[estimate == "central"]))
+      ) {
+        NA_real_
+      } else {
+        sqrt(sum(
           # Convert confidence intervals to standard deviations
           (value[estimate == "upper"] - value[estimate == "central"])^2
-        )
-      ),
+        ))
+      },
       .groups = "drop"
     ) %>%
     # Create three rows for each group with the different estimates

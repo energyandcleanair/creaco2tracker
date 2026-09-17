@@ -46,6 +46,7 @@ mock_weather_function_solar <- function(mock_data) {
 test_that(
   "get_weather_corrected_solar with multiple countries and varying weather",
   {
+    local_mocked_bindings(plot_corrected_vs_ember = function(...) invisible(NULL))
     library(testthat)
     library(dplyr)
     library(lubridate)

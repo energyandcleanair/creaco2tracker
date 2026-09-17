@@ -76,7 +76,10 @@ run_collect <- function(opts) {
   add_arg_if_supported("downscale_daily", FALSE)
   add_arg_if_supported("diagnostics_folder", NULL)
   add_arg_if_supported("date_to", date_to)
-  add_arg_if_supported("use_cache", FALSE)
+  # Version comparisons usually change model code rather than source inputs.
+  # Reuse the shared source cache prepared by scripts/compare so each worktree
+  # run does not download the same upstream datasets again.
+  add_arg_if_supported("use_cache", TRUE)
 
   co2 <- do.call(get_co2, get_co2_args)
 

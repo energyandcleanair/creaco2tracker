@@ -103,6 +103,9 @@ get_co2 <- function(
   })
 
   # Compute CO2 emissions based on Eurostat fossil-fuel consumption/oxydation
+  eurostat_cons <- coal_prepare_total_forecasts(
+    eurostat_cons, date_to, source_diagnostics_folder("eurostat")
+  )
   co2_unprojected <- log_timed_stage("get_co2_from_eurostat_cons", {
     get_co2_from_eurostat_cons(
       eurostat_cons,
@@ -125,6 +128,11 @@ get_co2 <- function(
       date_to = date_to
     )
   })
+
+  if (!is_null_or_empty(diagnostics_folder)) {
+    readr::write_csv(coal_projection_diagnostics(co2_unprojected, co2),
+      file.path(diagnostics_folder, "coal_projection_provenance.csv"))
+  }
 
 
   if (!is_null_or_empty(diagnostics_folder)) {
@@ -172,6 +180,13 @@ get_co2 <- function(
 
   # Improve latest EU months using validated tail-estimate submodels.
   co2 <- stabilise_eu_tail_estimates(co2)
+  if (!is_null_or_empty(diagnostics_folder)) {
+    for (name in c("eu_tail_country_coverage", "eu_tail_adjustments")) {
+      if (!is.null(attr(co2, name))) {
+        readr::write_csv(attr(co2, name), file.path(diagnostics_folder, paste0(name, ".csv")))
+      }
+    }
+  }
 
   # Validation
   log_timed_stage("validate_co2", {

@@ -8,6 +8,14 @@ coal_rows <- function(iso2, siec, nrg_bal, dates, values, unit = "THS_T") {
   )
 }
 
+coal_annual_rows <- function(iso2, siec, nrg_bal, years, values, unit = "THS_T") {
+  tibble(
+    freq = "A", nrg_bal = nrg_bal, siec = siec, unit = unit,
+    geo = iso2, iso2 = iso2, time = as.Date(paste0(years, "-01-01")),
+    values = values
+  )
+}
+
 test_that("coal gap filling interpolates internal gaps without changing observations", {
   dates <- seq(as.Date("2024-01-01"), as.Date("2024-06-01"), by = "month")
   monthly <- coal_rows("SE", SIEC_HARD_COAL, "GID_CAL", dates, c(10, 20, NA, NA, 50, 60))
@@ -171,11 +179,17 @@ test_that("solid sector splitting preserves usable electricity and requires depe
   )
   result <- eurostat_split_solid_elec_others(input)
 
-  expect_equal(nrow(filter(result, time == as.Date("2024-01-01"))), 0)
+  january <- filter(result, time == as.Date("2024-01-01"))
+  expect_equal(nrow(january), 1)
+  expect_equal(january$sector, SECTOR_UNKNOWN)
+  expect_equal(january$values, 10)
   expect_equal(
     filter(result, time == as.Date("2024-02-01"), sector == SECTOR_ELEC)$values,
     4
   )
+  expect_true(is.na(
+    filter(result, time == as.Date("2024-02-01"), sector == SECTOR_OTHERS)$values
+  ))
   expect_equal(
     filter(result, time == as.Date("2024-03-01"), sector == SECTOR_OTHERS)$values,
     6
@@ -222,7 +236,9 @@ test_that("missing coking input blocks only the affected total", {
     filter(result, siec == SIEC_HARD_COAL, sector == SECTOR_ELEC)$values,
     4
   )
-  expect_equal(nrow(filter(result, siec == SIEC_HARD_COAL, sector == SECTOR_OTHERS)), 0)
+  expect_true(is.na(
+    filter(result, siec == SIEC_HARD_COAL, sector == SECTOR_OTHERS)$values
+  ))
   expect_equal(
     filter(result, siec == SIEC_BROWN_COAL, sector == SECTOR_OTHERS)$values,
     5
@@ -303,6 +319,286 @@ test_that("process_solid_yearly keeps NA when all electricity components are mis
     "GR", as.Date("2025-01-01"), SIEC_BROWN_COAL, "TI_EHG_MAPCHP_E", "TJ", NA_real_
   )
   out <- process_solid_yearly(yearly_raw)
-  expect_equal(nrow(out), 1)
-  expect_true(is.na(out$values[[1]]))
+  expect_equal(nrow(out), 2)
+  expect_true(all(is.na(out$values)))
+})
+
+test_that("annual-backed rules recover a missing lignite year and its power split", {
+  history_dates <- seq(as.Date("2022-01-01"), as.Date("2024-12-01"), by = "month")
+  target_dates <- seq(as.Date("2025-01-01"), as.Date("2025-12-01"), by = "month")
+  monthly <- bind_rows(
+    coal_rows("GR", SIEC_BROWN_COAL, "GID_CAL", history_dates, rep(100, 36)),
+    coal_rows("GR", SIEC_BROWN_COAL, "GID_CAL", target_dates, rep(NA_real_, 12)),
+    coal_rows("GR", SIEC_BROWN_COAL, "TI_EHG_MAP", history_dates, rep(0, 36)),
+    coal_rows("GR", SIEC_BROWN_COAL, "TI_EHG_MAP", target_dates, rep(0, 12))
+  )
+  annual <- bind_rows(
+    coal_annual_rows("GR", SIEC_BROWN_COAL, "IC_CAL", 2022:2025, rep(1200, 4)),
+    coal_annual_rows("GR", SIEC_BROWN_COAL, "TI_E", 2022:2025, rep(1188, 4)),
+    coal_annual_rows(
+      "GR", SIEC_BROWN_COAL, "TI_EHG_MAPE_E", 2022:2024, rep(600, 3)
+    ),
+    coal_annual_rows(
+      "GR", SIEC_BROWN_COAL, "TI_EHG_MAPCHP_E", 2022:2024, rep(588, 3)
+    )
+  )
+  local_mocked_bindings(
+    get_eu_iso2s = function(include_eu = FALSE) "GR",
+    .package = "creaco2tracker"
+  )
+
+  result <- fill_raw_coal_annual_backed(monthly, annual)
+  target <- result %>% filter(lubridate::year(time) == 2025)
+  provenance <- attr(result, "coal_annual_provenance") %>%
+    filter(lubridate::year(time) == 2025)
+
+  expect_equal(sum(filter(target, nrg_bal == "GID_CAL")$values), 1200)
+  expect_equal(sum(filter(target, nrg_bal == "TI_EHG_MAP")$values), 1188)
+  expect_true(all(
+    filter(provenance, nrg_bal == "TI_EHG_MAP")$component_status ==
+      "reported_inconsistent"
+  ))
+  expect_true(all(
+    filter(provenance, nrg_bal == "TI_EHG_MAP")$annual_method ==
+      "transformation_identity"
+  ))
+})
+
+test_that("failed annual coking policy leaves missing values explicit", {
+  dates <- seq(as.Date("2022-01-01"), as.Date("2025-12-01"), by = "month")
+  monthly <- bind_rows(
+    coal_rows("FR", SIEC_HARD_COAL, "GID_CAL", dates, rep(100, 48)),
+    coal_rows("FR", SIEC_HARD_COAL, "TI_EHG_MAP", dates, rep(10, 48)),
+    coal_rows(
+      "FR", SIEC_HARD_COAL, "TI_CO", dates,
+      c(rep(0, 36), rep(NA_real_, 12))
+    )
+  )
+  annual <- bind_rows(
+    coal_annual_rows("FR", SIEC_HARD_COAL, "IC_CAL", 2022:2025, rep(1200, 4)),
+    coal_annual_rows("FR", SIEC_HARD_COAL, "TI_CO_E", 2022:2024, rep(0, 3))
+  )
+  local_mocked_bindings(
+    get_eu_iso2s = function(include_eu = FALSE) "FR",
+    .package = "creaco2tracker"
+  )
+
+  result <- fill_raw_coal_annual_backed(monthly, annual)
+  coking <- result %>%
+    filter(nrg_bal == "TI_CO", lubridate::year(time) == 2025)
+  provenance <- attr(result, "coal_annual_provenance")
+
+  expect_true(all(is.na(coking$values)))
+  expect_equal(nrow(provenance), 0)
+  expect_false(.coal_annual_policy_enabled(SIEC_HARD_COAL, "TI_CO", 12))
+  expect_false(.coal_annual_policy_enabled(
+    SIEC_BROWN_COAL_BRIQUETTES, "GID_CAL", 6
+  ))
+  expect_false(.coal_annual_policy_enabled(SIEC_OIL_SHALE, "GID_CAL", 12))
+  expect_true(.coal_annual_policy_enabled(SIEC_OIL_SHALE, "GID_CAL", 6))
+})
+
+test_that("reported zero transformation bounds briquette power use at zero", {
+  dates <- seq(as.Date("2025-01-01"), as.Date("2025-12-01"), by = "month")
+  monthly <- bind_rows(
+    coal_rows(
+      "AT", SIEC_BROWN_COAL_BRIQUETTES, "GID_CAL", dates, rep(10, 12)
+    ),
+    coal_rows(
+      "AT", SIEC_BROWN_COAL_BRIQUETTES, "TI_EHG_MAP", dates,
+      rep(NA_real_, 12)
+    )
+  )
+  annual <- bind_rows(
+    coal_annual_rows(
+      "AT", SIEC_BROWN_COAL_BRIQUETTES, "IC_CAL", 2025, 120
+    ),
+    coal_annual_rows(
+      "AT", SIEC_BROWN_COAL_BRIQUETTES, "TI_E", 2025, 0
+    )
+  )
+  local_mocked_bindings(
+    get_eu_iso2s = function(include_eu = FALSE) "AT",
+    .package = "creaco2tracker"
+  )
+
+  result <- fill_raw_coal_annual_backed(monthly, annual)
+  power <- result %>% filter(nrg_bal == "TI_EHG_MAP")
+  provenance <- attr(result, "coal_annual_provenance") %>%
+    filter(nrg_bal == "TI_EHG_MAP")
+
+  expect_equal(power$values, rep(0, 12))
+  expect_true(all(
+    provenance$annual_method == "reported_zero_transformation_bound"
+  ))
+})
+
+test_that("complete monthly coal sectors replace an annual unallocated total", {
+  input <- tibble(
+    iso2 = "DE",
+    time = as.Date("2025-01-01"),
+    unit = "THS_T",
+    siec = SIEC_BROWN_COAL_BRIQUETTES,
+    fuel = FUEL_COAL,
+    sector = c(SECTOR_UNKNOWN, SECTOR_ELEC, SECTOR_OTHERS),
+    values = c(100, 20, 70),
+    source = c("yearly", "monthly", "monthly")
+  )
+
+  result <- resolve_coal_unallocated_totals(input)
+  diagnostics <- attr(result, "coal_unallocated_sector")
+
+  expect_false(SECTOR_UNKNOWN %in% result$sector)
+  expect_equal(sum(result$values), 90)
+  expect_equal(diagnostics$status, "monthly_split_complete")
+})
+
+test_that("a monthly unallocated coal total replaces annual sector fallbacks", {
+  input <- tibble(
+    iso2 = "EU",
+    time = as.Date("2024-01-01"),
+    unit = "THS_T",
+    siec = SIEC_HARD_COAL,
+    fuel = FUEL_COAL,
+    sector = c(SECTOR_UNKNOWN, SECTOR_ELEC, SECTOR_OTHERS),
+    values = c(100, 40, 30),
+    source = c("monthly", "yearly", "yearly")
+  )
+
+  result <- resolve_coal_unallocated_totals(input)
+  diagnostics <- attr(result, "coal_unallocated_sector")
+
+  expect_equal(nrow(result), 1)
+  expect_equal(result$sector, SECTOR_UNKNOWN)
+  expect_equal(result$values, 100)
+  expect_equal(diagnostics$status, "monthly_total_unallocated")
+})
+
+test_that("coal unallocated reconciliation preserves non-coal rows", {
+  input <- tibble(
+    iso2 = "DE",
+    time = as.Date("2025-01-01"),
+    unit = "TJ_GCV",
+    siec = SIEC_NATURAL_GAS,
+    fuel = FUEL_GAS,
+    sector = c(SECTOR_ALL, SECTOR_ELEC),
+    values = c(100, 20),
+    source = "monthly"
+  )
+
+  result <- resolve_coal_unallocated_totals(input)
+  attr(result, "coal_unallocated_sector") <- NULL
+
+  expect_equal(result, input)
+})
+
+test_that("annual coal total preserves only the uncovered monthly residual", {
+  input <- tibble(
+    iso2 = "DE",
+    time = as.Date("2025-01-01"),
+    unit = "THS_T",
+    siec = SIEC_BROWN_COAL_BRIQUETTES,
+    fuel = FUEL_COAL,
+    sector = c(SECTOR_UNKNOWN, SECTOR_ELEC, SECTOR_OTHERS),
+    values = c(100, 20, NA_real_),
+    source = c("yearly", "monthly", "monthly")
+  )
+
+  result <- resolve_coal_unallocated_totals(input)
+  diagnostics <- attr(result, "coal_unallocated_sector")
+
+  expect_equal(result$values[result$sector == SECTOR_UNKNOWN], 80)
+  expect_false(SECTOR_OTHERS %in% result$sector)
+  expect_equal(sum(result$values), 100)
+  expect_equal(diagnostics$status, "annual_residual_unallocated")
+})
+
+test_that("an inconsistent annual coal residual remains explicitly unresolved", {
+  input <- tibble(
+    iso2 = "DE",
+    time = as.Date("2025-01-01"),
+    unit = "THS_T",
+    siec = SIEC_BROWN_COAL_BRIQUETTES,
+    fuel = FUEL_COAL,
+    sector = c(SECTOR_UNKNOWN, SECTOR_ELEC, SECTOR_OTHERS),
+    values = c(10, 20, NA_real_),
+    source = c("yearly", "monthly", "monthly")
+  )
+
+  result <- resolve_coal_unallocated_totals(input)
+  diagnostics <- attr(result, "coal_unallocated_sector")
+
+  expect_true(is.na(result$values[result$sector == SECTOR_UNKNOWN]))
+  expect_equal(diagnostics$status, "negative_residual")
+})
+
+test_that("yearly coal fallback is explicit and unresolved values stay missing", {
+  monthly <- tibble::tribble(
+    ~iso2, ~sector, ~time, ~unit, ~siec, ~fuel, ~values,
+    "SE", SECTOR_ELEC, as.Date("2025-01-01"), "THS_T", SIEC_HARD_COAL,
+    FUEL_COAL, NA_real_,
+    "SE", SECTOR_OTHERS, as.Date("2025-01-01"), "THS_T", SIEC_HARD_COAL,
+    FUEL_COAL, NA_real_
+  )
+  yearly <- monthly %>%
+    filter(sector == SECTOR_ELEC) %>%
+    mutate(values = 5)
+
+  combined <- combine_monthly_yearly_with_cutoff(yearly, monthly)
+  diagnostic <- coal_downstream_completeness(monthly, combined)
+
+  expect_equal(filter(combined, sector == SECTOR_ELEC)$values, 5)
+  expect_equal(
+    filter(diagnostic, sector == SECTOR_ELEC)$status,
+    "yearly_fallback"
+  )
+  expect_true(is.na(filter(combined, sector == SECTOR_OTHERS)$values))
+  expect_equal(filter(diagnostic, sector == SECTOR_OTHERS)$status, "unresolved")
+})
+
+test_that("verified EU omission repairs are guarded against duplication", {
+  candidates <- tibble(
+    contributor_iso2 = "GR", siec = SIEC_BROWN_COAL, nrg_bal = "GID_CAL",
+    unit = "THS_T", time = as.Date("2025-01-01"), contribution = 10,
+    eu_value = 100, reported_country_sum = 100, source_difference = 0,
+    tolerance = 0.001, verified = TRUE
+  ) %>%
+    bind_rows(., .)
+  converted <- tibble::tribble(
+    ~iso2, ~siec, ~time, ~unit, ~fuel, ~sector, ~value_co2_tonne,
+    "GR", SIEC_BROWN_COAL, as.Date("2025-01-01"), "THS_T", FUEL_COAL,
+    SECTOR_ELEC, 20,
+    "EU", SIEC_BROWN_COAL, as.Date("2025-01-01"), "THS_T", FUEL_COAL,
+    SECTOR_ELEC, 100
+  )
+
+  once <- apply_verified_coal_eu_repairs(
+    converted %>% group_by(siec, iso2),
+    candidates
+  )
+  twice <- apply_verified_coal_eu_repairs(once, candidates)
+
+  expect_equal(filter(once, iso2 == "EU")$value_co2_tonne, 120)
+  expect_equal(filter(twice, iso2 == "EU")$value_co2_tonne, 120)
+})
+
+test_that("missing required coal components propagate to aggregate emissions", {
+  components <- tidyr::crossing(
+    iso2 = "SE", date = as.Date("2025-01-01"), unit = "t",
+    sector = SECTOR_ALL, estimate = c("central", "lower", "upper")
+  ) %>%
+    tidyr::crossing(fuel = c(FUEL_COAL, FUEL_GAS)) %>%
+    mutate(value = if_else(fuel == FUEL_COAL, NA_real_, 10))
+
+  totals <- add_total_co2(components) %>%
+    filter(fuel == "total")
+  recombined <- tibble(
+    iso2 = "SE", date = as.Date("2025-01-01"), unit = "t",
+    sector = SECTOR_ALL, estimate = "central",
+    fuel = c(FUEL_COAL, FUEL_PEAT), value = c(NA_real_, 5)
+  ) %>%
+    recombine_fuels()
+
+  expect_true(all(is.na(totals$value)))
+  expect_true(is.na(recombined$value))
 })

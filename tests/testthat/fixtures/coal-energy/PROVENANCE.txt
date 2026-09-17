@@ -1,0 +1,4 @@
+Eurostat nrg_cb_sff: eight EU countries, 2022–2025, THS_T, selected coal balances.
+Source: September 16 2026 frozen extract; retrieval 2026-09-16 21:10:51 UTC.
+Original extract MD5: f9460ff23f57c7f0e2bd05bc2c4b4d46
+Rows are preserved without replacing missing values. Test expectations distinguish energy use from IC_CAL.

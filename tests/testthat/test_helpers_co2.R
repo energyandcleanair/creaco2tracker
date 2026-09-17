@@ -319,6 +319,73 @@ test_that(
       60
     )
     expect_false(SECTOR_OTHERS %in% result$sector)
+    expect_false(any(is.na(result$value)))
+    expect_equal(sum(result$value), 100)
     expect_no_error(validate_co2_no_sector_all_for_non_total_fuels(result))
   }
 )
+
+test_that(
+  "detotalise_co2 leaves required detail missing without a usable aggregate",
+  {
+    test_data <- tibble(
+      iso2 = "SE",
+      geo = "SE",
+      unit = "t",
+      date = as.Date("2025-01-01"),
+      fuel = "coal",
+      sector = c(SECTOR_ELEC, SECTOR_OTHERS),
+      value = c(10, NA_real_),
+      estimate = "central"
+    )
+
+    result <- detotalise_co2(test_data)
+
+    expect_equal(nrow(result), 2)
+    expect_true(is.na(result$value[result$sector == SECTOR_OTHERS]))
+  }
+)
+
+test_that(
+  "detotalise_co2 uses a known aggregate when all sector detail is unavailable",
+  {
+    test_data <- tibble(
+      iso2 = "EU",
+      geo = "EU",
+      unit = "t",
+      date = as.Date("1990-01-01"),
+      fuel = "oil",
+      sector = c(
+        SECTOR_ALL,
+        SECTOR_ELEC,
+        SECTOR_TRANSPORT_DOMESTIC,
+        SECTOR_TRANSPORT_INTERNATIONAL_AVIATION
+      ),
+      value = c(100, NA_real_, NA_real_, NA_real_),
+      estimate = "central"
+    )
+
+    result <- detotalise_co2(test_data)
+
+    expect_equal(nrow(result), 1)
+    expect_equal(result$sector, SECTOR_ALL)
+    expect_equal(result$value, 100)
+  }
+)
+
+test_that("detotalise_co2 retains unresolved unallocated contributions", {
+  test_data <- tibble(
+    iso2 = "EU",
+    unit = "t",
+    date = as.Date("1990-01-01"),
+    fuel = "coal",
+    sector = c(SECTOR_ELEC, SECTOR_OTHERS, SECTOR_UNKNOWN),
+    value = c(60, 40, NA_real_),
+    estimate = "central"
+  )
+
+  result <- detotalise_co2(test_data)
+
+  expect_equal(nrow(result), 3)
+  expect_true(is.na(sum(result$value)))
+})

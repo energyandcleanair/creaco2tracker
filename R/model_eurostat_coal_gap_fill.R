@@ -420,7 +420,12 @@ write_coal_gap_diagnostics <- function(monthly, diagnostics_folder) {
     coal_gap_provenance = attr(monthly, "coal_gap_provenance"),
     coal_gap_reconciliation = attr(monthly, "coal_gap_reconciliation"),
     coal_gap_completeness = attr(monthly, "coal_gap_completeness"),
-    coal_gap_exclusions = attr(monthly, "coal_gap_exclusions")
+    coal_gap_exclusions = attr(monthly, "coal_gap_exclusions"),
+    coal_annual_provenance = attr(monthly, "coal_annual_provenance"),
+    coal_component_completeness = attr(monthly, "coal_component_completeness"),
+    coal_unallocated_sector = attr(monthly, "coal_unallocated_sector"),
+    coal_eu_repair_candidates = attr(monthly, "coal_eu_repair_candidates"),
+    coal_annual_policy = attr(monthly, "coal_annual_policy")
   )
   dir.create(diagnostics_folder, recursive = TRUE, showWarnings = FALSE)
   raw_out_of_bounds <- diagnostics$coal_gap_reconciliation
