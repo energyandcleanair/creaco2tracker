@@ -207,6 +207,46 @@ test_that("project_until_now wires EU internal-gap fill around generic forecast"
   )
 })
 
+test_that("project_until_now preserves but does not forecast unallocated sectors", {
+  input <- tibble(
+    iso2 = "DE",
+    date = as.Date(c("2025-01-01", "2025-01-01")),
+    fuel = FUEL_COAL,
+    sector = c(SECTOR_OTHERS, SECTOR_UNKNOWN),
+    unit = "t",
+    value = c(10, 5)
+  )
+  forecast_sectors <- NULL
+  passthrough <- function(x, ...) x
+  local_mocked_bindings(
+    split_gas_to_elec_all = passthrough,
+    project_until_now_elec = passthrough,
+    project_until_now_gas = passthrough,
+    project_eu_from_countries = passthrough,
+    project_until_now_coal_others = passthrough,
+    fill_eu_internal_gaps = passthrough,
+    project_until_now_forecast = function(x, ...) {
+      forecast_sectors <<- unique(x$sector)
+      x
+    },
+    detotalise_co2 = passthrough,
+    .package = "creaco2tracker"
+  )
+
+  result <- project_until_now(
+    input,
+    pwr_generation = tibble(),
+    gas_demand = tibble(),
+    eurostat_indprod = tibble(),
+    date_to = as.Date("2025-02-01")
+  )
+
+  expect_false(SECTOR_UNKNOWN %in% forecast_sectors)
+  unallocated <- filter(result, sector == SECTOR_UNKNOWN)
+  expect_equal(sort(unallocated$estimate), c("central", "lower", "upper"))
+  expect_equal(unallocated$value, rep(5, 3))
+})
+
 test_that("validate_co2 rejects protected EU central internal gaps", {
   co2 <- tibble(
     iso2 = "EU",
@@ -225,6 +265,7 @@ test_that("validate_co2 rejects protected EU central internal gaps", {
 })
 
 test_that("stabilise_eu_tail_estimates applies validated country-sum tail adjustments", {
+  local_mocked_bindings(get_eu_iso2s = function(...) c("DE", "FR"))
   dates <- seq.Date(as.Date("2025-01-01"), as.Date("2025-08-01"), by = "month")
   country_rows <- bind_rows(lapply(c("DE", "FR"), function(iso2) {
     tibble(
@@ -268,6 +309,7 @@ test_that("stabilise_eu_tail_estimates applies validated country-sum tail adjust
 })
 
 test_that("country-sum submodel selects no tail adjustments when history disagrees", {
+  local_mocked_bindings(get_eu_iso2s = function(...) c("DE", "FR"))
   dates <- seq.Date(as.Date("2025-01-01"), as.Date("2025-08-01"), by = "month")
   country_rows <- bind_rows(lapply(c("DE", "FR"), function(iso2) {
     tibble(
@@ -306,6 +348,7 @@ test_that("country-sum submodel selects no tail adjustments when history disagre
 })
 
 test_that("country-sum submodel selects no tail adjustments below country threshold", {
+  local_mocked_bindings(get_eu_iso2s = function(...) c("DE", "FR"))
   dates <- seq.Date(as.Date("2025-01-01"), as.Date("2025-08-01"), by = "month")
   co2 <- bind_rows(
     tibble(
@@ -576,6 +619,7 @@ test_that("seasonal-YoY submodel selects no tail adjustments when backtest is wo
 })
 
 test_that("stabilise_eu_tail_estimates keeps selected total adjustments after recomputing totals", {
+  local_mocked_bindings(get_eu_iso2s = function(...) c("DE", "FR"))
   component_rows <- make_eu_tail_seasonal_fixture(tail_values = c(95, 95))
   dates <- seq.Date(as.Date("2023-01-01"), as.Date("2024-12-01"), by = "month")
 

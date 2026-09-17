@@ -18,7 +18,8 @@ get_co2_from_eurostat_cons <- function(
     add_ncv_iea
   ) # Default to IEA if invalid source
 
-  eurostat_cons %>%
+  repair_candidates <- attr(eurostat_cons, "coal_eu_repair_candidates")
+  converted <- eurostat_cons %>%
     add_ncv_fn(diagnostics_folder = diagnostics_folder, use_cache = use_cache) %>%
     add_emission_factor() %>%
     mutate(
@@ -29,13 +30,37 @@ get_co2_from_eurostat_cons <- function(
             ncv_gcv_gas * co2_factor_t_per_TJ
         )
     ) %>%
-    filter(!is.na(value_co2_tonne)) %>%
+    filter(unit %in% c(EUROSTAT_UNIT_THOUSAND_TONNES, EUROSTAT_UNIT_TJ_GCV)) %>%
+    apply_verified_coal_eu_repairs(repair_candidates)
+  repair_diagnostics <- attr(converted, "coal_eu_emissions_repairs")
+  if (!is_null_or_empty(diagnostics_folder) && !is.null(repair_diagnostics)) {
+    readr::write_csv(
+      repair_diagnostics,
+      file.path(diagnostics_folder, "coal_eu_emissions_repairs.csv")
+    )
+  }
+
+  separate_keys <- attr(eurostat_cons, "coal_separate_projection")
+  separate <- converted[0, ]
+  if (!is.null(separate_keys) && nrow(separate_keys) > 0) {
+    keys <- c("iso2", "siec", "unit", "fuel")
+    separate <- converted %>% semi_join(separate_keys, by = keys)
+    converted <- converted %>% anti_join(separate_keys, by = keys)
+    if (!is_null_or_empty(diagnostics_folder)) {
+      readr::write_csv(separate,
+        file.path(diagnostics_folder, "coal_separate_emissions.csv"))
+    }
+  }
+  aggregate_converted <- function(data) data %>%
     group_by_at(group_by_cols) %>%
     summarise(
-      value = sum(value_co2_tonne, na.rm = TRUE),
+      value = if (any(is.na(value_co2_tonne))) NA_real_ else sum(value_co2_tonne),
       unit = "t",
       .groups = "drop"
     )
+  result <- aggregate_converted(converted)
+  attr(result, "coal_separate_projection") <- aggregate_converted(separate)
+  result
 }
 
 add_emission_factor <- function(x) {

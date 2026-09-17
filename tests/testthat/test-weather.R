@@ -4,8 +4,30 @@ library(lubridate)
 library(glue)
 library(creahelpers)
 
-# Source the weather.R file to get the latest version of get_weather
-# This allows testing without rebuilding the package
+# Exercise request construction and response normalisation without a live API.
+# The explicitly enabled local API test retains its real client.
+weather_requests <- new.env(parent = emptyenv())
+weather_requests$refresh <- logical()
+weather_api <- creahelpers::api.get
+testthat::local_mocked_bindings(
+  api.get = function(endpoint, variable, region_type, date_from, date_to,
+    region_iso2 = NULL, region_id = NULL, refresh_cache = FALSE, ...) {
+    if (grepl("localhost", endpoint, fixed = TRUE)) {
+      return(weather_api(endpoint = endpoint, variable = variable,
+        region_type = region_type, date_from = date_from, date_to = date_to,
+        region_iso2 = region_iso2, region_id = region_id, ...))
+    }
+    stopifnot(grepl("/v1/weather$", endpoint))
+    weather_requests$refresh <- c(weather_requests$refresh, refresh_cache)
+    countries <- if (!is.null(region_iso2)) region_iso2 else region_id
+    tidyr::crossing(
+      date = seq(as.Date(date_from), as.Date(date_to), by = "day"),
+      variable = strsplit(variable, ",", fixed = TRUE)[[1]],
+      region_iso2 = strsplit(countries, ",", fixed = TRUE)[[1]]
+    ) %>% mutate(value = 10, region_id = region_iso2, region_type = region_type)
+  },
+  .package = "creahelpers"
+)
 
 test_that(
   "get_weather works with HDD and CDD for EU",
@@ -142,6 +164,7 @@ test_that(
 
     # Third call with refresh
     result3 <- do.call(get_weather, c(params, list(use_cache = FALSE)))
+    expect_equal(tail(weather_requests$refresh, 3), c(FALSE, FALSE, TRUE))
 
     # Should still have same data (but freshly fetched)
     expect_equal(nrow(result1), nrow(result3))

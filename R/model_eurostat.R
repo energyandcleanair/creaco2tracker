@@ -36,6 +36,31 @@ get_eurostat_cons <- function(
   cons_raw_oil <- cons_sources$oil
   cons_raw_solid <- cons_sources$solid
   cons_raw_gas <- cons_sources$gas
+  reported_solid <- cons_raw_solid$monthly
+  gap_provenance <- attr(reported_solid, "coal_gap_provenance")
+  if (!is.null(gap_provenance) && nrow(gap_provenance) > 0) {
+    keys <- c(.coal_monthly_gap_keys(), "time")
+    reported_solid <- reported_solid %>% left_join(
+      gap_provenance %>% select(all_of(keys), original_value, method), by = keys
+    ) %>% mutate(values = if_else(!is.na(method), original_value, values)) %>%
+      select(-original_value, -method)
+  }
+  if (!is_null_or_empty(diagnostics_folder)) {
+    readr::write_csv(
+      coal_energy_coverage(cons_raw_solid$yearly, reported_solid),
+      file.path(diagnostics_folder, "coal_energy_coverage.csv")
+    )
+  }
+
+  cons_raw_solid$monthly <- fill_raw_coal_annual_backed(
+    cons_raw_solid$monthly,
+    cons_raw_solid$yearly
+  )
+  coal_eu_repair_candidates <- attr(
+    cons_raw_solid$monthly,
+    "coal_eu_repair_candidates"
+  )
+  write_coal_gap_diagnostics(cons_raw_solid$monthly, diagnostics_folder)
 
   # Check siec is complete and unique.
   # That all iso2s are included
@@ -55,16 +80,21 @@ get_eurostat_cons <- function(
   aggregate <- function(x) {
     x %>%
       group_by(iso2, sector, time, unit, siec, fuel) %>%
-      summarise_at("values", sum, na.rm = TRUE) %>%
+      summarise(values = sum_or_na(values), .groups = "drop") %>%
       ungroup()
   }
 
   # Process data
+  solid_monthly <- process_solid_monthly(cons_raw_solid$monthly, pwr_generation)
+  if (!is_null_or_empty(diagnostics_folder)) {
+    readr::write_csv(attr(solid_monthly, "coal_eu_completeness"),
+      file.path(diagnostics_folder, "coal_eu_completeness.csv"))
+  }
   cons_monthly <- log_timed_stage("process_eurostat_monthly", {
     list(
       oil = process_oil_monthly(cons_raw_oil$monthly),
-      solid = process_solid_monthly(cons_raw_solid$monthly, pwr_generation = pwr_generation) %>%
-        eurostat_split_elec_others(),
+      solid = solid_monthly %>%
+        eurostat_split_solid_elec_others(),
       gas = process_gas_monthly(cons_raw_gas$monthly, pwr_generation = pwr_generation) %>%
         eurostat_split_elec_others()
     ) %>%
@@ -77,7 +107,8 @@ get_eurostat_cons <- function(
   cons_yearly <- log_timed_stage("process_eurostat_yearly", {
     list(
       oil = process_oil_yearly(cons_raw_oil$yearly),
-      solid = process_solid_yearly(cons_raw_solid$yearly) %>% eurostat_split_elec_others(),
+      solid = process_solid_yearly(cons_raw_solid$yearly) %>%
+        eurostat_split_solid_elec_others(),
       gas = process_gas_yearly(cons_raw_gas$yearly, pwr_generation = pwr_generation) %>%
         eurostat_split_elec_others()
     ) %>%
@@ -86,9 +117,14 @@ get_eurostat_cons <- function(
       add_iso2() %>%
       select(iso2, sector, time, unit, siec, fuel, values)
   })
+  attr(cons_monthly, "coal_reported_monthly") <- reported_solid %>%
+    process_solid_monthly(pwr_generation) %>% eurostat_split_solid_elec_others()
 
   # Check that there is no na value
-  if (any(!complete.cases(cons_monthly)) || any(!complete.cases(cons_yearly))) {
+  if (
+    any(!complete.cases(select(cons_monthly, -values))) ||
+      any(!complete.cases(select(cons_yearly, -values)))
+  ) {
     stop("There are NA values in the data (except in the 'values' column).")
   }
 
@@ -96,10 +132,38 @@ get_eurostat_cons <- function(
   cons_yearly_monthly <- log_timed_stage("apply_seasonal_adjustment", {
     apply_seasonal_adjustment(cons_yearly, cons_monthly)
   })
+  coal_allocation <- attr(cons_yearly_monthly, "coal_allocation")
+  if (!is_null_or_empty(diagnostics_folder) && !is.null(coal_allocation)) {
+    readr::write_csv(coal_allocation, file.path(diagnostics_folder, "coal_allocation.csv"))
+  }
 
   # Combine monthly and yearly data with cutoff filtering
   cons_combined <- log_timed_stage("combine_monthly_yearly_with_cutoff", {
-    combine_monthly_yearly_with_cutoff(cons_yearly_monthly, cons_monthly)
+    combine_monthly_yearly_with_cutoff(cons_yearly_monthly, cons_monthly) %>%
+      resolve_coal_unallocated_totals()
+  })
+  coal_unallocated_sector <- attr(cons_combined, "coal_unallocated_sector")
+  coal_downstream_completeness <- coal_downstream_completeness(
+    cons_monthly,
+    cons_combined
+  )
+  if (!is_null_or_empty(diagnostics_folder)) {
+    readr::write_csv(
+      coal_downstream_completeness,
+      file.path(diagnostics_folder, "coal_downstream_completeness.csv")
+    )
+    readr::write_csv(
+      coal_unallocated_sector,
+      file.path(diagnostics_folder, "coal_unallocated_sector.csv")
+    )
+  }
+
+  log_timed_stage("check_coal_annual_bounds", {
+    check_coal_annual_bounds(
+      cons_combined = cons_combined,
+      cons_yearly = cons_yearly,
+      diagnostics_folder = diagnostics_folder
+    )
   })
 
   if (!is_null_or_empty(diagnostics_folder)) {
@@ -146,8 +210,261 @@ get_eurostat_cons <- function(
     })
   }
 
-
+  attr(cons, "coal_eu_repair_candidates") <- coal_eu_repair_candidates
+  attr(cons, "coal_downstream_completeness") <- coal_downstream_completeness
+  attr(cons, "coal_unallocated_sector") <- coal_unallocated_sector
+  attr(cons, "coal_allocation") <- coal_allocation
   return(cons)
+}
+
+#' Record whether downstream annual data resolves missing monthly coal components
+#'
+#' @keywords internal
+coal_downstream_completeness <- function(cons_monthly, cons_combined) {
+  keys <- c("iso2", "sector", "time", "unit", "siec", "fuel")
+  monthly <- cons_monthly %>%
+    filter(siec %in% COAL_MONTHLY_GAP_FUELS) %>%
+    select(all_of(keys), monthly_value = values)
+  combined <- cons_combined %>%
+    filter(siec %in% COAL_MONTHLY_GAP_FUELS) %>%
+    select(all_of(keys), combined_value = values, combined_source = source)
+
+  monthly %>%
+    full_join(combined, by = keys) %>%
+    mutate(
+      status = case_when(
+        !is.na(monthly_value) ~ "monthly",
+        is.na(monthly_value) & combined_source == "yearly" &
+          !is.na(combined_value) ~ "yearly_fallback",
+        TRUE ~ "unresolved"
+      )
+    )
+}
+
+#' Reconcile unallocated coal totals with sector observations
+#'
+#' A coal total can be retained as `unknown` when its electricity split is
+#' unavailable. A monthly total scales a complete annual sector fallback to
+#' preserve its shares; without a usable fallback it remains unknown.
+#' An annual total assigns the residual to the missing sector when one monthly
+#' sector is known. Conflicting sector values are bounded to a valid total.
+#' Diagnostics retain the original residual and identify conflicting splits.
+#'
+#' @keywords internal
+resolve_coal_unallocated_totals <- function(x, tolerance = 1e-6) {
+  keys <- intersect(names(x), c("iso2", "time", "unit", "siec", "fuel"))
+  stats <- x %>%
+    filter(siec %in% COAL_MONTHLY_GAP_FUELS) %>%
+    group_by(across(all_of(keys))) %>%
+    summarise(
+      annual_split_valid = all(c(SECTOR_ELEC, SECTOR_OTHERS) %in%
+        sector[source == "yearly" & is.finite(values) & values >= 0]),
+      annual_split_total = sum(values[source == "yearly" &
+        sector %in% c(SECTOR_ELEC, SECTOR_OTHERS)], na.rm = TRUE),
+      monthly_unknown = if_else(
+        any(
+          sector == SECTOR_UNKNOWN & source == "monthly" & !is.na(values)
+        ),
+        sum(values[
+          sector == SECTOR_UNKNOWN & source == "monthly" & !is.na(values)
+        ]),
+        NA_real_
+      ),
+      annual_unknown = if_else(
+        any(
+          sector == SECTOR_UNKNOWN & source == "yearly" & !is.na(values)
+        ),
+        sum(values[
+          sector == SECTOR_UNKNOWN & source == "yearly" & !is.na(values)
+        ]),
+        NA_real_
+      ),
+      monthly_electricity = if_else(
+        any(
+          sector == SECTOR_ELEC & source == "monthly" & !is.na(values)
+        ),
+        sum(values[
+          sector == SECTOR_ELEC & source == "monthly" & !is.na(values)
+        ]),
+        NA_real_
+      ),
+      monthly_others = if_else(
+        any(
+          sector == SECTOR_OTHERS & source == "monthly" & !is.na(values)
+        ),
+        sum(values[
+          sector == SECTOR_OTHERS & source == "monthly" & !is.na(values)
+        ]),
+        NA_real_
+      ),
+      .groups = "drop"
+    ) %>%
+    filter(!is.na(monthly_unknown) | !is.na(annual_unknown)) %>%
+    mutate(
+      monthly_components = rowSums(!is.na(pick(
+        monthly_electricity, monthly_others
+      ))),
+      monthly_known = rowSums(pick(
+        monthly_electricity, monthly_others
+      ), na.rm = TRUE),
+      residual = annual_unknown - monthly_known,
+      status = case_when(
+        is.finite(monthly_unknown) & monthly_unknown >= 0 &
+          annual_split_valid & annual_split_total > 0 ~ "annual_split_scaled_to_monthly_total",
+        !is.na(monthly_unknown) ~ "monthly_total_unallocated",
+        monthly_components == 2L ~ "monthly_split_complete",
+        residual < -tolerance ~ "negative_residual",
+        monthly_components == 0L ~ "annual_total_unallocated",
+        TRUE ~ "annual_residual_allocated"
+      )
+    )
+
+  if (nrow(stats) == 0) {
+    attr(x, "coal_unallocated_sector") <- stats
+    return(x)
+  }
+
+  result <- x %>%
+    left_join(
+      stats %>% select(
+        all_of(keys), monthly_unknown, annual_unknown,
+        monthly_components, monthly_electricity, residual, status, annual_split_total
+      ),
+      by = keys,
+      relationship = "many-to-one"
+    ) %>%
+    filter(!coalesce(
+      status == "annual_split_scaled_to_monthly_total" &
+        (sector == SECTOR_UNKNOWN | source != "yearly"),
+      FALSE
+    )) %>%
+    filter(!coalesce(
+      status == "monthly_total_unallocated" &
+        sector %in% c(SECTOR_ELEC, SECTOR_OTHERS),
+      FALSE
+    )) %>%
+    filter(!coalesce(
+      status == "monthly_total_unallocated" &
+        sector == SECTOR_UNKNOWN & source == "yearly",
+      FALSE
+    )) %>%
+    filter(!coalesce(
+      status == "monthly_split_complete" &
+        sector == SECTOR_UNKNOWN & source == "yearly",
+      FALSE
+    )) %>%
+    mutate(
+      values = case_when(
+        status == "annual_split_scaled_to_monthly_total" &
+          sector %in% c(SECTOR_ELEC, SECTOR_OTHERS) ~
+          monthly_unknown * values / annual_split_total,
+        sector == SECTOR_UNKNOWN & source == "yearly" &
+          status %in% c(
+            "annual_total_unallocated", "annual_residual_allocated"
+          ) ~ pmax(0, residual),
+        sector == SECTOR_UNKNOWN & source == "yearly" &
+          status == "negative_residual" & annual_unknown >= 0 ~ 0,
+        sector %in% c(SECTOR_ELEC, SECTOR_OTHERS) & source == "monthly" &
+          status == "negative_residual" & annual_unknown >= 0 & is.finite(values) ~
+          annual_unknown,
+        sector == SECTOR_UNKNOWN & source == "yearly" &
+          status == "negative_residual" ~ NA_real_,
+        TRUE ~ values
+      )
+    ) %>%
+    filter(!(
+      !is.na(annual_unknown) &
+        status != "monthly_split_complete" &
+        sector %in% c(SECTOR_ELEC, SECTOR_OTHERS) &
+        source == "monthly" & is.na(values)
+    )) %>%
+    mutate(sector = case_when(
+      sector == SECTOR_UNKNOWN & source == "yearly" &
+        (status == "annual_residual_allocated" |
+          (status == "negative_residual" & annual_unknown >= 0)) ~
+        if_else(is.na(monthly_electricity), SECTOR_ELEC, SECTOR_OTHERS),
+      TRUE ~ sector
+    )) %>%
+    select(
+      -monthly_unknown, -annual_unknown, -monthly_components, -monthly_electricity, -residual,
+      -status, -annual_split_total
+    )
+
+  attr(result, "coal_unallocated_sector") <- stats
+  result
+}
+
+
+#' Check monthly coal consumption against annual Eurostat balances
+#'
+#' The check reports every complete monthly coal series that has a matching
+#' annual balance. It warns about differences greater than `relative_tolerance`
+#' and writes the comparison to the Eurostat diagnostics directory.
+#'
+#' @keywords internal
+check_coal_annual_bounds <- function(
+  cons_combined,
+  cons_yearly,
+  diagnostics_folder = NULL,
+  relative_tolerance = 0.05
+) {
+  series_keys <- c("iso2", "sector", "unit", "siec", "fuel", "year")
+  annual <- cons_yearly %>%
+    filter(fuel == FUEL_COAL, !is.na(values)) %>%
+    mutate(year = lubridate::year(time)) %>%
+    group_by(across(all_of(series_keys))) %>%
+    summarise(annual_value = sum_or_na(values), .groups = "drop")
+
+  monthly <- cons_combined %>%
+    filter(fuel == FUEL_COAL, !is.na(values)) %>%
+    mutate(year = lubridate::year(time)) %>%
+    group_by(across(all_of(series_keys))) %>%
+    summarise(
+      month_count = n_distinct(time),
+      monthly_value = sum(values),
+      monthly_source_months = sum(source == "monthly"),
+      .groups = "drop"
+    ) %>%
+    filter(month_count == 12)
+
+  reconciliation <- monthly %>%
+    inner_join(annual, by = series_keys) %>%
+    mutate(
+      difference = monthly_value - annual_value,
+      zero_denominator = annual_value == 0,
+      relative_difference = if_else(
+        zero_denominator,
+        NA_real_,
+        difference / abs(annual_value)
+      ),
+      source = case_when(
+        monthly_source_months == 12 ~ "monthly",
+        monthly_source_months == 0 ~ "yearly",
+        TRUE ~ "mixed"
+      ),
+      within_bounds = case_when(
+        zero_denominator ~ abs(difference) <= 1e-6,
+        TRUE ~ abs(relative_difference) <= relative_tolerance
+      )
+    )
+
+  if (!is_null_or_empty(diagnostics_folder)) {
+    readr::write_csv(
+      reconciliation,
+      file.path(diagnostics_folder, "coal_annual_reconciliation.csv")
+    )
+  }
+
+  out_of_bounds <- reconciliation %>% filter(!within_bounds)
+  if (nrow(out_of_bounds) > 0) {
+    log_warn(paste0(
+      "Coal monthly totals differ from annual balances by more than ",
+      round(relative_tolerance * 100), "% for ", nrow(out_of_bounds),
+      " complete country-sector series. See coal_annual_reconciliation.csv."
+    ))
+  }
+
+  reconciliation
 }
 
 
@@ -164,15 +481,18 @@ get_eurostat_cons <- function(
 #' @examples
 apply_seasonal_adjustment <- function(cons_yearly, cons_monthly) {
   # Check that there is no na value
-  if (any(!complete.cases(cons_monthly)) || any(!complete.cases(cons_yearly))) {
+  if (
+    any(!complete.cases(select(cons_monthly, -values))) ||
+      any(!complete.cases(select(cons_yearly, -values)))
+  ) {
     stop("There are NA values in the data (except in the 'values' column).")
   }
 
   # Calculate monthly shares for seasonal adjustment
   month_shares <- cons_monthly %>%
     group_by(iso2, sector, siec, unit, fuel, year = lubridate::year(time)) %>%
-    mutate(count = n()) %>%
-    filter(count == 12) %>%
+    mutate(count = n(), complete = count == 12 & all(!is.na(values))) %>%
+    filter(complete) %>%
     group_by(sector, siec, unit, iso2, fuel, month = lubridate::month(time)) %>%
     summarise(values = sum(values, na.rm = TRUE), .groups = "drop") %>%
     group_by(sector, siec, unit, iso2, fuel) %>%
@@ -185,6 +505,50 @@ apply_seasonal_adjustment <- function(cons_yearly, cons_monthly) {
       )
     ) %>%
     select(-c(values))
+
+  # An annual coal total whose sector split is unavailable has sector
+  # `unknown`, even when historical monthly years were fully allocated between
+  # electricity and other uses. Derive a total-consumption profile from those
+  # reported monthly sectors so the known annual total can still be retained.
+  coal_total_shares <- cons_monthly %>%
+    filter(
+      siec %in% COAL_MONTHLY_GAP_FUELS,
+      sector %in% c(SECTOR_ELEC, SECTOR_OTHERS, SECTOR_UNKNOWN)
+    ) %>%
+    group_by(iso2, siec, unit, fuel, time) %>%
+    summarise(
+      values = case_when(
+        any(sector == SECTOR_UNKNOWN & !is.na(values)) ~
+          sum(values[sector == SECTOR_UNKNOWN], na.rm = TRUE),
+        any(sector == SECTOR_ELEC & !is.na(values)) &
+          any(sector == SECTOR_OTHERS & !is.na(values)) ~
+          sum(values[sector %in% c(SECTOR_ELEC, SECTOR_OTHERS)], na.rm = TRUE),
+        TRUE ~ NA_real_
+      ),
+      .groups = "drop"
+    ) %>%
+    group_by(iso2, siec, unit, fuel, year = lubridate::year(time)) %>%
+    mutate(count = n(), complete = count == 12 & all(!is.na(values))) %>%
+    filter(complete) %>%
+    group_by(iso2, siec, unit, fuel, month = lubridate::month(time)) %>%
+    summarise(values = sum(values), .groups = "drop") %>%
+    group_by(iso2, siec, unit, fuel) %>%
+    mutate(
+      month_share = values / sum(values),
+      month_share = case_when(
+        is.na(month_share) | is.infinite(month_share) ~ 1 / 12,
+        TRUE ~ month_share
+      ),
+      sector = SECTOR_UNKNOWN
+    ) %>%
+    select(-values) %>%
+    anti_join(
+      month_shares %>%
+        filter(sector == SECTOR_UNKNOWN) %>%
+        distinct(iso2, sector, siec, unit, fuel, month),
+      by = c("iso2", "sector", "siec", "unit", "fuel", "month")
+    )
+  month_shares <- bind_rows(month_shares, coal_total_shares)
 
   # Validate that monthly shares sum to approximately 1
   if (!all(month_shares %>%
@@ -209,7 +573,13 @@ apply_seasonal_adjustment <- function(cons_yearly, cons_monthly) {
     ) %>%
     select(-c(year, month, month_share))
 
-  return(cons_yearly_monthly)
+  coal <- coal_allocate_annual(cons_yearly, cons_monthly)
+  result <- bind_rows(
+    cons_yearly_monthly %>% filter(!siec %in% COAL_MONTHLY_GAP_FUELS |
+      !iso2 %in% get_eu_iso2s(include_eu = TRUE)), coal
+  )
+  attr(result, "coal_allocation") <- attr(coal, "coal_allocation")
+  result
 }
 
 
@@ -227,8 +597,10 @@ remove_last_incomplete <- function(cons) {
   cons %>%
     group_by(iso2, sector, unit, siec, fuel) %>%
     arrange(desc(time)) %>%
-    mutate(cumsum = cumsum(values)) %>%
-    filter(cumsum != 0 | max(cumsum) == 0 | row_number() >= max_months) %>%
+    mutate(cumsum = cumsum(coalesce(values, 0))) %>%
+    filter(
+      is.na(values) | cumsum != 0 | max(cumsum) == 0 | row_number() >= max_months
+    ) %>%
     ungroup() %>%
     select(-c(cumsum))
 }
@@ -332,7 +704,7 @@ combine_monthly_yearly_with_cutoff <- function(cons_yearly_monthly, cons_monthly
     ) %>%
     select(-c(cutoff_date)) %>%
     group_by(iso2, sector, time, unit, siec, fuel) %>%
-    arrange(source) %>% # monthly < yearly
+    arrange(is.na(values), source) %>% # Prefer usable monthly, then usable yearly.
     slice(1) %>%
     ungroup()
 

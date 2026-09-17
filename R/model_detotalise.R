@@ -51,7 +51,20 @@ detotalise_co2 <- function(x) {
       )
     ) %>%
     select(-value_deducted) %>%
-    group_by(iso2, fuel, date) %>%
+    group_by_at(group_by_cols) %>%
+    # An unresolved unallocated component is a required contribution. Keep its
+    # NA explicit so the final aggregate cannot turn missing coverage into zero.
+    # A known aggregate can preserve the total even when its sector split is
+    # incomplete. When some detail is reported, the generated unknown residual
+    # contains the missing contribution. When no detail is reported, retain the
+    # aggregate itself. In both cases the NA detail rows are redundant.
+    filter(
+      !(
+        sector != SECTOR_ALL &
+          is.na(value) &
+          any(sector == SECTOR_ALL & !is.na(value))
+      )
+    ) %>%
     # Remove total if there is another sector
     filter(
       !(

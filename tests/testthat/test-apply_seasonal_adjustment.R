@@ -131,7 +131,7 @@ test_that(
 )
 
 test_that(
-  "apply_seasonal_adjustment throws error for incomplete data",
+  "apply_seasonal_adjustment excludes incomplete monthly profiles",
   {
     # Create test data with NA values
     cons_monthly <- tribble(
@@ -148,13 +148,36 @@ test_that(
     ) %>%
       mutate(time = as.Date(time))
 
-    # Should throw error due to NA values
-    expect_error(
-      apply_seasonal_adjustment(cons_yearly, cons_monthly),
-      "There are NA values in the data"
-    )
+    result <- apply_seasonal_adjustment(cons_yearly, cons_monthly)
+    expect_equal(nrow(result), 0)
   }
 )
+
+test_that("annual unallocated coal uses the historical total monthly profile", {
+  dates <- seq.Date(as.Date("2024-01-01"), by = "month", length.out = 12)
+  cons_monthly <- bind_rows(
+    tibble(
+      iso2 = "DE", sector = SECTOR_ELEC, time = dates, unit = "THS_T",
+      siec = SIEC_BROWN_COAL_BRIQUETTES, fuel = FUEL_COAL, values = 2
+    ),
+    tibble(
+      iso2 = "DE", sector = SECTOR_OTHERS, time = dates, unit = "THS_T",
+      siec = SIEC_BROWN_COAL_BRIQUETTES, fuel = FUEL_COAL, values = 8
+    )
+  )
+  cons_yearly <- tibble(
+    iso2 = "DE", sector = SECTOR_UNKNOWN, time = as.Date("2025-01-01"),
+    unit = "THS_T", siec = SIEC_BROWN_COAL_BRIQUETTES,
+    fuel = FUEL_COAL, values = 120
+  )
+
+  result <- apply_seasonal_adjustment(cons_yearly, cons_monthly)
+
+  expect_equal(nrow(result), 12)
+  expect_equal(result$sector, rep(SECTOR_UNKNOWN, 12))
+  expect_equal(result$values, rep(10, 12))
+  expect_equal(sum(result$values), 120)
+})
 
 test_that(
   "apply_seasonal_adjustment handles multiple countries and sectors",

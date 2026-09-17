@@ -230,18 +230,27 @@ split_gas_to_elec_all <- function(co2) {
 #'
 #' @examples
 recombine_fuels <- function(co2) {
-  co2 %>%
+  group_by_cols <- names(co2)[names(co2) != "value"]
+  result <- co2 %>%
     mutate(
       fuel = case_when(
         fuel == FUEL_PEAT ~ FUEL_COAL,
         TRUE ~ fuel
       )
     ) %>%
-    group_by(across(c(-value))) %>%
+    group_by(across(all_of(group_by_cols))) %>%
     summarise(
-      value = sum_or_na(value),
+      component_count = n(),
+      available_components = sum(!is.na(value)),
+      complete = all(!is.na(value)),
+      value = if (all(is.na(value))) NA_real_ else sum(value, na.rm = TRUE),
       .groups = "drop"
     )
+  attr(result, "fuel_completeness") <- result %>% select(
+    all_of(setdiff(group_by_cols, "fuel")), fuel,
+    component_count, available_components, complete
+  )
+  result %>% select(-component_count, -available_components, -complete)
 }
 
 
@@ -252,17 +261,32 @@ recombine_fuels <- function(co2) {
 #' @export
 add_total_co2 <- function(co2) {
   # First handle non-total fuels
-  co2 %>%
+  totals <- co2 %>%
     filter(fuel != "total") %>%
     group_by(iso2, date, unit) %>%
     summarise(
       # First calculate central value and std dev
-      central_value = sum_or_na(value[estimate == "central"]),
+      central_component_count = sum(estimate == "central"),
+      central_available_components = sum(!is.na(value[estimate == "central"])),
+      central_complete = all(!is.na(value[estimate == "central"])),
+      central_value = if (all(is.na(value[estimate == "central"]))) NA_real_ else
+        sum(value[estimate == "central"], na.rm = TRUE),
       # Convert confidence intervals to standard deviations
-      std_dev = sum_or_na((value[estimate == "upper"] - value[estimate == "central"])^2) %>%
-        sqrt(),
+      std_dev = if (
+        any(is.na(value[estimate == "upper"])) ||
+          any(is.na(value[estimate == "central"]))
+      ) {
+        NA_real_
+      } else {
+        sqrt(sum((value[estimate == "upper"] - value[estimate == "central"])^2))
+      },
       .groups = "drop"
-    ) %>%
+    )
+  completeness <- totals %>% select(
+    iso2, date, unit, central_component_count,
+    central_available_components, central_complete
+  )
+  result <- totals %>%
     # Create three rows for each group with the different estimates
     tidyr::crossing(estimate = c("central", "lower", "upper")) %>%
     mutate(
@@ -274,12 +298,20 @@ add_total_co2 <- function(co2) {
       fuel = "total",
       sector = SECTOR_ALL
     ) %>%
-    select(-central_value, -std_dev) %>%
+    select(
+      -central_component_count,
+      -central_available_components,
+      -central_complete,
+      -central_value,
+      -std_dev
+    ) %>%
     bind_rows(
       co2 %>%
         filter(fuel != "total")
     ) %>%
     ungroup()
+  attr(result, "total_component_completeness") <- completeness
+  result
 }
 
 combine_coke_coal <- function(co2) {
@@ -293,13 +325,22 @@ combine_coke_coal <- function(co2) {
     group_by_at(group_by_cols) %>%
     summarise(
       # First calculate central value and std dev
-      central_value = sum(value[estimate == "central"], na.rm = TRUE),
-      std_dev = sqrt(
-        sum(
+      central_value = if (any(is.na(value[estimate == "central"]))) {
+        NA_real_
+      } else {
+        sum(value[estimate == "central"])
+      },
+      std_dev = if (
+        any(is.na(value[estimate == "upper"])) ||
+          any(is.na(value[estimate == "central"]))
+      ) {
+        NA_real_
+      } else {
+        sqrt(sum(
           # Convert confidence intervals to standard deviations
           (value[estimate == "upper"] - value[estimate == "central"])^2
-        )
-      ),
+        ))
+      },
       .groups = "drop"
     ) %>%
     # Create three rows for each group with the different estimates

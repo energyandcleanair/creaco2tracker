@@ -33,84 +33,17 @@ process_solid_monthly <- function(x, pwr_generation) {
       arrange(desc(time))
   }
 
-  #############################
-  # Apply manual fixes
-  #############################
-  # Greece has started declaring 0 brown coal values for elec starting from
-  # 2015-09-01, but apparently 100% of brown coal was used for elec before that.
-  to_add_greece <- by_sector %>%
-    filter(
-      (
-        iso2 == "GR" & siec == SIEC_BROWN_COAL & time >= "2015-09-01" &
-          nrg_bal == NRG_GID_CALCULATED
-      )
-    ) %>%
-    mutate(
-      sector = SECTOR_ELEC,
-      nrg_bal = NRG_TRANS_ELEC
-    )
-
-  by_sector_fixed <- bind_rows(
-    by_sector %>%
-      filter(
-        !(
-          iso2 == "GR" & siec == SIEC_BROWN_COAL & time >= "2015-09-01" &
-            sector == SECTOR_ELEC
-        )
-      ),
-    to_add_greece
-  )
-
-  # Add the difference to EU
-  to_add_to_eu <- to_add_greece %>%
-    mutate(iso2 = "EU") %>%
-    select(iso2, time, siec, sector, unit, value_to_add = values)
-
-  by_sector_fixed <- by_sector_fixed %>%
-    left_join(to_add_to_eu, relationship = "one-to-one") %>%
-    mutate(value_to_add = tidyr::replace_na(value_to_add, 0)) %>%
-    mutate(values = values + value_to_add) %>%
-    select(-value_to_add)
-
-  #########################
-  # Fill hard coal electricity
-  # Slovenia stopped declaring hard coal elec since 2023-12-01
-  # yet it seems to be 0 (see investigate function above)
-  # As a result, EU has no data either since that date
-  # We rebuild EU Hard coal elec as the sum of all countries (when there are enough that is)
-  # By the same token, we also update coking as it will be used later on
-  ##########################
-  # We take hard coal from all countries.
-
-  # Manual France related fixes
-  by_sector_fixed <- by_sector_fixed %>%
-    mutate(
-      values = case_when(
-        # France has some gaps in Hard coal electricity that are annoying to get EU27 total
-        # We fill them with 0 after checking ENTSOE dates and confirming no coal generation.
-        sector == SECTOR_ELEC & iso2 == "FR" & siec == SIEC_HARD_COAL & is.na(values) ~ 0,
-        # For coking input, it stopped publishing data in around 2020-09
-        # we ignore for now, but would be good to implement a better way to guess values
-        # TODO Improve this
-        nrg_bal == NRG_TRANS_COKING & iso2 == "FR" & siec == SIEC_HARD_COAL &
-          is.na(values) ~ 0,
-        TRUE ~ values
-      )
-    )
-
-  by_sector_fixed <- fill_gaps_in_time_series(
-    data = by_sector_fixed,
-    group_cols = c("iso2", "siec", "nrg_bal", "sector", "unit"),
-    exclude_iso2s = "EU"
+  coal_monthly <- coal_fill_complete_eu(
+    by_sector %>% filter(siec %in% COAL_MONTHLY_GAP_FUELS)
   )
 
   # Fill missing EU values using sum of countries
   by_sector_fixed <- fill_eu_from_countries_sum(
-    data = by_sector_fixed,
+    data = by_sector %>% filter(!siec %in% COAL_MONTHLY_GAP_FUELS),
     group_cols = c("sector", "siec", "nrg_bal", "unit", "time"),
     min_countries = 25,
     max_rel_diff = 0.05
-  ) %>%
+  ) %>% bind_rows(coal_monthly) %>%
     mutate(fuel = siec_to_fuel(siec))
 
 
@@ -124,38 +57,60 @@ process_solid_monthly <- function(x, pwr_generation) {
       )
     ) %>%
     group_by(iso2, siec, sector, fuel, unit, time) %>%
-    summarise(values = sum(values * factor, na.rm = FALSE))
+    summarise(values = sum(values * factor, na.rm = FALSE), .groups = "drop")
 
 
-  # Remove recent dates where fewer siec and sector per date are available
-  keep_siec <- result %>%
-    ungroup() %>%
-    filter(!is.na(values)) %>%
-    group_by(iso2, sector, time) %>%
-    summarise(n = n_distinct(siec)) %>%
-    mutate(keep = n == max(n) | time < max(time) - months(36))
-
-  result <- result %>%
-    add_iso2() %>%
-    left_join(keep_siec) %>%
-    filter(keep) %>%
-    select(-keep, -n)
-
-  keep_sector <- result %>%
-    ungroup() %>%
-    filter(!is.na(values)) %>%
-    group_by(iso2, fuel, time) %>%
-    summarise(n = n_distinct(sector)) %>%
-    mutate(keep = n == max(n) | time < max(time) - months(36)) %>%
-    ungroup()
-
-  result <- result %>%
-    add_iso2() %>%
-    left_join(keep_sector) %>%
-    filter(keep) %>%
-    select(-keep, -n)
-
+  attr(result, "coal_eu_completeness") <- attr(coal_monthly, "coal_eu_completeness")
   return(result)
+}
+
+
+#' Split solid fuel totals only when the required monthly inputs exist
+#'
+#' Electricity can be retained without a total. The residual "others" sector
+#' requires both total consumption and electricity input. When the total is
+#' known but electricity is not, preserve the total in the explicit unknown
+#' sector instead of assigning it to "others" or discarding it.
+#'
+#' @keywords internal
+eurostat_split_solid_elec_others <- function(x) {
+  coal <- x %>% filter(siec %in% COAL_MONTHLY_GAP_FUELS)
+  other_solid <- x %>%
+    filter(!siec %in% COAL_MONTHLY_GAP_FUELS) %>%
+    eurostat_split_elec_others()
+  group_cols <- intersect(names(coal), c("iso2", "time", "unit", "siec", "fuel"))
+  wide <- coal %>%
+    ungroup() %>%
+    filter(sector %in% c(SECTOR_ALL, SECTOR_ELEC)) %>%
+    pivot_wider(
+      id_cols = all_of(group_cols),
+      names_from = sector,
+      values_from = values,
+      values_fill = NA
+    ) %>%
+    add_missing_cols(c("all", "electricity"))
+
+  allocated <- wide %>%
+    filter(is.na(all) | !is.na(electricity))
+  coal_split <- bind_rows(
+    allocated %>%
+      transmute(across(all_of(group_cols)), sector = SECTOR_ELEC, values = electricity),
+    allocated %>%
+      transmute(
+        across(all_of(group_cols)),
+        sector = SECTOR_OTHERS,
+        values = if_else(!is.na(all) & !is.na(electricity), all - electricity, NA_real_)
+      ),
+    wide %>%
+      filter(!is.na(all), is.na(electricity)) %>%
+      transmute(
+        across(all_of(group_cols)),
+        sector = SECTOR_UNKNOWN,
+        values = all
+      )
+  )
+
+  bind_rows(coal_split, other_solid)
 }
 
 process_solid_yearly <- function(x) {
@@ -193,9 +148,17 @@ process_solid_yearly <- function(x) {
       )
     ) %>%
     group_by(iso2, time, siec, sector, fuel, unit) %>%
-    summarise(values = sum(values * factor, na.rm = TRUE), .groups = "drop")
+    summarise(values = sum_or_na(values * factor), .groups = "drop")
 
-  return(result)
+  energy <- coal_annual_energy(x)
+  coal <- bind_rows(
+    energy %>% transmute(iso2, time, siec, unit, fuel, sector = SECTOR_ALL, values = energy),
+    energy %>% transmute(
+      iso2, time, siec, unit, fuel, sector = SECTOR_ELEC, values = electricity
+    )
+  )
+  bind_rows(result %>% filter(!siec %in% COAL_MONTHLY_GAP_FUELS |
+    !iso2 %in% get_eu_iso2s(include_eu = TRUE)), coal)
 }
 
 siec_to_fuel <- function(siec) {

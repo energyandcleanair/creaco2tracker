@@ -410,16 +410,26 @@ def chmod_public_dir(path: Path) -> None:
         return
 
 
-def prepare_collection_source_dir(source_dir: Path, log_prefix: str = LOG_PREFIX) -> None:
+def prepare_collection_source_dir(
+    source_dir: Path,
+    shared_cache_dir: Path,
+    log_prefix: str = LOG_PREFIX,
+) -> None:
     artifact_dir = source_dir.parent
     cache_dir = source_dir / "cache"
     data_dir = source_dir / "data"
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    shared_cache_dir.mkdir(parents=True, exist_ok=True)
+    if cache_dir.is_symlink() or cache_dir.is_file():
+        cache_dir.unlink()
+    elif cache_dir.is_dir():
+        shutil.rmtree(cache_dir)
+    relative_cache = os.path.relpath(shared_cache_dir, source_dir)
+    cache_dir.symlink_to(relative_cache, target_is_directory=True)
     data_dir.mkdir(parents=True, exist_ok=True)
     chmod_public_dir(artifact_dir)
-    chmod_public_dir(cache_dir)
+    chmod_public_dir(shared_cache_dir)
     chmod_public_dir(data_dir)
-    log(f"Source cache dir: {cache_dir}", prefix=log_prefix)
+    log(f"Shared source cache dir: {shared_cache_dir}", prefix=log_prefix)
 
 
 def copy_repo_renviron(repo_root: Path, source_dir: Path) -> None:
@@ -710,7 +720,7 @@ def collect_raw_run(
 
     workspace = materializer.materialize(paths, tmp_dir)
     copy_repo_renviron(paths.repo_root, workspace.source_dir)
-    prepare_collection_source_dir(workspace.source_dir)
+    prepare_collection_source_dir(workspace.source_dir, paths.repo_root / "cache")
 
     max_attempts = parse_retry_count()
     for attempt in range(1, max_attempts + 1):
@@ -778,7 +788,7 @@ def collect_external_sources(
 
     workspace = materializer_for(target_source).materialize(paths, tmp_dir)
     copy_repo_renviron(paths.repo_root, workspace.source_dir)
-    prepare_collection_source_dir(workspace.source_dir)
+    prepare_collection_source_dir(workspace.source_dir, paths.repo_root / "cache")
 
     ok = runner.run(
         paths.repo_root,

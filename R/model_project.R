@@ -31,6 +31,10 @@ project_until_now_lm <- function(
   co2_untouched <- x %>% anti_join(proxy %>% distinct(iso2, fuel, sector),
     by = c("iso2", "fuel", "sector")
   )
+  if (nrow(x %>% semi_join(proxy %>% distinct(iso2, fuel, sector),
+    by = c("iso2", "fuel", "sector"))) == 0) {
+    return(co2_untouched)
+  }
   co2_touched <- x %>%
     inner_join(proxy %>% distinct(iso2, fuel, sector),
       by = c("iso2", "fuel", "sector")
@@ -41,6 +45,7 @@ project_until_now_lm <- function(
     ungroup() %>%
     group_by(iso2, fuel, sector, unit) %>%
     group_modify(function(df, keys, ...) {
+      if (identical(fill_mode, "missing") && !anyNA(df$value)) return(df)
       iso2 <- keys %>%
         add_iso2() %>%
         pull(iso2)
@@ -496,6 +501,13 @@ project_until_now_coal_others <- function(
   fill_mode = c("overwrite", "missing", "ratio")
 ) {
   fill_mode <- match.arg(fill_mode)
+  if (!"iso2" %in% names(co2)) {
+    stop("Coal projection input must contain an iso2 column.")
+  }
+  co2_iso2 <- unique(co2$iso2)
+  if (length(co2_iso2) == 0) {
+    return(co2)
+  }
 
   # Cement, Steel, Glass, Coke
   products_ind <-
@@ -534,7 +546,7 @@ project_until_now_coal_others <- function(
 
   # See if model works for EU first
   proxy <- indprod %>%
-    filter(iso2 %in% co2$iso2) %>%
+    filter(.data$iso2 %in% .env$co2_iso2) %>%
     ungroup() %>%
     select(iso2, date = time, nace_r2, value = values) %>%
     group_by(iso2, date, nace_r2) %>%
