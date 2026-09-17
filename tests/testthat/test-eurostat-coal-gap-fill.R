@@ -196,7 +196,7 @@ test_that("solid sector splitting preserves usable electricity and requires depe
   )
 })
 
-test_that("strict dependency splitting does not remove coke or peat", {
+test_that("strict dependency splitting keeps unallocated coke and split peat", {
   input <- tibble::tribble(
     ~iso2, ~time, ~unit, ~siec, ~fuel, ~sector, ~values,
     "DE", as.Date("2024-01-01"), "THS_T", SIEC_COKE_OVEN_COKE,
@@ -207,12 +207,10 @@ test_that("strict dependency splitting does not remove coke or peat", {
 
   result <- eurostat_split_solid_elec_others(input)
 
-  expect_equal(nrow(result), 4)
+  expect_equal(nrow(result), 3)
   expect_equal(sum(result$values), 15)
-  expect_equal(
-    filter(result, sector == SECTOR_OTHERS) %>% arrange(siec) %>% pull(values),
-    c(10, 5)
-  )
+  expect_equal(filter(result, siec == SIEC_COKE_OVEN_COKE)$sector, SECTOR_UNKNOWN)
+  expect_equal(filter(result, sector == SECTOR_OTHERS) %>% pull(values), 5)
 })
 
 test_that("missing coking input blocks only the affected total", {

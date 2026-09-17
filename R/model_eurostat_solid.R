@@ -89,8 +89,9 @@ process_solid_monthly <- function(x, pwr_generation) {
 #' @keywords internal
 eurostat_split_solid_elec_others <- function(x) {
   coal <- x %>% filter(siec %in% COAL_MONTHLY_GAP_FUELS)
+  coke <- x %>% filter(siec == SIEC_COKE_OVEN_COKE)
   other_solid <- x %>%
-    filter(!siec %in% COAL_MONTHLY_GAP_FUELS) %>%
+    filter(!siec %in% c(COAL_MONTHLY_GAP_FUELS, SIEC_COKE_OVEN_COKE)) %>%
     eurostat_split_elec_others()
   group_cols <- intersect(names(coal), c("iso2", "time", "unit", "siec", "fuel"))
   wide <- coal %>%
@@ -124,7 +125,26 @@ eurostat_split_solid_elec_others <- function(x) {
       )
   )
 
-  bind_rows(coal_split, other_solid)
+  coke_group_cols <- intersect(names(coke), c("iso2", "time", "unit", "siec", "fuel"))
+  coke_wide <- coke %>%
+    ungroup() %>%
+    filter(sector %in% c(SECTOR_ALL, SECTOR_ELEC)) %>%
+    pivot_wider(
+      id_cols = all_of(coke_group_cols), names_from = sector,
+      values_from = values, values_fill = NA
+    ) %>%
+    add_missing_cols(c("all", "electricity"))
+  coke_split <- bind_rows(
+    coke_wide %>% filter(!is.na(electricity)) %>%
+      transmute(across(all_of(coke_group_cols)), sector = SECTOR_ELEC, values = electricity),
+    coke_wide %>% filter(!is.na(all), !is.na(electricity)) %>%
+      transmute(across(all_of(coke_group_cols)), sector = SECTOR_OTHERS,
+        values = all - electricity),
+    coke_wide %>% filter(!is.na(all), is.na(electricity)) %>%
+      transmute(across(all_of(coke_group_cols)), sector = SECTOR_UNKNOWN, values = all)
+  )
+
+  bind_rows(coal_split, coke_split, other_solid)
 }
 
 process_solid_yearly <- function(x) {

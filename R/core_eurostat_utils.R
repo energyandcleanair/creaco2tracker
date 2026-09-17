@@ -188,10 +188,10 @@ fill_eu_from_countries_sum <- function(
 
 
     # If correlation is good enough, use this set for filling
-    if (any(correlation_check$corr_is_good_enough)) {
+    if (any(correlation_check$corr_is_good_enough, na.rm = TRUE)) {
       # Get the groups where correlation is good enough
       good_groups <- correlation_check %>%
-        filter(corr_is_good_enough) %>%
+        filter(coalesce(corr_is_good_enough, FALSE)) %>%
         select(-corr_rel_diff, -corr_n_points, -corr_is_good_enough)
 
       # Fill missing values for these groups
