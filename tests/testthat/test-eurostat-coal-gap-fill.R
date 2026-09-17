@@ -453,7 +453,7 @@ test_that("complete monthly coal sectors replace an annual unallocated total", {
   expect_equal(diagnostics$status, "monthly_split_complete")
 })
 
-test_that("a monthly unallocated coal total replaces annual sector fallbacks", {
+test_that("a monthly coal total retains scaled annual sector fallbacks", {
   input <- tibble(
     iso2 = "EU",
     time = as.Date("2024-01-01"),
@@ -468,10 +468,10 @@ test_that("a monthly unallocated coal total replaces annual sector fallbacks", {
   result <- resolve_coal_unallocated_totals(input)
   diagnostics <- attr(result, "coal_unallocated_sector")
 
-  expect_equal(nrow(result), 1)
-  expect_equal(result$sector, SECTOR_UNKNOWN)
-  expect_equal(result$values, 100)
-  expect_equal(diagnostics$status, "monthly_total_unallocated")
+  expect_equal(nrow(result), 2)
+  expect_equal(result$sector, c(SECTOR_ELEC, SECTOR_OTHERS))
+  expect_equal(result$values, 100 * c(40, 30) / 70)
+  expect_equal(diagnostics$status, "annual_split_scaled_to_monthly_total")
 })
 
 test_that("coal unallocated reconciliation preserves non-coal rows", {
@@ -507,13 +507,13 @@ test_that("annual coal total preserves only the uncovered monthly residual", {
   result <- resolve_coal_unallocated_totals(input)
   diagnostics <- attr(result, "coal_unallocated_sector")
 
-  expect_equal(result$values[result$sector == SECTOR_UNKNOWN], 80)
-  expect_false(SECTOR_OTHERS %in% result$sector)
+  expect_equal(result$values[result$sector == SECTOR_OTHERS], 80)
+  expect_false(SECTOR_UNKNOWN %in% result$sector)
   expect_equal(sum(result$values), 100)
-  expect_equal(diagnostics$status, "annual_residual_unallocated")
+  expect_equal(diagnostics$status, "annual_residual_allocated")
 })
 
-test_that("an inconsistent annual coal residual remains explicitly unresolved", {
+test_that("an inconsistent annual coal split is bounded to its valid total", {
   input <- tibble(
     iso2 = "DE",
     time = as.Date("2025-01-01"),
@@ -528,7 +528,8 @@ test_that("an inconsistent annual coal residual remains explicitly unresolved", 
   result <- resolve_coal_unallocated_totals(input)
   diagnostics <- attr(result, "coal_unallocated_sector")
 
-  expect_true(is.na(result$values[result$sector == SECTOR_UNKNOWN]))
+  expect_equal(result$values[result$sector == SECTOR_ELEC], 10)
+  expect_equal(result$values[result$sector == SECTOR_OTHERS], 0)
   expect_equal(diagnostics$status, "negative_residual")
 })
 
@@ -606,4 +607,17 @@ test_that("missing coal components retain visible partial aggregates with diagno
   ) %in% names(totals)))
   expect_equal(recombined$value, 5)
   expect_false(attr(recombined, "fuel_completeness")$complete)
+})
+
+test_that("monthly coal totals reject incomplete or invalid annual splits", {
+  x <- tibble(iso2 = "DE", time = as.Date("2025-01-01"), unit = "THS_T",
+    siec = SIEC_BROWN_COAL_BRIQUETTES, fuel = FUEL_COAL,
+    sector = c(SECTOR_UNKNOWN, SECTOR_ELEC, SECTOR_OTHERS),
+    values = c(100, 40, NA_real_), source = c("monthly", "yearly", "yearly"))
+  for (invalid in c(NA_real_, -1, Inf)) {
+    x$values[3] <- invalid
+    result <- resolve_coal_unallocated_totals(x)
+    expect_equal(result$sector, SECTOR_UNKNOWN)
+    expect_equal(result$values, 100)
+  }
 })

@@ -244,10 +244,11 @@ coal_downstream_completeness <- function(cons_monthly, cons_combined) {
 #' Reconcile unallocated coal totals with sector observations
 #'
 #' A coal total can be retained as `unknown` when its electricity split is
-#' unavailable. A monthly total takes precedence over annual sector fallbacks.
-#' An annual total retains only the residual not covered by reported monthly
-#' sectors. These rules preserve the preferred total without double-counting a
-#' lower-priority sector split.
+#' unavailable. A monthly total scales a complete annual sector fallback to
+#' preserve its shares; without a usable fallback it remains unknown.
+#' An annual total assigns the residual to the missing sector when one monthly
+#' sector is known. Conflicting sector values are bounded to a valid total.
+#' Diagnostics retain the original residual and identify conflicting splits.
 #'
 #' @keywords internal
 resolve_coal_unallocated_totals <- function(x, tolerance = 1e-6) {
@@ -256,6 +257,10 @@ resolve_coal_unallocated_totals <- function(x, tolerance = 1e-6) {
     filter(siec %in% COAL_MONTHLY_GAP_FUELS) %>%
     group_by(across(all_of(keys))) %>%
     summarise(
+      annual_split_valid = all(c(SECTOR_ELEC, SECTOR_OTHERS) %in%
+        sector[source == "yearly" & is.finite(values) & values >= 0]),
+      annual_split_total = sum(values[source == "yearly" &
+        sector %in% c(SECTOR_ELEC, SECTOR_OTHERS)], na.rm = TRUE),
       monthly_unknown = if_else(
         any(
           sector == SECTOR_UNKNOWN & source == "monthly" & !is.na(values)
@@ -304,11 +309,13 @@ resolve_coal_unallocated_totals <- function(x, tolerance = 1e-6) {
       ), na.rm = TRUE),
       residual = annual_unknown - monthly_known,
       status = case_when(
+        is.finite(monthly_unknown) & monthly_unknown >= 0 &
+          annual_split_valid & annual_split_total > 0 ~ "annual_split_scaled_to_monthly_total",
         !is.na(monthly_unknown) ~ "monthly_total_unallocated",
         monthly_components == 2L ~ "monthly_split_complete",
         residual < -tolerance ~ "negative_residual",
         monthly_components == 0L ~ "annual_total_unallocated",
-        TRUE ~ "annual_residual_unallocated"
+        TRUE ~ "annual_residual_allocated"
       )
     )
 
@@ -321,11 +328,16 @@ resolve_coal_unallocated_totals <- function(x, tolerance = 1e-6) {
     left_join(
       stats %>% select(
         all_of(keys), monthly_unknown, annual_unknown,
-        monthly_components, residual, status
+        monthly_components, monthly_electricity, residual, status, annual_split_total
       ),
       by = keys,
       relationship = "many-to-one"
     ) %>%
+    filter(!coalesce(
+      status == "annual_split_scaled_to_monthly_total" &
+        (sector == SECTOR_UNKNOWN | source != "yearly"),
+      FALSE
+    )) %>%
     filter(!coalesce(
       status == "monthly_total_unallocated" &
         sector %in% c(SECTOR_ELEC, SECTOR_OTHERS),
@@ -343,10 +355,18 @@ resolve_coal_unallocated_totals <- function(x, tolerance = 1e-6) {
     )) %>%
     mutate(
       values = case_when(
+        status == "annual_split_scaled_to_monthly_total" &
+          sector %in% c(SECTOR_ELEC, SECTOR_OTHERS) ~
+          monthly_unknown * values / annual_split_total,
         sector == SECTOR_UNKNOWN & source == "yearly" &
           status %in% c(
-            "annual_total_unallocated", "annual_residual_unallocated"
+            "annual_total_unallocated", "annual_residual_allocated"
           ) ~ pmax(0, residual),
+        sector == SECTOR_UNKNOWN & source == "yearly" &
+          status == "negative_residual" & annual_unknown >= 0 ~ 0,
+        sector %in% c(SECTOR_ELEC, SECTOR_OTHERS) & source == "monthly" &
+          status == "negative_residual" & annual_unknown >= 0 & is.finite(values) ~
+          annual_unknown,
         sector == SECTOR_UNKNOWN & source == "yearly" &
           status == "negative_residual" ~ NA_real_,
         TRUE ~ values
@@ -358,9 +378,16 @@ resolve_coal_unallocated_totals <- function(x, tolerance = 1e-6) {
         sector %in% c(SECTOR_ELEC, SECTOR_OTHERS) &
         source == "monthly" & is.na(values)
     )) %>%
+    mutate(sector = case_when(
+      sector == SECTOR_UNKNOWN & source == "yearly" &
+        (status == "annual_residual_allocated" |
+          (status == "negative_residual" & annual_unknown >= 0)) ~
+        if_else(is.na(monthly_electricity), SECTOR_ELEC, SECTOR_OTHERS),
+      TRUE ~ sector
+    )) %>%
     select(
-      -monthly_unknown, -annual_unknown, -monthly_components, -residual,
-      -status
+      -monthly_unknown, -annual_unknown, -monthly_components, -monthly_electricity, -residual,
+      -status, -annual_split_total
     )
 
   attr(result, "coal_unallocated_sector") <- stats

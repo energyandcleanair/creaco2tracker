@@ -205,7 +205,8 @@ coal_prepare_total_forecasts <- function(
   selected <- coal %>%
     group_by(across(all_of(keys))) %>%
     filter(lubridate::year(time) >= max(lubridate::year(time)) - 1L) %>%
-    filter(sector == SECTOR_UNKNOWN, !is.na(values)) %>%
+    filter((sector == SECTOR_UNKNOWN & !is.na(values)) |
+      (is.finite(values) & values < 0)) %>%
     ungroup() %>% distinct(across(all_of(keys)))
   if (!is.null(allocation) && nrow(allocation) > 0) {
     annual_only <- allocation %>%
@@ -222,8 +223,9 @@ coal_prepare_total_forecasts <- function(
   projected <- lapply(seq_along(groups), function(index) {
     group <- groups[[index]]
     # A negative derived sector is an inconsistent split, not negative fuel use.
-    # Preserve a finite, non-negative total as unallocated. An invalid total
+    # Bound a conflicting split to its finite, non-negative total. An invalid total
     # remains unresolved while usable non-negative sector observations survive.
+    invalid_dates <- as.Date(character())
     conflicting_dates <- unique(group$time[is.finite(group$values) & group$values < 0])
     for (date_index in seq_along(conflicting_dates)) {
       conflict_date <- conflicting_dates[date_index]
@@ -235,18 +237,51 @@ coal_prepare_total_forecasts <- function(
       valid_total <- is.finite(total) && total >= 0
       provenance[[length(provenance) + 1L]] <<- group[1, keys] %>% mutate(
         time = conflict_date, method = if (valid_total)
-          "conflicting_split_total_preserved" else "unresolved_invalid_split",
+          "conflicting_split_bounded_to_total" else "unresolved_invalid_split",
         input_date = conflict_date, total = if (valid_total) total else NA_real_,
         known_sectors = sum(rows$values[rows$values >= 0], na.rm = TRUE),
         residual = sum(rows$values[rows$values < 0], na.rm = TRUE),
         conflict = TRUE, three_year_total = NA_real_
       )
       if (valid_total) {
-        replacement <- rows[1, ] %>% mutate(sector = SECTOR_UNKNOWN, values = total)
+        replacement <- rows %>% mutate(values = pmax(0, values))
+        positive_total <- sum(replacement$values)
+        replacement$values <- if (positive_total > 0) {
+          replacement$values * total / positive_total
+        } else rep(0, nrow(replacement))
       } else {
+        invalid_dates <- c(invalid_dates, conflict_date)
         replacement <- rows %>% mutate(values = if_else(values < 0, NA_real_, values))
       }
       group <- bind_rows(group %>% filter(time != conflict_date), replacement)
+    }
+    # Allocate known totals from recent complete splits of this country and fuel.
+    # Freeze the reference rows so inferred splits cannot propagate through history.
+    split_history <- group %>%
+      group_by(time) %>%
+      filter(n() == 2L, all(c(SECTOR_ELEC, SECTOR_OTHERS) %in% sector),
+        all(is.finite(values) & values >= 0), sum(values) > 0) %>% ungroup()
+    unknown_dates <- unique(group$time[group$sector == SECTOR_UNKNOWN &
+      is.finite(group$values) & group$values >= 0])
+    for (date_index in seq_along(unknown_dates)) {
+      date <- unknown_dates[date_index]
+      rows <- group %>% filter(time == date)
+      if (nrow(rows) != 1L) next
+      reference <- split_history %>% filter(time < date,
+        time >= date %m-% lubridate::years(5)) %>%
+        mutate(same_month = lubridate::month(time) == lubridate::month(date)) %>%
+        arrange(desc(same_month), desc(time))
+      if (nrow(reference) == 0) next
+      reference <- reference %>% filter(time == first(time))
+      replacement <- rows[rep(1, 2), ]
+      replacement$sector <- reference$sector
+      replacement$values <- rows$values * reference$values / sum(reference$values)
+      provenance[[length(provenance) + 1L]] <<- group[1, keys] %>% mutate(
+        time = date, method = "recent_historical_split", input_date = reference$time[1],
+        total = rows$values, known_sectors = 0, residual = rows$values,
+        conflict = FALSE, three_year_total = NA_real_
+      )
+      group <- bind_rows(group %>% filter(time != date), replacement)
     }
     totals <- group %>% group_by(time) %>% summarise(
       total = if (anyNA(values) ||
@@ -276,6 +311,7 @@ coal_prepare_total_forecasts <- function(
     out <- lapply(seq_along(dates), function(j) {
       date <- dates[j]
       rows <- group %>% filter(time == date)
+      if (date %in% invalid_dates) return(rows)
       actual <- totals$total[match(date, totals$time)]
       previous_date <- date %m-% lubridate::years(1)
       previous <- totals$total[match(previous_date, totals$time)]
@@ -299,7 +335,38 @@ coal_prepare_total_forecasts <- function(
         three_year_total = if (all(is.finite(trailing))) mean(trailing) else NA_real_
       )
       if (!is.na(actual)) return(rows)
+      if (conflict && is.finite(total) && total >= 0) {
+        bounded <- known %>% mutate(values = values * total / sum(values))
+        missing_sectors <- setdiff(c(SECTOR_ELEC, SECTOR_OTHERS), bounded$sector)
+        zeros <- group[rep(1, length(missing_sectors)), ] %>%
+          mutate(time = date, sector = missing_sectors, values = 0)
+        provenance[[length(provenance)]]$method <<- paste0(method, "_bounded_to_total")
+        return(bind_rows(bounded, zeros))
+      }
       if (conflict) residual <- NA_real_
+      if (is.finite(residual) && residual >= 0 && nrow(known) == 1L &&
+        known$sector %in% c(SECTOR_ELEC, SECTOR_OTHERS)) {
+        remainder <- group[1, ] %>% mutate(time = date,
+          sector = setdiff(c(SECTOR_ELEC, SECTOR_OTHERS), known$sector), values = residual)
+        return(bind_rows(known, remainder))
+      }
+      # A valid original split from the same month of the preceding year can
+      # allocate a forecast total. Estimated rows never become training history.
+      split <- group %>% filter(time == previous_date,
+        sector %in% c(SECTOR_ELEC, SECTOR_OTHERS))
+      valid_split <- nrow(split) == 2L &&
+        all(c(SECTOR_ELEC, SECTOR_OTHERS) %in% split$sector) &&
+        all(is.finite(split$values) & split$values >= 0) && sum(split$values) > 0
+      if (is.finite(total) && total >= 0 && !conflict && valid_split) {
+        missing_sectors <- split %>% filter(!sector %in% known$sector)
+        if (nrow(missing_sectors) > 0 && sum(missing_sectors$values) > 0) {
+          missing_sectors <- missing_sectors %>% mutate(
+            time = date, values = residual * values / sum(values)
+          )
+          provenance[[length(provenance)]]$method <<- paste0(method, "_previous_year_split")
+          return(bind_rows(known, missing_sectors))
+        }
+      }
       unknown <- group[1, ] %>% mutate(
         time = date, sector = SECTOR_UNKNOWN, values = residual
       )

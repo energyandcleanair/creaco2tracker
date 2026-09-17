@@ -93,12 +93,14 @@ test_that("fuel total forecasts do not train on a changing unallocated residual"
   result <- coal_prepare_total_forecasts(bind_rows(x, known), as.Date("2027-01-01"))
   jan <- result %>% filter(time == as.Date("2026-01-01"))
   expect_equal(sum(jan$values), 10)
-  expect_equal(jan$values[jan$sector == SECTOR_UNKNOWN], 6)
+  expect_equal(jan$values[jan$sector == SECTOR_OTHERS], 6)
   expect_true(all(is.na(filter(result, time == as.Date("2027-01-01"))$values)))
   known$values <- 11
   result <- coal_prepare_total_forecasts(bind_rows(x, known), as.Date("2026-01-01"))
-  expect_true(is.na(filter(result, time == as.Date("2026-01-01"),
-    sector == SECTOR_UNKNOWN)$values))
+  expect_equal(filter(result, time == as.Date("2026-01-01"),
+    sector == SECTOR_ELEC)$values, 10)
+  expect_equal(filter(result, time == as.Date("2026-01-01"),
+    sector == SECTOR_OTHERS)$values, 0)
   interrupted <- x
   interrupted$values[6] <- NA_real_
   result <- coal_prepare_total_forecasts(interrupted, as.Date("2026-06-01"))
@@ -117,7 +119,8 @@ test_that("annual-only forecasting includes an established zero power component"
     "preserved_monthly_estimate"))
   result <- coal_prepare_total_forecasts(allocated, as.Date("2026-06-01"))
   h1 <- result %>% filter(lubridate::year(time) == 2026)
-  expect_equal(nrow(h1), 6)
+  expect_equal(nrow(h1), 12)
+  expect_true(all(h1$values[h1$sector == SECTOR_ELEC] == 0))
   expect_equal(sum(h1$values), 6)
   expect_true("LU" %in% attr(result, "coal_separate_projection")$iso2)
   annual$values[2] <- NA_real_
@@ -134,10 +137,10 @@ test_that("separate fuel totals survive an inconsistent derived sector split", {
     sector = c(SECTOR_UNKNOWN, SECTOR_ELEC, SECTOR_OTHERS), values = c(80, 100, -20))
   result <- coal_prepare_total_forecasts(x, as.Date("2021-01-01"))
   current <- result %>% filter(time == as.Date("2021-01-01"))
-  expect_equal(current$sector, SECTOR_UNKNOWN)
-  expect_equal(current$values, 80)
+  expect_equal(current$values[current$sector == SECTOR_ELEC], 80)
+  expect_equal(current$values[current$sector == SECTOR_OTHERS], 0)
   provenance <- attr(result, "coal_total_forecasts") %>% filter(time == current$time)
-  expect_equal(provenance$method, "conflicting_split_total_preserved")
+  expect_equal(provenance$method, "conflicting_split_bounded_to_total")
   expect_true(provenance$conflict)
   expect_equal(provenance$residual, -20)
 
@@ -265,4 +268,34 @@ test_that("EU tail totals cannot use partial country coverage", {
   duplicate <- bind_rows(countries, filter(countries, iso2 == "SE"))
   expect_equal(nrow(select_eu_tail_country_sum_adjustments(
     bind_rows(eu, duplicate), tail_months = 2)), 0)
+})
+
+test_that("known coal totals reuse recent splits only within the same fuel and country", {
+  x <- tibble(iso2 = "DE", siec = SIEC_BROWN_COAL_BRIQUETTES, fuel = FUEL_COAL,
+    unit = "THS_T", time = as.Date(c("2024-01-01", "2024-01-01", "2025-01-01")),
+    sector = c(SECTOR_ELEC, SECTOR_OTHERS, SECTOR_UNKNOWN), values = c(2, 8, 20))
+  result <- coal_prepare_total_forecasts(x, as.Date("2025-01-01"))
+  current <- filter(result, time == as.Date("2025-01-01"))
+  expect_equal(current$values[current$sector == SECTOR_ELEC], 4)
+  expect_equal(current$values[current$sector == SECTOR_OTHERS], 16)
+  expect_true("recent_historical_split" %in% attr(result, "coal_total_forecasts")$method)
+
+  for (field in c("iso2", "siec", "time")) {
+    separate <- x
+    separate[[field]][1:2] <- switch(field, iso2 = "FR", siec = SIEC_HARD_COAL,
+      time = as.Date("2026-01-01"))
+    current <- coal_prepare_total_forecasts(separate, as.Date("2025-01-01")) %>%
+      filter(time == as.Date("2025-01-01"))
+    expect_equal(current$sector, SECTOR_UNKNOWN)
+    expect_equal(current$values, 20)
+  }
+})
+
+test_that("negative coal splits are bounded even without unallocated history", {
+  x <- tibble(iso2 = "IT", siec = SIEC_HARD_COAL, fuel = FUEL_COAL, unit = "THS_T",
+    time = as.Date("2025-01-01"), sector = c(SECTOR_ELEC, SECTOR_OTHERS),
+    values = c(100, -20))
+  result <- coal_prepare_total_forecasts(x, x$time[1])
+  expect_equal(result$values[result$sector == SECTOR_ELEC], 80)
+  expect_equal(result$values[result$sector == SECTOR_OTHERS], 0)
 })
