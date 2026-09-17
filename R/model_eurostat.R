@@ -56,6 +56,21 @@ get_eurostat_cons <- function(
     cons_raw_solid$monthly,
     cons_raw_solid$yearly
   )
+  coking <- .resolve_coal_coking(
+    cons_raw_solid$monthly,
+    cons_raw_solid$yearly,
+    industry = eurostat_data_access_get_indprod(
+      use_cache = use_cache, data_masking = data_masking
+    )
+  )
+  cons_raw_solid$monthly <- coking$monthly
+  cons_raw_solid$yearly <- coking$yearly
+  if (!is_null_or_empty(diagnostics_folder)) {
+    readr::write_csv(coking$diagnostics,
+      file.path(diagnostics_folder, "coal_coking_provenance.csv"))
+    readr::write_csv(coking$validation,
+      file.path(diagnostics_folder, "coal_coking_validation.csv"))
+  }
   coal_eu_repair_candidates <- attr(
     cons_raw_solid$monthly,
     "coal_eu_repair_candidates"
@@ -117,6 +132,16 @@ get_eurostat_cons <- function(
       add_iso2() %>%
       select(iso2, sector, time, unit, siec, fuel, values)
   })
+  # A seasonal profile labelled reported must not contain coking imputations or
+  # the original unadjusted EU totals whose coking contribution was omitted.
+  disputed <- coking$diagnostics %>% filter(frequency == "monthly", conflict) %>%
+    select(iso2, time)
+  disputed_key <- paste(disputed$iso2, disputed$time)
+  disputed_row <- reported_solid$siec == SIEC_HARD_COAL &
+    reported_solid$nrg_bal == "TI_CO" &
+    paste(reported_solid$iso2, reported_solid$time) %in% disputed_key
+  reported_solid$values[disputed_row] <- NA_real_
+  attr(reported_solid, "coal_coking_resolved") <- TRUE
   attr(cons_monthly, "coal_reported_monthly") <- reported_solid %>%
     process_solid_monthly(pwr_generation) %>% eurostat_split_solid_elec_others()
 
@@ -214,6 +239,7 @@ get_eurostat_cons <- function(
   attr(cons, "coal_downstream_completeness") <- coal_downstream_completeness
   attr(cons, "coal_unallocated_sector") <- coal_unallocated_sector
   attr(cons, "coal_allocation") <- coal_allocation
+  attr(cons, "coal_coking_provenance") <- coking$diagnostics
   return(cons)
 }
 

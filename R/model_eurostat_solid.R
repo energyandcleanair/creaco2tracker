@@ -1,4 +1,7 @@
 process_solid_monthly <- function(x, pwr_generation) {
+  if (!isTRUE(attr(x, "coal_coking_resolved"))) {
+    x <- .resolve_coal_coking(x, x[0, ])$monthly
+  }
   # This one is a bit tricky: for certain months/regions,
   # EUROSTAT has gross inland deliveries data but no transformation/consumption data
   # We should make sure to filter out these months so that it's not considered months without coal
@@ -38,12 +41,14 @@ process_solid_monthly <- function(x, pwr_generation) {
   )
 
   # Fill missing EU values using sum of countries
-  by_sector_fixed <- fill_eu_from_countries_sum(
-    data = by_sector %>% filter(!siec %in% COAL_MONTHLY_GAP_FUELS),
+  other_solid <- by_sector %>% filter(!siec %in% COAL_MONTHLY_GAP_FUELS)
+  if (nrow(other_solid)) other_solid <- fill_eu_from_countries_sum(
+    data = other_solid,
     group_cols = c("sector", "siec", "nrg_bal", "unit", "time"),
     min_countries = 25,
     max_rel_diff = 0.05
-  ) %>% bind_rows(coal_monthly) %>%
+  )
+  by_sector_fixed <- bind_rows(other_solid, coal_monthly) %>%
     mutate(fuel = siec_to_fuel(siec))
 
 
@@ -57,10 +62,19 @@ process_solid_monthly <- function(x, pwr_generation) {
       )
     ) %>%
     group_by(iso2, siec, sector, fuel, unit, time) %>%
-    summarise(values = sum(values * factor, na.rm = FALSE), .groups = "drop")
+    summarise(values = {
+      required <- c(NRG_GID_CALCULATED, NRG_TRANS_COKING)
+      if (first(siec) == SIEC_HARD_COAL && first(sector) == SECTOR_ALL &&
+        (!all(required %in% nrg_bal) || anyDuplicated(nrg_bal))) {
+        NA_real_
+      } else {
+        sum(values * factor, na.rm = FALSE)
+      }
+    }, .groups = "drop")
 
 
   attr(result, "coal_eu_completeness") <- attr(coal_monthly, "coal_eu_completeness")
+  attr(result, "coal_coking_provenance") <- attr(x, "coal_coking_provenance")
   return(result)
 }
 
@@ -114,6 +128,9 @@ eurostat_split_solid_elec_others <- function(x) {
 }
 
 process_solid_yearly <- function(x) {
+  if (!isTRUE(attr(x, "coal_coking_resolved"))) {
+    x <- .resolve_coal_coking(x[0, ], x)$yearly
+  }
   NRG_FINAL_ENERGY <- "FC_E"
   NRG_TRANS_ENERGY <- "TI_E"
   NRG_ELEC_CHP <- "TI_EHG_MAPCHP_E"
@@ -157,8 +174,7 @@ process_solid_yearly <- function(x) {
       iso2, time, siec, unit, fuel, sector = SECTOR_ELEC, values = electricity
     )
   )
-  bind_rows(result %>% filter(!siec %in% COAL_MONTHLY_GAP_FUELS |
-    !iso2 %in% get_eu_iso2s(include_eu = TRUE)), coal)
+  bind_rows(result %>% filter(!siec %in% COAL_MONTHLY_GAP_FUELS), coal)
 }
 
 siec_to_fuel <- function(siec) {

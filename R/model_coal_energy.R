@@ -5,22 +5,25 @@
 #' coking deduction. An absent required balance is not a reported zero.
 #' @keywords internal
 coal_annual_energy <- function(x) {
+  resolved <- isTRUE(attr(x, "coal_coking_resolved"))
   keys <- c("iso2", "time", "siec", "unit")
   balances <- c("FC_E", "TI_E", "TI_CO_E", COAL_ANNUAL_POWER_BALANCES)
   x %>%
-    filter(iso2 %in% get_eu_iso2s(include_eu = TRUE),
-      siec %in% COAL_MONTHLY_GAP_FUELS, nrg_bal %in% balances) %>%
+    filter(siec %in% COAL_MONTHLY_GAP_FUELS, nrg_bal %in% balances) %>%
     group_by(across(all_of(c(keys, "nrg_bal")))) %>%
     summarise(values = if (n() == 1L) first(values) else NA_real_, .groups = "drop") %>%
     pivot_wider(names_from = nrg_bal, values_from = values) %>%
     add_missing_cols(balances) %>%
     mutate(
-      coking_required = siec == SIEC_HARD_COAL & (is.na(TI_E) | TI_E != 0),
+      TI_CO_E = if_else(!resolved & .coking_conflict(iso2, time, TI_CO_E),
+        NA_real_, TI_CO_E),
+      coking_required = siec == SIEC_HARD_COAL &
+        (is.na(TI_E) | TI_E != 0 | (!is.na(TI_CO_E) & TI_CO_E != 0)),
       coking = if_else(coking_required, TI_CO_E, 0),
       energy = FC_E + TI_E - (1 - HARDCOAL_COKING_RATE_FACTOR) * coking,
       electricity = if_else(TI_E == 0 & !is.na(TI_E), 0,
         TI_EHG_MAPE_E + TI_EHG_MAPCHP_E),
-      energy = if_else(FC_E >= 0 & TI_E >= 0 & coking >= 0 & energy >= 0,
+      energy = if_else(FC_E >= 0 & TI_E >= 0 & coking >= 0 & coking <= TI_E & energy >= 0,
         energy, NA_real_),
       electricity = if_else(electricity >= 0 & (is.na(energy) | electricity <= energy),
         electricity, NA_real_),
@@ -375,7 +378,7 @@ coal_prepare_total_forecasts <- function(
     bind_rows(group %>% filter(time %in% complete_dates), bind_rows(out))
   }) %>% bind_rows()
   result <- bind_rows(x %>% anti_join(selected, by = keys), projected)
-  for (name in c("coal_eu_repair_candidates", "coal_allocation")) {
+  for (name in c("coal_eu_repair_candidates", "coal_allocation", "coal_coking_provenance")) {
     attr(result, name) <- attr(x, name)
   }
   attr(result, "coal_separate_projection") <- selected

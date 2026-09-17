@@ -8,7 +8,7 @@ COAL_ANNUAL_POWER_BALANCES <- c("TI_EHG_MAPE_E", "TI_EHG_MAPCHP_E")
     SIEC_HARD_COAL, "GID_CAL", "partial", TRUE, "raw_balance_validation_only",
     SIEC_HARD_COAL, "GID_CAL", "long", TRUE, "raw_balance_validation_only",
     SIEC_HARD_COAL, "TI_EHG_MAP", "any", TRUE, "raw_balance_validation_only",
-    SIEC_HARD_COAL, "TI_CO", "any", FALSE, "validation_failed",
+    SIEC_HARD_COAL, "TI_CO", "any", FALSE, "handled_by_coking_resolver",
     SIEC_BROWN_COAL, "GID_CAL", "partial", TRUE, "raw_balance_validation_only",
     SIEC_BROWN_COAL, "GID_CAL", "long", TRUE, "raw_balance_validation_only",
     SIEC_BROWN_COAL, "TI_EHG_MAP", "any", TRUE, "raw_balance_validation_only",
