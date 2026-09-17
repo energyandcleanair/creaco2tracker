@@ -70,6 +70,21 @@ test_that("historical annual backfill retains the observed seasonal climatology"
     "historical_reported_climatology"))
 })
 
+test_that("an explicit annual zero rejects a contradictory complete monthly series", {
+  annual <- tibble(iso2 = "EE", siec = SIEC_BROWN_COAL, fuel = FUEL_COAL,
+    sector = SECTOR_OTHERS, unit = "THS_T", time = as.Date("2016-01-01"), values = 0)
+  monthly <- annual[rep(1, 12), ] %>% mutate(
+    time = seq(as.Date("2016-01-01"), by = "month", length.out = 12),
+    values = 1:12
+  )
+
+  result <- coal_allocate_annual(annual, monthly)
+
+  expect_equal(result$values, rep(0, 12))
+  expect_true(all(attr(result, "coal_allocation")$allocation_method ==
+    "reported_zero_annual_bound"))
+})
+
 test_that("fuel total forecasts do not train on a changing unallocated residual", {
   x <- tibble(iso2 = "DE", siec = SIEC_BROWN_COAL_BRIQUETTES, fuel = FUEL_COAL,
     unit = "THS_T", sector = SECTOR_UNKNOWN,
@@ -134,12 +149,13 @@ test_that("separate fuel totals survive an inconsistent derived sector split", {
   expect_false(any(unresolved$values < 0, na.rm = TRUE))
 })
 
-test_that("unallocated missing forecasts cannot become a complete country total", {
+test_that("unallocated missing forecasts retain a visible incomplete country total", {
   x <- tibble(iso2 = "BG", date = as.Date("2026-01-01"), fuel = FUEL_COAL,
     sector = c(SECTOR_ELEC, SECTOR_UNKNOWN), value = c(10, NA_real_),
     unit = "t", estimate = "central")
   result <- add_total_co2(detotalise_co2(x))
-  expect_true(is.na(filter(result, fuel == "total", estimate == "central")$value))
+  expect_equal(filter(result, fuel == "total", estimate == "central")$value, 10)
+  expect_false(attr(result, "total_component_completeness")$central_complete)
   unknown <- x %>% filter(sector == SECTOR_UNKNOWN) %>% select(-estimate)
   projected <- project_until_now(unknown, NULL, NULL, NULL, date_to = unknown$date)
   expect_equal(nrow(projected), 3)

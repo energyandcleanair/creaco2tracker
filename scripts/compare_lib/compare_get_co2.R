@@ -337,8 +337,7 @@ plot_eu_timeseries <- function(eu_pairs, plots_dir, base_label, target_label) {
     mutate(
       series = recode(series, base_value = base_label, target_value = target_label),
       value_mt = value / 1e6
-    ) %>%
-    filter(!is.na(value_mt))
+    )
 
   plt <- ggplot(plot_data, aes(date, value_mt, color = series)) +
     geom_line(linewidth = 0.7) +
@@ -373,8 +372,7 @@ plot_country_timeseries <- function(country_pairs, plots_dir, base_label, target
     mutate(
       series = recode(series, base_value = base_label, target_value = target_label),
       value_mt = value / 1e6
-    ) %>%
-    filter(!is.na(value_mt))
+    )
 
   n_country <- n_distinct(plot_data$iso2)
   ncol <- min(4, max(1, n_country))

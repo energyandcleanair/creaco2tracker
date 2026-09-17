@@ -582,7 +582,7 @@ test_that("verified EU omission repairs are guarded against duplication", {
   expect_equal(filter(twice, iso2 == "EU")$value_co2_tonne, 120)
 })
 
-test_that("missing required coal components propagate to aggregate emissions", {
+test_that("missing coal components retain visible partial aggregates with diagnostics", {
   components <- tidyr::crossing(
     iso2 = "SE", date = as.Date("2025-01-01"), unit = "t",
     sector = SECTOR_ALL, estimate = c("central", "lower", "upper")
@@ -599,6 +599,11 @@ test_that("missing required coal components propagate to aggregate emissions", {
   ) %>%
     recombine_fuels()
 
-  expect_true(all(is.na(totals$value)))
-  expect_true(is.na(recombined$value))
+  expect_equal(totals$value[totals$estimate == "central"], 10)
+  expect_false(attr(totals, "total_component_completeness")$central_complete)
+  expect_false(any(c(
+    "central_component_count", "central_available_components", "central_complete"
+  ) %in% names(totals)))
+  expect_equal(recombined$value, 5)
+  expect_false(attr(recombined, "fuel_completeness")$complete)
 })

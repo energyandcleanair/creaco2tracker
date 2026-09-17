@@ -170,6 +170,7 @@ get_co2 <- function(
 
   # Re-combine fuels e.g. peat goes to coal
   co2 <- recombine_fuels(co2)
+  fuel_completeness <- attr(co2, "fuel_completeness")
 
   # Ensure aggregate sector rows cannot coexist with disaggregated sector rows
   # before final fuel totals are calculated.
@@ -177,10 +178,17 @@ get_co2 <- function(
 
   # Add total
   co2 <- add_total_co2(co2)
+  total_component_completeness <- attr(co2, "total_component_completeness")
 
   # Improve latest EU months using validated tail-estimate submodels.
   co2 <- stabilise_eu_tail_estimates(co2)
   if (!is_null_or_empty(diagnostics_folder)) {
+    for (name in c("fuel_completeness", "total_component_completeness")) {
+      diagnostic <- get(name)
+      if (!is.null(diagnostic)) {
+        readr::write_csv(diagnostic, file.path(diagnostics_folder, paste0(name, ".csv")))
+      }
+    }
     for (name in c("eu_tail_country_coverage", "eu_tail_adjustments")) {
       if (!is.null(attr(co2, name))) {
         readr::write_csv(attr(co2, name), file.path(diagnostics_folder, paste0(name, ".csv")))

@@ -94,6 +94,12 @@ coal_allocate_annual <- function(annual, monthly) {
     current <- current[lubridate::year(current$time) == yr, ]
     observed <- current$values[match(dates, current$time)]
     reported_values <- group$values[match(dates, group$time)]
+    # An explicitly zero annual energy balance is a stronger definition check
+    # than a contradictory complete monthly series. This catches overlapping
+    # monthly fuel classifications without introducing country-specific rules.
+    annual_zero_conflict <- is.finite(row$values) && abs(row$values) <= 1e-6 &&
+      all(is.finite(observed)) && any(abs(observed) > 1e-6)
+    if (annual_zero_conflict) observed[] <- NA_real_
     shares_for <- function(year_value) {
       cache_key <- paste(id, year_value)
       if (exists(cache_key, profile_cache, inherits = FALSE)) {
@@ -163,7 +169,9 @@ coal_allocate_annual <- function(annual, monthly) {
     output$values <- prediction
     is_reported <- !is.na(reported_values) & !missing &
       abs(reported_values - observed) <= 1e-6
-    output$allocation_method <- ifelse(!missing,
+    output$allocation_method <- if (annual_zero_conflict) {
+      "reported_zero_annual_bound"
+    } else ifelse(!missing,
       ifelse(is_reported, "reported", "preserved_monthly_estimate"), method)
     output$allocation_status <- if (!valid) "annual_remainder_inconsistent" else "estimated"
     output$annual_value <- row$values

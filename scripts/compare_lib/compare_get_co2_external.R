@@ -866,6 +866,19 @@ trend_agreement <- function(annual_pairs) {
 
 write_summary <- function(comparison_dir, target_label, date_to, eu_totals, country_totals,
                           coverage, source_status, annual_pairs) {
+  gcb_country_plot <- file.path(
+    "plots",
+    "annual_country_timeseries_global-carbon-budget-2025.png"
+  )
+  key_plots <- c(
+    "![annual_eu_timeseries.png](plots/annual_eu_timeseries.png)",
+    "![annual_country_adjusted_scatter.png](plots/annual_country_adjusted_scatter.png)",
+    "![annual_country_adjusted_diff_ranking.png](plots/annual_country_adjusted_diff_ranking.png)",
+    if (file.exists(file.path(comparison_dir, gcb_country_plot))) {
+      paste0("![", basename(gcb_country_plot), "](", gcb_country_plot, ")")
+    },
+    "![monthly_carbonmonitor_eu_timeseries.png](plots/monthly_carbonmonitor_eu_timeseries.png)"
+  )
   eu_raw <- eu_totals %>%
     filter(period == "annual", crea_variant == "raw") %>%
     arrange(desc(abs(diff_mt))) %>%
@@ -1011,10 +1024,7 @@ write_summary <- function(comparison_dir, target_label, date_to, eu_totals, coun
     md_table(names(status_rows), status_rows),
     "",
     "## Key plots",
-    "![annual_eu_timeseries.png](plots/annual_eu_timeseries.png)",
-    "![annual_country_adjusted_scatter.png](plots/annual_country_adjusted_scatter.png)",
-    "![annual_country_adjusted_diff_ranking.png](plots/annual_country_adjusted_diff_ranking.png)",
-    "![monthly_carbonmonitor_eu_timeseries.png](plots/monthly_carbonmonitor_eu_timeseries.png)",
+    key_plots,
     "",
     "</details>"
   )

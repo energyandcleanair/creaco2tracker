@@ -299,8 +299,14 @@ test_that("external comparison report writes expected fixture artifacts", {
     value = c(100e6, 10e6, 50e6, 5e6, 120e6, 20e6, 60e6, 6e6)
   )
   external <- tibble(
-    source_id = c("example", "example", "example", "carbon-monitor", "carbon-monitor"),
-    source = c("Example", "Example", "Example", "Carbon Monitor", "Carbon Monitor"),
+    source_id = c(
+      "global-carbon-budget-2025", "global-carbon-budget-2025",
+      "global-carbon-budget-2025", "carbon-monitor", "carbon-monitor"
+    ),
+    source = c(
+      "Global Carbon Budget", "Global Carbon Budget", "Global Carbon Budget",
+      "Carbon Monitor", "Carbon Monitor"
+    ),
     period = c("annual", "annual", "annual", "monthly", "monthly"),
     iso2 = c("EU", "DE", "EU", "EU", "DE"),
     date = as.Date(c("2023-01-01", "2023-01-01", "2024-01-01", "2023-01-01", "2023-01-01")),
@@ -309,8 +315,8 @@ test_that("external comparison report writes expected fixture artifacts", {
     unit = "Mt"
   )
   status <- tibble(
-    source_id = c("example", "carbon-monitor", "example"),
-    source = c("Example", "Carbon Monitor", "Example"),
+    source_id = c("global-carbon-budget-2025", "carbon-monitor", "global-carbon-budget-2025"),
+    source = c("Global Carbon Budget", "Carbon Monitor", "Global Carbon Budget"),
     period = c("annual", "monthly", "monthly"),
     status = c("ok", "ok", "skipped"),
     message = c("", "", "Monthly comparison is only supported for Carbon Monitor in v1."),
@@ -344,12 +350,12 @@ test_that("external comparison report writes expected fixture artifacts", {
   expect_true(file.exists(file.path(
     comparison_dir,
     "plots",
-    "annual_eu_timeseries_example.png"
+    "annual_eu_timeseries_global-carbon-budget-2025.png"
   )))
   expect_true(file.exists(file.path(
     comparison_dir,
     "plots",
-    "annual_country_timeseries_example.png"
+    "annual_country_timeseries_global-carbon-budget-2025.png"
   )))
   summary_text <- readLines(file.path(comparison_dir, "summary.md"))
   expect_true(any(summary_text == "## EU annual raw totals"))
@@ -358,6 +364,10 @@ test_that("external comparison report writes expected fixture artifacts", {
     match("## EU annual adjusted totals", summary_text)
   )
   expect_true(any(summary_text == "<summary>Detailed comparison</summary>"))
+  expect_true(any(summary_text == paste0(
+    "![annual_country_timeseries_global-carbon-budget-2025.png]",
+    "(plots/annual_country_timeseries_global-carbon-budget-2025.png)"
+  )))
   expect_false(any(grepl(
     "Monthly comparison is only supported for Carbon Monitor in v1.",
     summary_text,
