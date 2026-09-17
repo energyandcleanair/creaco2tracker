@@ -788,7 +788,7 @@ def collect_external_sources(
 
     workspace = materializer_for(target_source).materialize(paths, tmp_dir)
     copy_repo_renviron(paths.repo_root, workspace.source_dir)
-    prepare_collection_source_dir(workspace.source_dir)
+    prepare_collection_source_dir(workspace.source_dir, paths.repo_root / "cache")
 
     ok = runner.run(
         paths.repo_root,
