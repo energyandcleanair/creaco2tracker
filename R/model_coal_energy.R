@@ -123,9 +123,27 @@ coal_allocate_annual <- function(annual, monthly) {
         method <- "three_year_profile"
         profile_years <- paste(names(past)[1:3], collapse = ",")
       } else {
-        shares <- rep(1 / 12, 12)
-        method <- "equal_months"
-        profile_years <- NA_character_
+        # Monthly solid-fuel observations are only used in production from
+        # 2020 onwards. Earlier annual history has always been backfilled with
+        # an observed seasonal climatology. Retain that profile for those
+        # historical rows, rather than flattening them to equal twelfths. This
+        # is explicitly a retrospective reconstruction: projections and
+        # current gaps still use only preceding observations.
+        profile_candidates <- sort(unique(lubridate::year(group$time)))
+        climatology <- setNames(
+          lapply(profile_candidates, shares_for),
+          profile_candidates
+        )
+        climatology <- Filter(Negate(is.null), climatology)
+        if (yr < 2020L && length(climatology) > 0L) {
+          shares <- Reduce(`+`, climatology) / length(climatology)
+          method <- "historical_reported_climatology"
+          profile_years <- paste(names(climatology), collapse = ",")
+        } else {
+          shares <- rep(1 / 12, 12)
+          method <- "equal_months"
+          profile_years <- NA_character_
+        }
       }
     }
     missing <- is.na(observed)

@@ -55,6 +55,21 @@ test_that("annual allocation preserves months and never borrows future profiles"
   expect_equal(coal_allocate_annual(annual, monthly)$values, rep(0, 12))
 })
 
+test_that("historical annual backfill retains the observed seasonal climatology", {
+  annual <- tibble(iso2 = "FR", siec = SIEC_BROWN_COAL, fuel = FUEL_COAL,
+    sector = SECTOR_OTHERS, unit = "THS_T", time = as.Date("2010-01-01"), values = 120)
+  monthly <- annual[rep(1, 12), ] %>% mutate(
+    time = seq(as.Date("2020-01-01"), by = "month", length.out = 12),
+    values = c(22, rep(98 / 11, 11))
+  )
+
+  result <- coal_allocate_annual(annual, monthly)
+
+  expect_equal(result$values, monthly$values)
+  expect_true(all(attr(result, "coal_allocation")$allocation_method ==
+    "historical_reported_climatology"))
+})
+
 test_that("fuel total forecasts do not train on a changing unallocated residual", {
   x <- tibble(iso2 = "DE", siec = SIEC_BROWN_COAL_BRIQUETTES, fuel = FUEL_COAL,
     unit = "THS_T", sector = SECTOR_UNKNOWN,
