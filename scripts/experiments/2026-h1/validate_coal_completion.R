@@ -94,7 +94,7 @@ for (name in c("get_eurostat_from_code", "ember.get_power_generation",
   }
 }
 if (mode == "holdouts") {
-  source("scripts/coal_completion_replay_helpers.R", local = TRUE)
+  source("scripts/experiments/2026-h1/coal_completion_replay_helpers.R", local = TRUE)
   run_coal_downstream_replays(inputs, root, option("--years", "2019:2024"))
   quit(status = 0)
 }

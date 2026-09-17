@@ -7,7 +7,7 @@
 #   trade_2010_2025.json, ember_GRC.json
 #
 # Example:
-# Rscript scripts/investigate_greek_lignite_imputation.R \
+# Rscript scripts/experiments/2026-h1/investigate_greek_lignite_imputation.R \
 #   --input-dir .tmp/h1_coal_investigation \
 #   --output-dir diagnostics/greek_lignite_imputation_2026-09-16
 
