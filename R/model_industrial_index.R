@@ -16,7 +16,7 @@ get_industrial_indexes <- function(
   product_codes <- INDPROD_PRODUCT_CODES
 
 
-  pefasu <- get_eurostat_from_code("env_ac_pefasu")
+  pefasu <- eurostat_data_access_get_pefasu()
 
   consumption_per_sector <- lapply(names(product_codes), function(product) {
     pefasu %>%
@@ -358,7 +358,7 @@ investigate_c19 <- function(pefasu, indprod, product_codes) {
   )
 
 
-  pefasu <- get_eurostat_from_code("env_ac_pefasu")
+  pefasu <- eurostat_data_access_get_pefasu()
 
 
   consumption_per_sector <- lapply(names(product_codes), function(product) {

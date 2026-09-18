@@ -67,3 +67,57 @@ power_data_access_get_sources <- function(
     ember_yearly = ember_yearly
   )
 }
+
+
+#' Fetch installed power-generation capacity
+#'
+#' @param source One of `"entsoe"` or `"ember"`.
+#' @param iso2s Character vector of ISO2 country codes.
+#' @param date_from,date_to Optional date bounds used by ENTSOE.
+#' @param use_cache Whether to use source-level caches.
+#'
+#' @return Installed-capacity observations from the selected source.
+#' @keywords internal
+power_data_access_get_installed_capacity <- function(
+  source = c("entsoe", "ember"),
+  iso2s = "EU",
+  date_from = "2015-01-01",
+  date_to = lubridate::today(),
+  use_cache = TRUE
+) {
+  source <- match.arg(source)
+  if (source == "ember") {
+    return(ember.get_installed_capacity(iso2s = iso2s, use_cache = use_cache))
+  }
+
+  do.call(entsoe.get_installed_capacity, list(
+    iso2s = iso2s,
+    date_from = date_from,
+    date_to = date_to,
+    use_cache = use_cache
+  ))
+}
+
+
+#' Fetch power-generation sources used by validation
+#'
+#' @param iso2s Character vector of ISO2 country codes.
+#' @param use_cache Whether to use source-level caches.
+#' @param include_entsoe Whether to retrieve ENTSOE generation data.
+#'
+#' @return A list containing ENTSOE and EMBER generation data.
+#' @keywords internal
+power_data_access_get_validation_sources <- function(
+  iso2s = get_eu_iso2s(),
+  use_cache = TRUE,
+  include_entsoe = TRUE
+) {
+  list(
+    entsoe = if (include_entsoe) {
+      entsoe.get_power_generation(iso2s = iso2s, use_cache = use_cache)
+    } else {
+      NULL
+    },
+    ember = ember.get_power_generation(iso2s = iso2s, use_cache = use_cache)
+  )
+}

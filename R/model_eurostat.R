@@ -77,6 +77,7 @@ get_eurostat_cons <- function(
       file.path(diagnostics_folder, "coal_coking_provenance.csv"))
     readr::write_csv(coking$validation,
       file.path(diagnostics_folder, "coal_coking_validation.csv"))
+    write_coal_coking_diagnostic_plots(coking$diagnostics, diagnostics_folder)
   }
   coal_eu_repair_candidates <- attr(
     cons_raw_solid$monthly,

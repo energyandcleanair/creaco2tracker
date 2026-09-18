@@ -1,15 +1,16 @@
-# Coking is a required input, not a residual sector. These source conflicts are
+# Coking is a required input, not a residual sector. Source conflicts are
 # deliberately narrow: positive observations always supersede the conflict rule.
-# SDES documents continued operation of the French coke ovens in 2023 and 2024:
-# https://www.statistiques.developpement-durable.gouv.fr/media/9074/download?inline=
-# https://www.statistiques.developpement-durable.gouv.fr/media/9087/download?inline=
 .coking_conflict <- function(iso2, time, value, frequency = "annual") {
-  frequency == "annual" & iso2 == "FR" & lubridate::year(time) %in% 2021:2024 &
-    !is.na(value) & value == 0
-}
-
-.coking_source <- function() {
-  "https://www.statistiques.developpement-durable.gouv.fr/media/9074/download?inline="
+  evidence <- get_coal_coking_conflicts()
+  index <- match(
+    paste(iso2, frequency),
+    paste(evidence$iso2, evidence$frequency)
+  )
+  matched <- !is.na(index)
+  matched & !is.na(value) &
+    lubridate::year(time) >= evidence$year_from[index] &
+    lubridate::year(time) <= evidence$year_to[index] &
+    value == evidence$conflicting_value[index]
 }
 
 .coking_unique <- function(x) {
@@ -196,6 +197,550 @@
   resolved
 }
 
+# Input and resolution-state construction ----------------------------------
+
+.coking_prepare_inputs <- function(monthly, annual) {
+  previous_monthly <- attr(monthly, "coal_coking_original")
+  if (!is.null(previous_monthly)) monthly <- previous_monthly
+  previous_annual <- attr(annual, "coal_coking_original")
+  if (!is.null(previous_annual)) annual <- previous_annual
+
+  source_monthly <- monthly
+  provenance <- attr(monthly, "coal_gap_provenance")
+  if (!is.null(provenance) && nrow(provenance)) {
+    original <- provenance %>%
+      filter(siec == SIEC_HARD_COAL, nrg_bal == "TI_CO", unit == "THS_T")
+    index <- match(
+      paste(monthly$iso2, monthly$time),
+      paste(original$iso2, original$time)
+    )
+    replace <- monthly$siec == SIEC_HARD_COAL &
+      monthly$nrg_bal == "TI_CO" &
+      monthly$unit == "THS_T" &
+      !is.na(index)
+    monthly$values[replace] <- original$original_value[index[replace]]
+  }
+
+  list(
+    monthly = monthly,
+    annual = annual,
+    source_monthly = source_monthly,
+    source_annual = annual
+  )
+}
+
+.coking_observations <- function(monthly, annual) {
+  list(
+    monthly = .coking_balance(monthly, "TI_CO") %>%
+      mutate(conflict = .coking_conflict(iso2, time, value, "monthly")),
+    annual = .coking_balance(annual, "TI_CO_E") %>%
+      mutate(conflict = .coking_conflict(iso2, time, value))
+  )
+}
+
+.coking_add_eu_keys <- function(keys) {
+  members <- get_eu_iso2s()
+  eu_keys <- keys %>%
+    filter(iso2 %in% members) %>%
+    count(time) %>%
+    filter(n == length(members)) %>%
+    transmute(iso2 = "EU", time)
+  bind_rows(keys, eu_keys) %>% distinct()
+}
+
+.coking_initialise_state <- function(keys, observations) {
+  keys %>%
+    left_join(observations, by = c("iso2", "time")) %>%
+    mutate(
+      duplicate = coalesce(duplicate, FALSE),
+      conflict = coalesce(conflict, FALSE),
+      original_value = value,
+      resolved_value = if_else(conflict | duplicate, NA_real_, value),
+      method = if_else(is.finite(resolved_value), "reported", "unresolved"),
+      evidence = if_else(
+        conflict,
+        "documented_french_reporting_break",
+        "original_source"
+      ),
+      bounded = FALSE,
+      constraint = "none",
+      training_start = as.Date(NA),
+      training_end = as.Date(NA)
+    ) %>%
+    select(-value)
+}
+
+.coking_resolution_states <- function(monthly, annual, observations) {
+  monthly_keys <- monthly %>%
+    filter(
+      siec == SIEC_HARD_COAL,
+      unit == "THS_T",
+      nrg_bal %in% COAL_MONTHLY_GAP_BALANCES
+    ) %>%
+    distinct(iso2, time)
+  if (nrow(monthly_keys)) {
+    monthly_keys <- monthly_keys %>%
+      group_by(iso2) %>%
+      reframe(time = seq(min(time), max(time), by = "month"))
+  }
+
+  annual_keys <- annual %>%
+    filter(
+      siec == SIEC_HARD_COAL,
+      unit == "THS_T",
+      nrg_bal %in% c("FC_E", "TI_E", "TI_CO_E")
+    ) %>%
+    distinct(iso2, time)
+
+  list(
+    monthly = .coking_initialise_state(
+      .coking_add_eu_keys(monthly_keys),
+      observations$monthly
+    ),
+    annual = .coking_initialise_state(
+      .coking_add_eu_keys(annual_keys),
+      observations$annual
+    )
+  )
+}
+
+# Country-year estimation --------------------------------------------------
+
+.coking_select_predictions <- function(candidates, scores, horizon, requested) {
+  choice <- .coking_choose(candidates[requested, ], scores, horizon)
+  prediction <- if (choice$method != "unresolved") {
+    candidates[[choice$method]]
+  } else {
+    rep(NA_real_, nrow(candidates))
+  }
+  methods <- rep(choice$method, nrow(candidates))
+  evidence <- rep(choice$evidence, nrow(candidates))
+
+  # A proxy gap in one month must not discard evidence for another month.
+  if (choice$method == "unresolved") {
+    for (month in requested) {
+      partial <- .coking_choose(candidates[month, ], scores, horizon)
+      prediction[month] <- partial$values
+      methods[month] <- partial$method
+      evidence[month] <- partial$evidence
+    }
+  }
+
+  list(
+    choice = choice,
+    values = prediction,
+    methods = methods,
+    evidence = evidence
+  )
+}
+
+.coking_monthly_observed_values <- function(observed, country, dates) {
+  index <- match(
+    paste(country, dates),
+    paste(observed$iso2, observed$time)
+  )
+  values <- observed$value[index]
+  conflicts <- observed$conflict[index]
+  values[!is.na(conflicts) & conflicts] <- NA_real_
+  values
+}
+
+.coking_residual_weights <- function(prediction, activity, dates) {
+  if (all(is.finite(prediction)) && sum(prediction) > 0) return(prediction)
+
+  for (proxy_name in c("coke_activity", "steel_activity")) {
+    proxy <- activity %>% filter(proxy == proxy_name)
+    weights <- proxy$value[match(dates, proxy$time)]
+    if (all(is.finite(weights)) && sum(weights) > 0) return(weights)
+  }
+  rep(1, length(dates))
+}
+
+.coking_apply_annual_residual <- function(
+  prediction,
+  methods,
+  evidence,
+  choice,
+  known,
+  annual_row,
+  activity,
+  dates
+) {
+  if (nrow(annual_row) != 1L || !anyNA(known)) {
+    return(list(
+      values = prediction,
+      methods = methods,
+      evidence = evidence,
+      choice = choice
+    ))
+  }
+
+  remaining <- annual_row$value - sum(known, na.rm = TRUE)
+  weights <- .coking_residual_weights(prediction, activity, dates)
+  missing <- is.na(known)
+  if (remaining >= 0 && sum(weights[missing]) > 0) {
+    prediction[missing] <- remaining * weights[missing] / sum(weights[missing])
+    choice$method <- "annual_residual"
+    choice$evidence <- if (all(weights == 1)) {
+      "reported_annual_uniform_fallback"
+    } else {
+      "reported_annual_activity_profile"
+    }
+    methods[] <- choice$method
+    evidence[] <- choice$evidence
+  }
+
+  list(
+    values = prediction,
+    methods = methods,
+    evidence = evidence,
+    choice = choice
+  )
+}
+
+.coking_record_training <- function(
+  state,
+  missing,
+  start,
+  history,
+  activity,
+  annual_history
+) {
+  valid_history <- history %>%
+    filter(time < start, is.finite(value), !conflict, !duplicate)
+  for (selected in unique(state$method[missing])) {
+    supported <- missing[state$method[missing] == selected]
+    if (selected == "unresolved") next
+    if (selected == "annual_residual") {
+      state$training_start[supported] <- start
+      state$training_end[supported] <- as.Date(paste0(lubridate::year(start), "-12-01"))
+      next
+    }
+
+    training <- valid_history
+    if (nrow(training)) {
+      if (selected %in% c("coke_activity", "steel_activity")) {
+        training <- training %>%
+          inner_join(
+            activity %>%
+              filter(proxy == selected, is.finite(value), value > 0) %>%
+              select(time),
+            by = "time"
+          ) %>%
+          arrange(desc(time)) %>%
+          slice_head(n = 36)
+      } else if (selected == "previous_year") {
+        previous_dates <- lubridate::`%m-%`(
+          state$time[supported],
+          lubridate::years(1)
+        )
+        training <- filter(training, time %in% previous_dates)
+      }
+      if (nrow(training)) {
+        state$training_start[supported] <- min(training$time)
+        state$training_end[supported] <- max(training$time)
+      }
+      next
+    }
+
+    annual_training <- annual_history %>%
+      filter(time < start, is.finite(value), !conflict, !duplicate) %>%
+      arrange(desc(time)) %>%
+      slice_head(n = 3)
+    if (nrow(annual_training) && selected %in% c("coke_activity", "steel_activity")) {
+      state$training_start[supported] <- min(annual_training$time)
+      state$training_end[supported] <- max(annual_training$time)
+      state$evidence[supported] <- paste0(
+        state$evidence[supported],
+        "_annual_calibration"
+      )
+    }
+  }
+  state
+}
+
+.coking_resolve_annual <- function(
+  state,
+  indices,
+  required,
+  prediction,
+  known,
+  choice,
+  annual_observed,
+  country,
+  start
+) {
+  if (!required) return(state)
+
+  complete_year <- prediction
+  complete_year[!is.na(known)] <- known[!is.na(known)]
+  if (all(is.finite(complete_year))) {
+    state$resolved_value[indices] <- sum(complete_year)
+    state$method[indices] <- "resolved_monthly_sum"
+    state$evidence[indices] <- if (choice$method == "unresolved") {
+      "mixed_monthly_candidates"
+    } else {
+      choice$evidence
+    }
+    return(state)
+  }
+
+  past <- annual_observed %>%
+    filter(
+      iso2 == country,
+      time < start,
+      !conflict,
+      !duplicate,
+      is.finite(value)
+    ) %>%
+    arrange(desc(time))
+  previous_year <- as.Date(paste0(lubridate::year(start) - 1L, "-01-01"))
+  if (nrow(past) && past$time[[1]] == previous_year) {
+    state$resolved_value[indices] <- past$value[[1]]
+    state$method[indices] <- "previous_year_annual"
+    state$evidence[indices] <- "insufficient_monthly_evidence_fallback"
+  }
+  state
+}
+
+.coking_resolve_year <- function(
+  monthly_state,
+  annual_state,
+  observed,
+  annual_observed,
+  activity,
+  country,
+  year
+) {
+  start <- as.Date(paste0(year, "-01-01"))
+  dates <- seq(start, by = "month", length.out = 12)
+  monthly_indices <- which(monthly_state$iso2 == country & monthly_state$time %in% dates)
+  annual_indices <- which(annual_state$iso2 == country & annual_state$time == start)
+  monthly_missing <- monthly_indices[
+    !is.finite(monthly_state$resolved_value[monthly_indices]) &
+      !monthly_state$duplicate[monthly_indices]
+  ]
+  annual_required <- length(annual_indices) &&
+    !is.finite(annual_state$resolved_value[annual_indices]) &&
+    !annual_state$duplicate[annual_indices]
+  if (!length(monthly_missing) && !annual_required) {
+    return(list(monthly = monthly_state, annual = annual_state, validation = NULL))
+  }
+
+  annual_history <- annual_observed %>% filter(iso2 == country)
+  candidates <- .coking_candidates(observed, dates, activity, start, annual_history)
+  scores <- .coking_scores(observed, activity, start)
+  validation <- if (nrow(scores)) {
+    mutate(scores, iso2 = country, target_year = year)
+  } else {
+    NULL
+  }
+  valid_history <- observed %>%
+    filter(time < start, is.finite(value), !conflict, !duplicate)
+  recent <- nrow(valid_history) &&
+    max(valid_history$time) >= lubridate::`%m-%`(start, lubridate::years(1))
+  horizon <- if (recent) "short" else "long"
+  requested <- if (length(monthly_missing)) {
+    match(monthly_state$time[monthly_missing], candidates$time)
+  } else {
+    seq_len(12)
+  }
+
+  prediction <- .coking_select_predictions(candidates, scores, horizon, requested)
+  known <- .coking_monthly_observed_values(observed, country, dates)
+  annual_row <- annual_observed %>%
+    filter(iso2 == country, time == start, !conflict, !duplicate, is.finite(value))
+  prediction <- .coking_apply_annual_residual(
+    prediction = prediction$values,
+    methods = prediction$methods,
+    evidence = prediction$evidence,
+    choice = prediction$choice,
+    known = known,
+    annual_row = annual_row,
+    activity = activity,
+    dates = dates
+  )
+
+  monthly_state$resolved_value[monthly_missing] <- prediction$values[
+    match(monthly_state$time[monthly_missing], dates)
+  ]
+  monthly_state$method[monthly_missing] <- prediction$methods[
+    match(monthly_state$time[monthly_missing], dates)
+  ]
+  monthly_state$evidence[monthly_missing] <- prediction$evidence[
+    match(monthly_state$time[monthly_missing], dates)
+  ]
+  monthly_state <- .coking_record_training(
+    monthly_state,
+    monthly_missing,
+    start,
+    observed,
+    activity,
+    annual_history
+  )
+  annual_state <- .coking_resolve_annual(
+    annual_state,
+    annual_indices,
+    annual_required,
+    prediction$values,
+    known,
+    prediction$choice,
+    annual_observed,
+    country,
+    start
+  )
+
+  list(monthly = monthly_state, annual = annual_state, validation = validation)
+}
+
+.coking_resolve_countries <- function(states, observations, activity) {
+  validation <- list()
+  countries <- setdiff(unique(c(states$monthly$iso2, states$annual$iso2)), "EU")
+  for (country in countries) {
+    monthly_observed <- observations$monthly %>% filter(iso2 == country)
+    annual_observed <- observations$annual %>% filter(iso2 == country)
+    country_activity <- activity %>% filter(iso2 == country)
+    years <- sort(unique(lubridate::year(c(
+      states$monthly$time[states$monthly$iso2 == country],
+      states$annual$time[states$annual$iso2 == country]
+    ))))
+    for (year in years) {
+      resolved <- .coking_resolve_year(
+        states$monthly,
+        states$annual,
+        monthly_observed,
+        annual_observed,
+        country_activity,
+        country,
+        year
+      )
+      states$monthly <- resolved$monthly
+      states$annual <- resolved$annual
+      if (!is.null(resolved$validation)) {
+        validation[[length(validation) + 1L]] <- resolved$validation
+      }
+    }
+  }
+  states$validation <- bind_rows(validation)
+  states
+}
+
+# Accounting constraints and output ---------------------------------------
+
+.coking_bound_estimates <- function(resolved, raw, frequency) {
+  total_code <- if (frequency == "monthly") "GID_CAL" else "TI_E"
+  totals <- .coking_balance(raw, total_code)
+  maximum <- totals$value[match(
+    paste(resolved$iso2, resolved$time),
+    paste(totals$iso2, totals$time)
+  )]
+  if (frequency == "monthly") {
+    power <- .coking_balance(raw, "TI_EHG_MAP")
+    electricity <- power$value[match(
+      paste(resolved$iso2, resolved$time),
+      paste(power$iso2, power$time)
+    )]
+    maximum <- pmin(
+      maximum,
+      (maximum - coalesce(electricity, 0)) / (1 - HARDCOAL_COKING_RATE_FACTOR)
+    )
+  }
+
+  estimated <- resolved$method != "reported" & is.finite(resolved$resolved_value)
+  reported_conflict <- resolved$method == "reported" &
+    is.finite(maximum) &
+    is.finite(resolved$resolved_value) &
+    resolved$resolved_value > pmax(0, maximum)
+  resolved$constraint[reported_conflict] <- "reported_accounting_conflict"
+
+  exceeded <- estimated &
+    is.finite(maximum) &
+    resolved$resolved_value > pmax(0, maximum)
+  resolved$bounded[exceeded] <- TRUE
+  resolved$constraint[exceeded] <- "accounting_bound"
+
+  # A zero/partial annual transformation total cannot erase positive monthly
+  # coking observations. Preserve their sum and expose the conflict instead.
+  derived <- exceeded &
+    frequency == "annual" &
+    resolved$method == "resolved_monthly_sum"
+  resolved$bounded[derived] <- FALSE
+  resolved$constraint[derived] <- "annual_transformation_conflict"
+
+  # Annual anchors that violate the bound remain unresolved.
+  constrained <- exceeded & resolved$method == "annual_residual"
+  resolved$resolved_value[exceeded & !derived] <- pmax(0, maximum[exceeded & !derived])
+  resolved$resolved_value[constrained] <- NA_real_
+  resolved$evidence[constrained] <- "annual_residual_exceeds_monthly_bound"
+  resolved
+}
+
+.coking_recompute_annual_sums <- function(annual, monthly) {
+  for (index in which(annual$method == "resolved_monthly_sum")) {
+    rows <- monthly %>%
+      filter(
+        iso2 == annual$iso2[[index]],
+        lubridate::year(time) == lubridate::year(annual$time[[index]])
+      )
+    if (nrow(rows) == 12L) annual$resolved_value[[index]] <- sum(rows$resolved_value)
+  }
+  annual
+}
+
+.coking_diagnostics <- function(monthly, annual) {
+  conflict_evidence <- get_coal_coking_conflicts()
+  annual_check <- monthly %>%
+    mutate(year = lubridate::year(time)) %>%
+    group_by(iso2, year) %>%
+    summarise(
+      monthly_total = if (n() == 12L) sum(resolved_value) else NA_real_,
+      .groups = "drop"
+    ) %>%
+    inner_join(
+      annual %>%
+        transmute(
+          iso2,
+          year = lubridate::year(time),
+          annual_total = resolved_value
+        ),
+      by = c("iso2", "year")
+    ) %>%
+    mutate(annual_difference = monthly_total - annual_total)
+
+  bind_rows(
+    mutate(monthly, frequency = "monthly"),
+    mutate(annual, frequency = "annual")
+  ) %>%
+    mutate(
+      siec = SIEC_HARD_COAL,
+      unit = "THS_T",
+      deduction = (1 - HARDCOAL_COKING_RATE_FACTOR) * resolved_value,
+      status = case_when(
+        !is.finite(resolved_value) ~ "unresolved",
+        method == "reported" ~ "reported",
+        TRUE ~ "estimated"
+      )
+    ) %>%
+    left_join(
+      conflict_evidence %>% select(iso2, frequency, conflict_source = source),
+      by = c("iso2", "frequency")
+    ) %>%
+    mutate(conflict_source = if_else(conflict, conflict_source, NA_character_)) %>%
+    mutate(year = lubridate::year(time)) %>%
+    left_join(
+      annual_check %>% select(iso2, year, annual_difference),
+      by = c("iso2", "year")
+    )
+}
+
+.coking_attach_result <- function(source, resolved, diagnostics, code, frequency) {
+  result <- .coking_apply(source, resolved, code, frequency)
+  attr(result, "coal_coking_original") <- source
+  attr(result, "coal_coking_resolved") <- TRUE
+  attr(result, "coal_coking_provenance") <- diagnostics
+  result
+}
+
 #' Resolve coking before coal combustion accounting
 #'
 #' Original measurements, estimates and evidenced source conflicts remain
@@ -203,244 +748,39 @@
 #' @keywords internal
 #' @noRd
 .resolve_coal_coking <- function(monthly, annual, industry = tibble::tibble()) {
-  previous <- attr(monthly, "coal_coking_original")
-  if (!is.null(previous)) monthly <- previous
-  previous <- attr(annual, "coal_coking_original")
-  if (!is.null(previous)) annual <- previous
-  source_monthly <- monthly
-  source_annual <- annual
-  provenance <- attr(monthly, "coal_gap_provenance")
-  if (!is.null(provenance) && nrow(provenance)) {
-    original <- provenance %>% filter(siec == SIEC_HARD_COAL, nrg_bal == "TI_CO",
-      unit == "THS_T")
-    idx <- match(paste(monthly$iso2, monthly$time), paste(original$iso2, original$time))
-    replace <- monthly$siec == SIEC_HARD_COAL & monthly$nrg_bal == "TI_CO" &
-      monthly$unit == "THS_T" & !is.na(idx)
-    monthly$values[replace] <- original$original_value[idx[replace]]
-  }
-  observed <- .coking_balance(monthly, "TI_CO") %>%
-    mutate(conflict = .coking_conflict(iso2, time, value, "monthly"))
-  annual_observed <- .coking_balance(annual, "TI_CO_E") %>%
-    mutate(conflict = .coking_conflict(iso2, time, value))
-  activity <- .coking_activity(monthly, industry)
-  monthly_keys <- monthly %>% filter(siec == SIEC_HARD_COAL, unit == "THS_T",
-    nrg_bal %in% COAL_MONTHLY_GAP_BALANCES) %>% distinct(iso2, time)
-  if (nrow(monthly_keys)) monthly_keys <- monthly_keys %>% group_by(iso2) %>%
-    reframe(time = seq(min(time), max(time), by = "month"))
-  annual_keys <- annual %>% filter(siec == SIEC_HARD_COAL, unit == "THS_T",
-    nrg_bal %in% c("FC_E", "TI_E", "TI_CO_E")) %>% distinct(iso2, time)
-  initialise <- function(keys, observations) keys %>% left_join(observations,
-    by = c("iso2", "time")) %>% mutate(
-      duplicate = coalesce(duplicate, FALSE), conflict = coalesce(conflict, FALSE),
-      original_value = value,
-      resolved_value = if_else(conflict | duplicate, NA_real_, value),
-      method = if_else(is.finite(resolved_value), "reported", "unresolved"),
-      evidence = if_else(conflict, "documented_french_reporting_break", "original_source"),
-      bounded = FALSE, constraint = "none",
-      training_start = as.Date(NA), training_end = as.Date(NA)
-    ) %>% select(-value)
-  # EU coking keys must exist even when Eurostat omits the complete EU row.
-  eu_keys <- function(keys) keys %>% filter(iso2 %in% get_eu_iso2s()) %>%
-    count(time) %>% filter(n == length(get_eu_iso2s())) %>%
-    transmute(iso2 = "EU", time)
-  monthly_keys <- bind_rows(monthly_keys, eu_keys(monthly_keys)) %>% distinct()
-  annual_keys <- bind_rows(annual_keys, eu_keys(annual_keys)) %>% distinct()
-  m <- initialise(monthly_keys, observed)
-  a <- initialise(annual_keys, annual_observed)
-  validation <- list()
-  for (country in setdiff(unique(c(m$iso2, a$iso2)), "EU")) {
-    history <- observed %>% filter(iso2 == country)
-    act <- activity %>% filter(iso2 == country)
-    years <- sort(unique(lubridate::year(c(m$time[m$iso2 == country],
-      a$time[a$iso2 == country]))))
-    for (year in years) {
-      start <- as.Date(paste0(year, "-01-01"))
-      dates <- seq(start, by = "month", length.out = 12)
-      mi <- which(m$iso2 == country & m$time %in% dates)
-      ai <- which(a$iso2 == country & a$time == start)
-      need_monthly <- length(mi) && any(!is.finite(m$resolved_value[mi]) & !m$duplicate[mi])
-      need_annual <- length(ai) && !is.finite(a$resolved_value[ai]) && !a$duplicate[ai]
-      if (!need_monthly && !need_annual) next
-      annual_history <- annual_observed %>% filter(iso2 == country)
-      candidates <- .coking_candidates(history, dates, act, start, annual_history)
-      scores <- .coking_scores(history, act, start)
-      if (nrow(scores)) validation[[length(validation) + 1L]] <-
-        mutate(scores, iso2 = country, target_year = year)
-      valid_history <- history %>% filter(time < start, is.finite(value), !conflict, !duplicate)
-      recent <- nrow(valid_history) && max(valid_history$time) >=
-        lubridate::`%m-%`(start, lubridate::years(1))
-      horizon <- if (recent) "short" else "long"
-      # Choose on the requested months; future proxy availability cannot affect
-      # which method is selected for the observed portion of a current year.
-      missing_months <- mi[!is.finite(m$resolved_value[mi]) & !m$duplicate[mi]]
-      requested <- if (length(missing_months)) match(m$time[missing_months], candidates$time) else
-        seq_len(12)
-      choice <- .coking_choose(candidates[requested, ], scores, horizon)
-      prediction <- if (choice$method != "unresolved") candidates[[choice$method]] else
-        rep(NA_real_, 12)
-      methods <- rep(choice$method, 12)
-      evidence <- rep(choice$evidence, 12)
-      # A proxy gap in one month must not discard evidence for another month.
-      # If no candidate covers the whole gap, select on each available subset.
-      if (choice$method == "unresolved") {
-        for (month in requested) {
-          partial <- .coking_choose(candidates[month, ], scores, horizon)
-          prediction[month] <- partial$values
-          methods[month] <- partial$method
-          evidence[month] <- partial$evidence
-        }
-      }
-      annual_row <- annual_observed %>% filter(iso2 == country, time == start,
-        !conflict, !duplicate, is.finite(value))
-      known <- observed$value[match(paste(country, dates), paste(observed$iso2, observed$time))]
-      bad <- observed$conflict[match(paste(country, dates), paste(observed$iso2, observed$time))]
-      known[!is.na(bad) & bad] <- NA_real_
-      if (nrow(annual_row) == 1L && anyNA(known)) {
-        remaining <- annual_row$value - sum(known, na.rm = TRUE)
-        weights <- prediction
-        if (any(!is.finite(weights)) || sum(weights, na.rm = TRUE) <= 0) {
-          weights <- act %>% filter(proxy == "coke_activity")
-          weights <- weights$value[match(dates, weights$time)]
-        }
-        if (any(!is.finite(weights)) || sum(weights, na.rm = TRUE) <= 0) {
-          steel <- act %>% filter(proxy == "steel_activity")
-          weights <- steel$value[match(dates, steel$time)]
-        }
-        if (any(!is.finite(weights)) || sum(weights, na.rm = TRUE) <= 0) weights <- rep(1, 12)
-        if (remaining >= 0 && sum(weights[is.na(known)]) > 0) {
-          prediction[is.na(known)] <- remaining * weights[is.na(known)] /
-            sum(weights[is.na(known)])
-          choice$method <- "annual_residual"
-          choice$evidence <- if (all(weights == 1)) "reported_annual_uniform_fallback" else
-            "reported_annual_activity_profile"
-          methods[] <- choice$method
-          evidence[] <- choice$evidence
-        }
-      }
-      missing <- mi[!is.finite(m$resolved_value[mi]) & !m$duplicate[mi]]
-      m$resolved_value[missing] <- prediction[match(m$time[missing], dates)]
-      m$method[missing] <- methods[match(m$time[missing], dates)]
-      m$evidence[missing] <- evidence[match(m$time[missing], dates)]
-      for (selected in unique(m$method[missing])) {
-        supported <- missing[m$method[missing] == selected]
-        if (selected == "unresolved") next
-        if (selected == "annual_residual") {
-          m$training_start[supported] <- start
-          m$training_end[supported] <- as.Date(paste0(year, "-12-01"))
-          next
-        }
-        if (nrow(valid_history)) {
-          training <- valid_history
-          if (selected %in% c("coke_activity", "steel_activity")) {
-            training <- training %>% inner_join(act %>% filter(proxy == selected,
-              is.finite(value), value > 0) %>% select(time), by = "time") %>%
-              arrange(desc(time)) %>% slice_head(n = 36)
-          } else if (selected == "previous_year") {
-            training <- filter(training, time %in% lubridate::`%m-%`(m$time[supported],
-              lubridate::years(1)))
-          }
-          if (nrow(training)) {
-            m$training_start[supported] <- min(training$time)
-            m$training_end[supported] <- max(training$time)
-          }
-        } else {
-          annual_training <- annual_history %>% filter(time < start, is.finite(value),
-            !conflict, !duplicate) %>% arrange(desc(time)) %>% slice_head(n = 3)
-          if (nrow(annual_training) && selected %in% c("coke_activity", "steel_activity")) {
-            m$training_start[supported] <- min(annual_training$time)
-            m$training_end[supported] <- max(annual_training$time)
-            m$evidence[supported] <- paste0(m$evidence[supported], "_annual_calibration")
-          }
-        }
-      }
-      # Annual estimates use all twelve resolved months, or a separate annual
-      # history fallback when the monthly system does not exist.
-      if (need_annual) {
-        complete_year <- prediction
-        complete_year[!is.na(known)] <- known[!is.na(known)]
-        if (all(is.finite(complete_year))) {
-          a$resolved_value[ai] <- sum(complete_year)
-          a$method[ai] <- "resolved_monthly_sum"
-          a$evidence[ai] <- if (choice$method == "unresolved") "mixed_monthly_candidates" else
-            choice$evidence
-        } else {
-          past <- annual_observed %>% filter(iso2 == country, time < start,
-            !conflict, !duplicate, is.finite(value)) %>% arrange(desc(time))
-          if (nrow(past) && past$time[[1]] == as.Date(paste0(year - 1L, "-01-01"))) {
-            a$resolved_value[ai] <- past$value[[1]]
-            a$method[ai] <- "previous_year_annual"
-            a$evidence[ai] <- "insufficient_monthly_evidence_fallback"
-          }
-        }
-      }
-    }
-  }
-  # Bounds only affect estimates. Reported conflicts remain visible downstream.
-  bound <- function(resolved, raw, frequency) {
-    total_code <- if (frequency == "monthly") "GID_CAL" else "TI_E"
-    totals <- .coking_balance(raw, total_code)
-    maximum <- totals$value[match(paste(resolved$iso2, resolved$time),
-      paste(totals$iso2, totals$time))]
-    if (frequency == "monthly") {
-      power <- .coking_balance(raw, "TI_EHG_MAP")
-      electricity <- power$value[match(paste(resolved$iso2, resolved$time),
-        paste(power$iso2, power$time))]
-      maximum <- pmin(maximum, (maximum - coalesce(electricity, 0)) /
-        (1 - HARDCOAL_COKING_RATE_FACTOR))
-    }
-    estimated <- resolved$method != "reported" & is.finite(resolved$resolved_value)
-    reported_conflict <- resolved$method == "reported" & is.finite(maximum) &
-      is.finite(resolved$resolved_value) & resolved$resolved_value > pmax(0, maximum)
-    resolved$constraint[reported_conflict] <- "reported_accounting_conflict"
-    exceeded <- estimated & is.finite(maximum) & resolved$resolved_value > pmax(0, maximum)
-    resolved$bounded[exceeded] <- TRUE
-    resolved$constraint[exceeded] <- "accounting_bound"
-    derived <- exceeded & frequency == "annual" & resolved$method == "resolved_monthly_sum"
-    # A zero/partial annual transformation total cannot erase positive monthly
-    # coking observations. Keep their sum; annual energy accounting rejects the
-    # inconsistent transformation total instead of declaring coking to be zero.
-    resolved$bounded[derived] <- FALSE
-    resolved$constraint[derived] <- "annual_transformation_conflict"
-    # Annual anchors cannot be reconciled by silently truncating their monthly
-    # residual: flag that case as unresolved instead.
-    constrained <- exceeded & resolved$method == "annual_residual"
-    resolved$resolved_value[exceeded & !derived] <- pmax(0, maximum[exceeded & !derived])
-    resolved$resolved_value[constrained] <- NA_real_
-    resolved$evidence[constrained] <- "annual_residual_exceeds_monthly_bound"
-    resolved
-  }
-  m <- bound(m, monthly, "monthly")
-  # Recompute estimated annual values from bounded monthly estimates when complete.
-  for (index in which(a$method == "resolved_monthly_sum")) {
-    rows <- m %>% filter(iso2 == a$iso2[[index]],
-      lubridate::year(time) == lubridate::year(a$time[[index]]))
-    if (nrow(rows) == 12L) a$resolved_value[[index]] <- sum(rows$resolved_value)
-  }
-  a <- bound(a, annual, "annual")
-  m <- .coking_eu(m, observed, "monthly")
-  a <- .coking_eu(a, annual_observed, "annual")
-  diagnostics <- bind_rows(mutate(m, frequency = "monthly"), mutate(a, frequency = "annual")) %>%
-    mutate(siec = SIEC_HARD_COAL, unit = "THS_T",
-      deduction = (1 - HARDCOAL_COKING_RATE_FACTOR) * resolved_value,
-      status = case_when(!is.finite(resolved_value) ~ "unresolved",
-        method == "reported" ~ "reported", TRUE ~ "estimated"),
-      conflict_source = if_else(conflict, .coking_source(), NA_character_))
-  annual_check <- m %>% mutate(year = lubridate::year(time)) %>%
-    group_by(iso2, year) %>% summarise(
-      monthly_total = if (n() == 12L) sum(resolved_value) else NA_real_, .groups = "drop"
-    ) %>% inner_join(a %>% transmute(iso2, year = lubridate::year(time),
-      annual_total = resolved_value), by = c("iso2", "year")) %>%
-    mutate(annual_difference = monthly_total - annual_total)
-  diagnostics <- diagnostics %>% mutate(year = lubridate::year(time)) %>%
-    left_join(annual_check %>% select(iso2, year, annual_difference), by = c("iso2", "year"))
-  monthly <- .coking_apply(source_monthly, m, "TI_CO", "M")
-  annual <- .coking_apply(source_annual, a, "TI_CO_E", "A")
-  attr(monthly, "coal_coking_original") <- source_monthly
-  attr(annual, "coal_coking_original") <- source_annual
-  attr(monthly, "coal_coking_resolved") <- TRUE
-  attr(annual, "coal_coking_resolved") <- TRUE
-  attr(monthly, "coal_coking_provenance") <- diagnostics
-  attr(annual, "coal_coking_provenance") <- diagnostics
-  list(monthly = monthly, yearly = annual, diagnostics = diagnostics,
-    validation = bind_rows(validation))
+  inputs <- .coking_prepare_inputs(monthly, annual)
+  observations <- .coking_observations(inputs$monthly, inputs$annual)
+  activity <- .coking_activity(inputs$monthly, industry)
+  states <- .coking_resolution_states(
+    inputs$monthly,
+    inputs$annual,
+    observations
+  )
+  states <- .coking_resolve_countries(states, observations, activity)
+
+  states$monthly <- .coking_bound_estimates(states$monthly, inputs$monthly, "monthly")
+  states$annual <- .coking_recompute_annual_sums(states$annual, states$monthly)
+  states$annual <- .coking_bound_estimates(states$annual, inputs$annual, "annual")
+  states$monthly <- .coking_eu(states$monthly, observations$monthly, "monthly")
+  states$annual <- .coking_eu(states$annual, observations$annual, "annual")
+
+  diagnostics <- .coking_diagnostics(states$monthly, states$annual)
+  list(
+    monthly = .coking_attach_result(
+      inputs$source_monthly,
+      states$monthly,
+      diagnostics,
+      "TI_CO",
+      "M"
+    ),
+    yearly = .coking_attach_result(
+      inputs$source_annual,
+      states$annual,
+      diagnostics,
+      "TI_CO_E",
+      "A"
+    ),
+    diagnostics = diagnostics,
+    validation = states$validation
+  )
 }

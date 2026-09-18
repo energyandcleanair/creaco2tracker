@@ -21,6 +21,43 @@ test_that(
 
 
 test_that(
+  "source retrieval is confined to client and data-access files",
+  {
+    cfg <- architecture_get_boundary_config()
+
+    for (file_name in cfg$source_boundary_files) {
+      file_path <- testthat::test_path("..", "..", "R", file_name)
+      lines <- readLines(file_path, warn = FALSE)
+      code <- paste(lines[!grepl("^\\s*#", lines)], collapse = "\n")
+
+      for (pattern in cfg$forbidden_source_patterns) {
+        expect_false(
+          grepl(pattern, code, perl = TRUE),
+          info = paste("Source retrieval pattern", pattern, "found in", file_name)
+        )
+      }
+    }
+  }
+)
+
+
+test_that(
+  "source-derived coking evidence is owned by the data layer",
+  {
+    model_path <- testthat::test_path("..", "..", "R", "model_coal_coking.R")
+    data_path <- testthat::test_path("..", "..", "R", "data_coal_coking_conflicts.R")
+
+    expect_false(grepl("https?://", paste(readLines(model_path), collapse = "\n")))
+    expect_true(grepl(
+      "statistiques.developpement-durable.gouv.fr",
+      paste(readLines(data_path), collapse = "\n"),
+      fixed = TRUE
+    ))
+  }
+)
+
+
+test_that(
   "configured data-access files exist",
   {
     cfg <- architecture_get_boundary_config()

@@ -1,5 +1,7 @@
-validate_power <- function(pwr_generation = entsoe.get_power_generation(), folder = "validation") {
-  ember_explorer <- ember.get_power_generation(iso2s = get_eu_iso2s())
+validate_power <- function(pwr_generation = NULL, folder = "validation") {
+  sources <- power_data_access_get_validation_sources(include_entsoe = is.null(pwr_generation))
+  if (is.null(pwr_generation)) pwr_generation <- sources$entsoe
+  ember_explorer <- sources$ember
   ember_1 <- ember_explorer %>%
     mutate(
       source = recode(
@@ -17,17 +19,7 @@ validate_power <- function(pwr_generation = entsoe.get_power_generation(), folde
     )
 
 
-  filepath <- "data/ember_yearly_full_release_long_format.csv"
-  url <- paste0(
-    "https://storage.googleapis.com/emb-prod-bkt-publicdata/",
-    "public-downloads/yearly_full_release_long_format.csv"
-  )
-  if (!file.exists(filepath)) {
-    dir.create(dirname(filepath), showWarnings = FALSE, recursive = TRUE)
-    download.file(url, filepath)
-  }
-
-  ember_catalogue <- read_csv(filepath)
+  ember_catalogue <- validation_data_access_get_ember_catalogue()
   ember_2 <- ember_catalogue %>%
     rename(iso3 = `ISO 3 code`) %>%
     mutate(iso2 = countrycode::countrycode(iso3, "iso3c", "iso2c")) %>%
