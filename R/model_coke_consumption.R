@@ -195,6 +195,8 @@
 #'
 #' Original observations remain distinguishable from estimates. Only gaps of at
 #' most six months bounded by reported coke consumption are eligible.
+#' Eligibility and validation depend on the gap and its historical evidence,
+#' independently of later reporting years in the series.
 #' @keywords internal
 #' @noRd
 .resolve_coke_consumption <- function(monthly, annual, industry = tibble::tibble()) {
@@ -228,8 +230,7 @@
       indices <- start_index:end_index
       bounded <- start_index > 1L && end_index < nrow(d) &&
         is.finite(d$resolved_value[[start_index - 1L]]) &&
-        is.finite(d$resolved_value[[end_index + 1L]]) && length(indices) <= 6L &&
-        any(lubridate::year(d$time[indices]) == lubridate::year(max(d$time)))
+        is.finite(d$resolved_value[[end_index + 1L]]) && length(indices) <= 6L
       if (!bounded) next
       d$eligible_gap[indices] <- TRUE
       act <- activity %>% filter(iso2 == country)

@@ -193,6 +193,8 @@ coal_allocate_annual <- function(annual, monthly) {
 #'
 #' Complete totals are forecast from original history only. Allocated annual
 #' observations retain their provenance and are never regression training rows.
+#' Forecast totals below known sector consumption are raised to the known sum.
+#' Diagnostics retain the original forecast and shortfall and flag the conflict.
 #' @keywords internal
 coal_prepare_total_forecasts <- function(
   x, date_to, diagnostics_folder = NULL,
@@ -244,7 +246,8 @@ coal_prepare_total_forecasts <- function(
         input_date = conflict_date, total = if (valid_total) total else NA_real_,
         known_sectors = sum(rows$values[rows$values >= 0], na.rm = TRUE),
         residual = sum(rows$values[rows$values < 0], na.rm = TRUE),
-        conflict = TRUE, three_year_total = NA_real_
+        conflict = TRUE, three_year_total = NA_real_,
+        forecast_total = NA_real_, forecast_residual = NA_real_
       )
       if (valid_total) {
         replacement <- rows %>% mutate(values = pmax(0, values))
@@ -282,7 +285,8 @@ coal_prepare_total_forecasts <- function(
       provenance[[length(provenance) + 1L]] <<- group[1, keys] %>% mutate(
         time = date, method = "recent_historical_split", input_date = reference$time[1],
         total = rows$values, known_sectors = 0, residual = rows$values,
-        conflict = FALSE, three_year_total = NA_real_
+        conflict = FALSE, three_year_total = NA_real_,
+        forecast_total = NA_real_, forecast_residual = NA_real_
       )
       group <- bind_rows(group %>% filter(time != date), replacement)
     }
@@ -302,7 +306,7 @@ coal_prepare_total_forecasts <- function(
       provenance[[length(provenance) + 1L]] <<- missing %>% select(all_of(keys), time) %>%
         mutate(method = "unresolved_no_total_history", input_date = as.Date(NA),
           total = NA_real_, known_sectors = 0, residual = NA_real_, conflict = FALSE,
-          three_year_total = NA_real_)
+          three_year_total = NA_real_, forecast_total = NA_real_, forecast_residual = NA_real_)
       return(bind_rows(group, missing))
     }
     limit <- as.Date(paste0(max(lubridate::year(latest$time)) + 1L, "-12-01"))
@@ -335,16 +339,19 @@ coal_prepare_total_forecasts <- function(
         time = date, method = method, input_date = previous_date,
         total = total, known_sectors = sum(known$values),
         residual = residual, conflict = conflict,
+        forecast_total = if (is.na(actual)) total else NA_real_,
+        forecast_residual = if (is.na(actual)) residual else NA_real_,
         three_year_total = if (all(is.finite(trailing))) mean(trailing) else NA_real_
       )
       if (!is.na(actual)) return(rows)
       if (conflict && is.finite(total) && total >= 0) {
-        bounded <- known %>% mutate(values = values * total / sum(values))
-        missing_sectors <- setdiff(c(SECTOR_ELEC, SECTOR_OTHERS), bounded$sector)
+        missing_sectors <- setdiff(c(SECTOR_ELEC, SECTOR_OTHERS), known$sector)
         zeros <- group[rep(1, length(missing_sectors)), ] %>%
           mutate(time = date, sector = missing_sectors, values = 0)
-        provenance[[length(provenance)]]$method <<- paste0(method, "_bounded_to_total")
-        return(bind_rows(bounded, zeros))
+        provenance[[length(provenance)]]$method <<- paste0(method, "_raised_to_known_sectors")
+        provenance[[length(provenance)]]$total <<- sum(known$values)
+        provenance[[length(provenance)]]$residual <<- 0
+        return(bind_rows(known, zeros))
       }
       if (conflict) residual <- NA_real_
       if (is.finite(residual) && residual >= 0 && nrow(known) == 1L &&

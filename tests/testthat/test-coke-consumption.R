@@ -72,12 +72,64 @@ test_that("coke estimates split with evidenced zero power and are stable", {
       time <= as.Date("2026-05-01"))$resolved_value)
 })
 
+test_that("later reporting years preserve historical coke gap reconstruction", {
+  gap_dates <- seq(as.Date("2026-01-01"), as.Date("2026-05-01"), by = "month")
+  later_dates <- seq(as.Date("2026-07-01"), as.Date("2027-06-01"), by = "month")
+  for (absent in c(FALSE, TRUE)) {
+    fixture <- sweden_coke_fixture(absent)
+    baseline <- .resolve_coke_consumption(fixture$monthly, fixture$annual, fixture$industry)
+    extended_monthly <- bind_rows(fixture$monthly, coke_rows(later_dates, 120))
+    later_industry <- fixture$industry[rep(1, length(later_dates)), ] %>%
+      mutate(time = later_dates, values = 90)
+    extended <- .resolve_coke_consumption(extended_monthly, fixture$annual,
+      bind_rows(fixture$industry, later_industry))
+    before <- filter(baseline$diagnostics, time %in% gap_dates)
+    after <- filter(extended$diagnostics, time %in% gap_dates)
+    expect_true(all(before$eligible_gap & before$status == "estimated"))
+    expect_equal(after, before)
+    expect_equal(filter(extended$validation, target_start == min(gap_dates)),
+      filter(baseline$validation, target_start == min(gap_dates)))
+    expect_equal(filter(extended$monthly, time %in% gap_dates) %>% as.data.frame(),
+      filter(baseline$monthly, time %in% gap_dates) %>% as.data.frame(), ignore_attr = TRUE)
+    reported <- filter(extended$diagnostics, is.finite(original_value))
+    expect_equal(reported$resolved_value, reported$original_value)
+  }
+})
+
 test_that("long or unbounded coke gaps remain unresolved", {
   dates <- seq(as.Date("2024-01-01"), by = "month", length.out = 14)
   monthly <- coke_rows(dates, c(rep(100, 3), rep(NA_real_, 7), rep(100, 4)))
   result <- .resolve_coke_consumption(monthly, monthly[0, ], tibble())
   expect_true(all(is.na(filter(result$diagnostics, eligible_gap == FALSE,
     method == "unresolved")$resolved_value)))
+})
+
+test_that("unbounded and duplicate-blocked coke gaps remain ineligible", {
+  fixture <- sweden_coke_fixture()
+  gap_dates <- seq(as.Date("2026-01-01"), as.Date("2026-05-01"), by = "month")
+  trailing <- filter(fixture$monthly, time < as.Date("2026-06-01"))
+  leading <- filter(fixture$monthly, time >= min(gap_dates))
+  duplicate <- bind_rows(fixture$monthly,
+    filter(fixture$monthly, time == as.Date("2026-06-01")))
+  for (monthly in list(trailing, leading, duplicate)) {
+    result <- .resolve_coke_consumption(monthly, fixture$annual, fixture$industry)
+    gap <- filter(result$diagnostics, time %in% gap_dates)
+    expect_equal(nrow(gap), 5L)
+    expect_false(any(gap$eligible_gap))
+    expect_true(all(is.na(gap$resolved_value)))
+    expect_true(all(gap$status == "unresolved"))
+  }
+})
+
+test_that("eligible coke gaps require enough historical validation evidence", {
+  fixture <- sweden_coke_fixture()
+  monthly <- filter(fixture$monthly, time >= as.Date("2025-01-01"))
+  result <- .resolve_coke_consumption(monthly, fixture$annual, fixture$industry)
+  gap <- filter(result$diagnostics, time >= as.Date("2026-01-01"),
+    time <= as.Date("2026-05-01"))
+  expect_true(all(gap$eligible_gap))
+  expect_true(all(is.na(gap$resolved_value)))
+  expect_true(all(gap$evidence == "fewer_than_three_matched_holdouts"))
 })
 
 test_that("coke totals without power evidence remain explicitly unallocated", {

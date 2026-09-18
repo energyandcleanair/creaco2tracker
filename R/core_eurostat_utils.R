@@ -209,6 +209,9 @@ fill_eu_from_countries_sum <- function(
   }
 
   # Combine all projections and take first available value for each combination
+  if (length(projected_results) == 0) {
+    return(data)
+  }
   final_projection <- bind_rows(projected_results) %>%
     group_by(across(all_of(group_cols))) %>%
     filter(!is.na(values)) %>%
