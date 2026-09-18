@@ -5,22 +5,25 @@
 #' coking deduction. An absent required balance is not a reported zero.
 #' @keywords internal
 coal_annual_energy <- function(x) {
+  resolved <- isTRUE(attr(x, "coal_coking_resolved"))
   keys <- c("iso2", "time", "siec", "unit")
   balances <- c("FC_E", "TI_E", "TI_CO_E", COAL_ANNUAL_POWER_BALANCES)
   x %>%
-    filter(iso2 %in% get_eu_iso2s(include_eu = TRUE),
-      siec %in% COAL_MONTHLY_GAP_FUELS, nrg_bal %in% balances) %>%
+    filter(siec %in% COAL_MONTHLY_GAP_FUELS, nrg_bal %in% balances) %>%
     group_by(across(all_of(c(keys, "nrg_bal")))) %>%
     summarise(values = if (n() == 1L) first(values) else NA_real_, .groups = "drop") %>%
     pivot_wider(names_from = nrg_bal, values_from = values) %>%
     add_missing_cols(balances) %>%
     mutate(
-      coking_required = siec == SIEC_HARD_COAL & (is.na(TI_E) | TI_E != 0),
+      TI_CO_E = if_else(!resolved & .coking_conflict(iso2, time, TI_CO_E),
+        NA_real_, TI_CO_E),
+      coking_required = siec == SIEC_HARD_COAL &
+        (is.na(TI_E) | TI_E != 0 | (!is.na(TI_CO_E) & TI_CO_E != 0)),
       coking = if_else(coking_required, TI_CO_E, 0),
       energy = FC_E + TI_E - (1 - HARDCOAL_COKING_RATE_FACTOR) * coking,
       electricity = if_else(TI_E == 0 & !is.na(TI_E), 0,
         TI_EHG_MAPE_E + TI_EHG_MAPCHP_E),
-      energy = if_else(FC_E >= 0 & TI_E >= 0 & coking >= 0 & energy >= 0,
+      energy = if_else(FC_E >= 0 & TI_E >= 0 & coking >= 0 & coking <= TI_E & energy >= 0,
         energy, NA_real_),
       electricity = if_else(electricity >= 0 & (is.na(energy) | electricity <= energy),
         electricity, NA_real_),
@@ -190,6 +193,8 @@ coal_allocate_annual <- function(annual, monthly) {
 #'
 #' Complete totals are forecast from original history only. Allocated annual
 #' observations retain their provenance and are never regression training rows.
+#' Forecast totals below known sector consumption are raised to the known sum.
+#' Diagnostics retain the original forecast and shortfall and flag the conflict.
 #' @keywords internal
 coal_prepare_total_forecasts <- function(
   x, date_to, diagnostics_folder = NULL,
@@ -241,7 +246,8 @@ coal_prepare_total_forecasts <- function(
         input_date = conflict_date, total = if (valid_total) total else NA_real_,
         known_sectors = sum(rows$values[rows$values >= 0], na.rm = TRUE),
         residual = sum(rows$values[rows$values < 0], na.rm = TRUE),
-        conflict = TRUE, three_year_total = NA_real_
+        conflict = TRUE, three_year_total = NA_real_,
+        forecast_total = NA_real_, forecast_residual = NA_real_
       )
       if (valid_total) {
         replacement <- rows %>% mutate(values = pmax(0, values))
@@ -279,7 +285,8 @@ coal_prepare_total_forecasts <- function(
       provenance[[length(provenance) + 1L]] <<- group[1, keys] %>% mutate(
         time = date, method = "recent_historical_split", input_date = reference$time[1],
         total = rows$values, known_sectors = 0, residual = rows$values,
-        conflict = FALSE, three_year_total = NA_real_
+        conflict = FALSE, three_year_total = NA_real_,
+        forecast_total = NA_real_, forecast_residual = NA_real_
       )
       group <- bind_rows(group %>% filter(time != date), replacement)
     }
@@ -299,7 +306,7 @@ coal_prepare_total_forecasts <- function(
       provenance[[length(provenance) + 1L]] <<- missing %>% select(all_of(keys), time) %>%
         mutate(method = "unresolved_no_total_history", input_date = as.Date(NA),
           total = NA_real_, known_sectors = 0, residual = NA_real_, conflict = FALSE,
-          three_year_total = NA_real_)
+          three_year_total = NA_real_, forecast_total = NA_real_, forecast_residual = NA_real_)
       return(bind_rows(group, missing))
     }
     limit <- as.Date(paste0(max(lubridate::year(latest$time)) + 1L, "-12-01"))
@@ -332,16 +339,19 @@ coal_prepare_total_forecasts <- function(
         time = date, method = method, input_date = previous_date,
         total = total, known_sectors = sum(known$values),
         residual = residual, conflict = conflict,
+        forecast_total = if (is.na(actual)) total else NA_real_,
+        forecast_residual = if (is.na(actual)) residual else NA_real_,
         three_year_total = if (all(is.finite(trailing))) mean(trailing) else NA_real_
       )
       if (!is.na(actual)) return(rows)
       if (conflict && is.finite(total) && total >= 0) {
-        bounded <- known %>% mutate(values = values * total / sum(values))
-        missing_sectors <- setdiff(c(SECTOR_ELEC, SECTOR_OTHERS), bounded$sector)
+        missing_sectors <- setdiff(c(SECTOR_ELEC, SECTOR_OTHERS), known$sector)
         zeros <- group[rep(1, length(missing_sectors)), ] %>%
           mutate(time = date, sector = missing_sectors, values = 0)
-        provenance[[length(provenance)]]$method <<- paste0(method, "_bounded_to_total")
-        return(bind_rows(bounded, zeros))
+        provenance[[length(provenance)]]$method <<- paste0(method, "_raised_to_known_sectors")
+        provenance[[length(provenance)]]$total <<- sum(known$values)
+        provenance[[length(provenance)]]$residual <<- 0
+        return(bind_rows(known, zeros))
       }
       if (conflict) residual <- NA_real_
       if (is.finite(residual) && residual >= 0 && nrow(known) == 1L &&
@@ -375,7 +385,7 @@ coal_prepare_total_forecasts <- function(
     bind_rows(group %>% filter(time %in% complete_dates), bind_rows(out))
   }) %>% bind_rows()
   result <- bind_rows(x %>% anti_join(selected, by = keys), projected)
-  for (name in c("coal_eu_repair_candidates", "coal_allocation")) {
+  for (name in c("coal_eu_repair_candidates", "coal_allocation", "coal_coking_provenance")) {
     attr(result, name) <- attr(x, name)
   }
   attr(result, "coal_separate_projection") <- selected

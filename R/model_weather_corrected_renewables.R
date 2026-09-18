@@ -549,7 +549,13 @@ get_weather_corrected_hydro <- function(
   # Get ENTSOE installed capacity data for hydro
   capacity_raw <- tryCatch(
     {
-      entsoe.get_installed_capacity(iso2s = iso2s, date_from = date_from, date_to = date_to) %>%
+      power_data_access_get_installed_capacity(
+        source = "entsoe",
+        iso2s = iso2s,
+        date_from = date_from,
+        date_to = date_to,
+        use_cache = use_cache
+      ) %>%
         filter(grepl("hydro", source, ignore.case = TRUE)) %>%
         mutate(year = lubridate::year(date)) %>%
         group_by(iso2, year) %>%
@@ -748,7 +754,10 @@ plot_corrected_vs_ember <- function(model_data_country, iso2, source_type, diagn
   # Get EMBER capacity data once
   ember_capacity_raw <- tryCatch(
     {
-      ember.get_installed_capacity(iso2s = iso2s) %>%
+      power_data_access_get_installed_capacity(
+        source = "ember",
+        iso2s = iso2s
+      ) %>%
         filter(grepl(source_type, source, ignore.case = TRUE)) %>%
         filter(date >= min(model_data_country$date))
     },
@@ -760,7 +769,11 @@ plot_corrected_vs_ember <- function(model_data_country, iso2, source_type, diagn
 
   entsoe_capacity_raw <- tryCatch(
     {
-      entsoe.get_installed_capacity(iso2s = iso2s, date_from = min(model_data_country$date)) %>%
+      power_data_access_get_installed_capacity(
+        source = "entsoe",
+        iso2s = iso2s,
+        date_from = min(model_data_country$date)
+      ) %>%
         filter(grepl(source_type, source, ignore.case = TRUE))
     },
     error = function(e) {

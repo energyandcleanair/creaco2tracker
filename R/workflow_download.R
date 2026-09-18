@@ -2,8 +2,7 @@ download_co2 <- function(
   date_from = "2015-01-01", use_cache = FALSE, version = NULL, iso2s =
     NULL
 ) {
-  creahelpers::api.get(
-    "api.energyandcleanair.org/emission/co2",
+  crea_data_access_get_co2(
     date_from = date_from,
     # The meaning of use_cache is different
     # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means
@@ -43,8 +42,7 @@ download_gas_demand <- function(
   # Remove null elements
   params <- purrr::compact(params)
 
-  creahelpers::api.get(
-    "api.energyandcleanair.org/energy/demand",
+  crea_data_access_get_demand(
     params = params,
     # The meaning of use_cache is different
     # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means
@@ -75,8 +73,7 @@ download_corrected_demand <- function(
   # Remove null elements
   params <- purrr::compact(params)
 
-  creahelpers::api.get(
-    "api.energyandcleanair.org/energy/demand",
+  crea_data_access_get_demand(
     params = params,
     # The meaning of use_cache is different
     # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means
@@ -119,7 +116,7 @@ download_thermal_efficiency <- function(region_id = NULL) {
   )
 
   # Create URL params
-  eff <- creahelpers::api.get("api.energyandcleanair.org/energy/iea_balance", params = params) %>%
+  eff <- crea_data_access_get_iea_balance(params = params) %>%
     mutate(value = value / 100) %>%
     select(region_id = iso2, product_raw, flow_raw, unit, year, value)
 
