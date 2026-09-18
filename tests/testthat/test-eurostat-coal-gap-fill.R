@@ -727,6 +727,96 @@ test_that("verified EU omission repairs are guarded against duplication", {
   expect_equal(filter(twice, iso2 == "EU")$value_co2_tonne, 120)
 })
 
+test_that("EU power corrections require an exact match to the reported country sum", {
+  original <- tibble::tibble(
+    iso2 = c("GR", "EU"), siec = SIEC_BROWN_COAL, nrg_bal = "TI_EHG_MAP",
+    unit = "THS_T", time = as.Date("2026-01-01"), values = 0
+  )
+  provenance <- tibble::tibble(
+    iso2 = "GR", siec = SIEC_BROWN_COAL, nrg_bal = "TI_EHG_MAP",
+    unit = "THS_T", time = as.Date("2026-01-01"), original_value = 0,
+    filled_value = 10, component_status = "reported_inconsistent"
+  )
+  local_mocked_bindings(
+    get_eu_iso2s = function(include_eu = FALSE) "GR",
+    .package = "creaco2tracker"
+  )
+
+  verified <- .coal_detect_eu_omissions(original, original, provenance)
+  mismatched <- .coal_detect_eu_omissions(
+    original %>% mutate(values = if_else(iso2 == "EU", 1, values)),
+    original,
+    provenance
+  )
+  absent <- .coal_detect_eu_omissions(
+    original %>% filter(iso2 != "EU"),
+    original,
+    provenance
+  )
+
+  expect_true(verified$verified)
+  expect_equal(verified$contribution, 10)
+  expect_equal(verified$repair_sector, SECTOR_ELEC)
+  expect_false(mismatched$verified)
+  expect_false(absent$verified)
+})
+
+test_that("verified EU power corrections preserve total by reducing others", {
+  candidates <- tibble::tibble(
+    contributor_iso2 = "GR", siec = SIEC_BROWN_COAL, nrg_bal = "TI_EHG_MAP",
+    unit = "THS_T", time = as.Date("2026-01-01"), contribution = 10,
+    repair_sector = SECTOR_ELEC, eu_value = 100, reported_country_sum = 100,
+    source_difference = 0, tolerance = 0.001, verified = TRUE
+  )
+  converted <- tidyr::crossing(
+    iso2 = c("GR", "EU"),
+    sector = c(SECTOR_ELEC, SECTOR_OTHERS)
+  ) %>%
+    mutate(
+      siec = SIEC_BROWN_COAL, time = as.Date("2026-01-01"), unit = "THS_T",
+      fuel = FUEL_COAL,
+      value_co2_tonne = case_when(
+        iso2 == "GR" & sector == SECTOR_ELEC ~ 20,
+        iso2 == "GR" ~ 5,
+        iso2 == "EU" & sector == SECTOR_ELEC ~ 100,
+        TRUE ~ 40
+      )
+    )
+
+  result <- apply_verified_coal_eu_repairs(converted, candidates)
+  repeated <- apply_verified_coal_eu_repairs(result, candidates)
+
+  expect_equal(
+    result %>% filter(iso2 == "EU", sector == SECTOR_ELEC) %>% pull(value_co2_tonne),
+    120
+  )
+  expect_equal(
+    result %>% filter(iso2 == "EU", sector == SECTOR_OTHERS) %>% pull(value_co2_tonne),
+    20
+  )
+  expect_equal(sum(filter(result, iso2 == "EU")$value_co2_tonne), 140)
+  expect_equal(repeated$value_co2_tonne, result$value_co2_tonne)
+})
+
+test_that("EU power corrections require both sector rows", {
+  candidates <- tibble::tibble(
+    contributor_iso2 = "GR", siec = SIEC_BROWN_COAL, nrg_bal = "TI_EHG_MAP",
+    unit = "THS_T", time = as.Date("2026-01-01"), contribution = 10,
+    repair_sector = SECTOR_ELEC, eu_value = 100, reported_country_sum = 100,
+    source_difference = 0, tolerance = 0.001, verified = TRUE
+  )
+  converted <- tibble::tribble(
+    ~iso2, ~sector, ~siec, ~time, ~unit, ~fuel, ~value_co2_tonne,
+    "GR", SECTOR_ELEC, SIEC_BROWN_COAL, as.Date("2026-01-01"), "THS_T", FUEL_COAL, 20,
+    "EU", SECTOR_ELEC, SIEC_BROWN_COAL, as.Date("2026-01-01"), "THS_T", FUEL_COAL, 100
+  )
+
+  result <- apply_verified_coal_eu_repairs(converted, candidates)
+
+  expect_equal(filter(result, iso2 == "EU")$value_co2_tonne, 100)
+  expect_false(attr(result, "coal_eu_emissions_repairs")$applied)
+})
+
 test_that("missing coal components retain visible partial aggregates with diagnostics", {
   components <- tidyr::crossing(
     iso2 = "SE", date = as.Date("2025-01-01"), unit = "t",
