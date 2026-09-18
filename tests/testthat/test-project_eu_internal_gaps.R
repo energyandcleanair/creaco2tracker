@@ -179,8 +179,13 @@ test_that("fill_eu_internal_gaps fills internal gaps created by forecast expansi
 })
 
 test_that("project_until_now wires EU internal-gap fill around generic forecast", {
+  orchestration_path <- testthat::test_path(
+    "..", "..", "R", "model_project_orchestration.R"
+  )
+  skip_if_not(file.exists(orchestration_path), "Requires a source checkout")
+
   orchestration_source <- paste(
-    readLines(testthat::test_path("..", "..", "R", "model_project_orchestration.R")),
+    readLines(orchestration_path),
     collapse = "\n"
   )
 
