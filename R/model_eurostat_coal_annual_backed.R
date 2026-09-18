@@ -378,18 +378,19 @@ COAL_ANNUAL_POWER_BALANCES <- c("TI_EHG_MAPE_E", "TI_EHG_MAPCHP_E")
     consumption <- reported_consumption$reported_value[
       match(year_dates, reported_consumption$time)
     ]
-    if (!is.null(ratio) && all(!is.na(consumption[replaceable]))) {
+    eligible <- replaceable & year_dates <= country_cutoff & is.finite(consumption)
+    if (!is.null(ratio) && any(eligible)) {
       return(tibble::tibble(
         iso2 = iso2,
         siec = siec,
         nrg_bal = nrg_bal,
         unit = unit,
-        time = year_dates[replaceable],
-        original_value = original[replaceable],
-        filled_value = pmax(0, consumption[replaceable] * tail(ratio, 1)),
-        replace_existing = !is.na(values[replaceable]),
+        time = year_dates[eligible],
+        original_value = original[eligible],
+        filled_value = pmax(0, consumption[eligible] * tail(ratio, 1)),
+        replace_existing = !is.na(values[eligible]),
         component_status = if_else(
-          !is.na(original[replaceable]), "reported_inconsistent", "missing"
+          !is.na(original[eligible]), "reported_inconsistent", "missing"
         ),
         annual_method = "previous_year_share_unconstrained",
         annual_input_years = paste(history$year, collapse = ","),
@@ -567,6 +568,14 @@ COAL_ANNUAL_POWER_BALANCES <- c("TI_EHG_MAPE_E", "TI_EHG_MAPCHP_E")
 }
 
 #' Fill long monthly coal gaps from reported annual balances
+#'
+#' Reported annual anchors allocate residuals across all twelve months before
+#' predictions are restricted to the country's monthly coverage. Without a
+#' current-year anchor, stable historical shares estimate eligible power inputs
+#' from each month's finite reported consumption within that coverage. Missing
+#' consumption in other months does not block these estimates. Reported power
+#' zeros qualify for replacement only under the existing power-dominance evidence
+#' checks, and their original values remain in the reconstruction diagnostics.
 #'
 #' @keywords internal
 fill_raw_coal_annual_backed <- function(monthly, annual) {

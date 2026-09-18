@@ -16,6 +16,50 @@ coal_annual_rows <- function(iso2, siec, nrg_bal, years, values, unit = "THS_T")
   )
 }
 
+greece_current_year_coal_fixture <- function(
+  explicit_future = FALSE,
+  missing_consumption_month = NA_integer_,
+  extend_to_2027 = FALSE
+) {
+  history_years <- 2023:2025
+  current_dates <- seq(as.Date("2026-01-01"), as.Date("2026-06-01"), by = "month")
+  current_consumption <- c(100, 110, 120, 130, 140, 150)
+  if (!is.na(missing_consumption_month)) {
+    current_consumption[missing_consumption_month] <- NA_real_
+  }
+  monthly <- bind_rows(
+    coal_rows("GR", SIEC_BROWN_COAL, "GID_CAL", current_dates, current_consumption),
+    coal_rows("GR", SIEC_BROWN_COAL, "TI_EHG_MAP", current_dates, rep(0, 6))
+  )
+  if (explicit_future) {
+    future_dates <- seq(as.Date("2026-07-01"), as.Date("2026-12-01"), by = "month")
+    monthly <- bind_rows(
+      monthly,
+      coal_rows("GR", SIEC_BROWN_COAL, "GID_CAL", future_dates, rep(NA_real_, 6)),
+      coal_rows("GR", SIEC_BROWN_COAL, "TI_EHG_MAP", future_dates, rep(NA_real_, 6))
+    )
+  }
+  if (extend_to_2027) {
+    later_dates <- seq(as.Date("2027-01-01"), as.Date("2027-06-01"), by = "month")
+    monthly <- bind_rows(
+      monthly,
+      coal_rows("GR", SIEC_BROWN_COAL, "GID_CAL", later_dates, rep(80, 6)),
+      coal_rows("GR", SIEC_BROWN_COAL, "TI_EHG_MAP", later_dates, rep(70, 6))
+    )
+  }
+  annual <- bind_rows(
+    coal_annual_rows("GR", SIEC_BROWN_COAL, "IC_CAL", history_years, rep(1200, 3)),
+    coal_annual_rows("GR", SIEC_BROWN_COAL, "TI_E", history_years, rep(1080, 3)),
+    coal_annual_rows(
+      "GR", SIEC_BROWN_COAL, "TI_EHG_MAPE_E", history_years, rep(540, 3)
+    ),
+    coal_annual_rows(
+      "GR", SIEC_BROWN_COAL, "TI_EHG_MAPCHP_E", history_years, rep(540, 3)
+    )
+  )
+  list(monthly = monthly, annual = annual, expected = current_consumption * 0.9)
+}
+
 test_that("coal gap filling interpolates internal gaps without changing observations", {
   dates <- seq(as.Date("2024-01-01"), as.Date("2024-06-01"), by = "month")
   monthly <- coal_rows("SE", SIEC_HARD_COAL, "GID_CAL", dates, c(10, 20, NA, NA, 50, 60))
@@ -360,6 +404,108 @@ test_that("annual-backed rules recover a missing lignite year and its power spli
     filter(provenance, nrg_bal == "TI_EHG_MAP")$annual_method ==
       "transformation_identity"
   ))
+})
+
+test_that("current-year Greek lignite power is repaired through the country cutoff", {
+  fixture <- greece_current_year_coal_fixture()
+  local_mocked_bindings(
+    get_eu_iso2s = function(include_eu = FALSE) "GR",
+    .package = "creaco2tracker"
+  )
+
+  result <- fill_raw_coal_annual_backed(fixture$monthly, fixture$annual)
+  current_power <- result %>%
+    filter(nrg_bal == "TI_EHG_MAP", lubridate::year(time) == 2026) %>%
+    arrange(time)
+  provenance <- attr(result, "coal_annual_provenance") %>%
+    filter(nrg_bal == "TI_EHG_MAP", lubridate::year(time) == 2026) %>%
+    arrange(time)
+  split <- result %>%
+    filter(
+      lubridate::year(time) == 2026,
+      nrg_bal %in% c("GID_CAL", "TI_EHG_MAP")
+    ) %>%
+    mutate(
+      fuel = FUEL_COAL,
+      sector = if_else(nrg_bal == "TI_EHG_MAP", SECTOR_ELEC, SECTOR_ALL)
+    ) %>%
+    select(iso2, time, unit, siec, fuel, sector, values) %>%
+    eurostat_split_solid_elec_others()
+
+  expect_equal(current_power$time, seq(as.Date("2026-01-01"), by = "month", length.out = 6))
+  expect_equal(current_power$values, fixture$expected)
+  expect_equal(provenance$original_value, rep(0, 6))
+  expect_equal(provenance$component_status, rep("reported_inconsistent", 6))
+  expect_equal(provenance$annual_method, rep("previous_year_share_unconstrained", 6))
+  expect_equal(provenance$annual_input_years, rep("2023,2024,2025", 6))
+  expect_equal(provenance$profile_method, rep("same_month_reported_consumption", 6))
+  expect_true(all(current_power$time <= as.Date("2026-06-01")))
+  expect_equal(
+    split %>% group_by(time) %>% summarise(value = sum(values), .groups = "drop") %>%
+      pull(value),
+    c(100, 110, 120, 130, 140, 150)
+  )
+  expect_equal(
+    split %>% filter(sector == SECTOR_OTHERS) %>% arrange(time) %>% pull(values),
+    c(100, 110, 120, 130, 140, 150) - fixture$expected
+  )
+})
+
+test_that("current-year coal repair is independent of future row coverage", {
+  local_mocked_bindings(
+    get_eu_iso2s = function(include_eu = FALSE) "GR",
+    .package = "creaco2tracker"
+  )
+  variants <- list(
+    absent = greece_current_year_coal_fixture(),
+    explicit = greece_current_year_coal_fixture(explicit_future = TRUE),
+    extended = greece_current_year_coal_fixture(extend_to_2027 = TRUE)
+  )
+  repaired <- lapply(variants, function(fixture) {
+    result <- fill_raw_coal_annual_backed(fixture$monthly, fixture$annual)
+    list(
+      values = result %>%
+        filter(nrg_bal == "TI_EHG_MAP", time >= as.Date("2026-01-01"),
+          time <= as.Date("2026-06-01")) %>%
+        arrange(time) %>% pull(values),
+      provenance = attr(result, "coal_annual_provenance") %>%
+        filter(nrg_bal == "TI_EHG_MAP", time >= as.Date("2026-01-01"),
+          time <= as.Date("2026-06-01")) %>%
+        arrange(time) %>%
+        select(time, original_value, filled_value, component_status, annual_method,
+          annual_input_years, profile_method, profile_input_years)
+    )
+  })
+
+  expect_equal(repaired$explicit, repaired$absent)
+  expect_equal(repaired$extended, repaired$absent)
+})
+
+test_that("current-year coal repair skips only months without consumption", {
+  fixture <- greece_current_year_coal_fixture(missing_consumption_month = 3)
+  local_mocked_bindings(
+    get_eu_iso2s = function(include_eu = FALSE) "GR",
+    .package = "creaco2tracker"
+  )
+
+  result <- fill_raw_coal_annual_backed(fixture$monthly, fixture$annual)
+  power <- result %>%
+    filter(nrg_bal == "TI_EHG_MAP", lubridate::year(time) == 2026) %>%
+    arrange(time)
+
+  expect_equal(power$values, c(fixture$expected[1:2], 0, fixture$expected[4:6]))
+  expect_equal(
+    attr(result, "coal_annual_provenance") %>%
+      filter(nrg_bal == "TI_EHG_MAP", lubridate::year(time) == 2026) %>%
+      pull(time),
+    power$time[-3]
+  )
+  repeated <- fill_raw_coal_annual_backed(result, fixture$annual)
+  expect_equal(
+    repeated %>% filter(nrg_bal == "TI_EHG_MAP", lubridate::year(time) == 2026) %>%
+      arrange(time) %>% pull(values),
+    power$values
+  )
 })
 
 test_that("failed annual coking policy leaves missing values explicit", {
