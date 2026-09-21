@@ -158,6 +158,22 @@ test_that(
   }
 )
 
+test_that("fill_eu_from_countries_sum preserves data without a valid proxy", {
+  data <- tibble(
+    iso2 = rep(c("DE", "FR", "IT", "EU"), each = 2),
+    sector = "all", siec = "C0100", nrg_bal = "GID_CAL", unit = "THS_T",
+    time = rep(as.Date(c("2024-01-01", "2024-02-01")), 4),
+    values = c(10, 20, 10, 20, 10, 20, 1000, NA_real_)
+  )
+
+  result <- fill_eu_from_countries_sum(
+    data, c("sector", "siec", "nrg_bal", "unit", "time"),
+    min_countries = 3, min_points = 1, max_rel_diff = 0.01
+  )
+
+  expect_equal(result, data)
+})
+
 test_that(
   "eurostat_split_elec_others preserves data when only 'all' sector is available",
   {

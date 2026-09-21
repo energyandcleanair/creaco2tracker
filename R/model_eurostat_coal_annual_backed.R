@@ -8,7 +8,7 @@ COAL_ANNUAL_POWER_BALANCES <- c("TI_EHG_MAPE_E", "TI_EHG_MAPCHP_E")
     SIEC_HARD_COAL, "GID_CAL", "partial", TRUE, "raw_balance_validation_only",
     SIEC_HARD_COAL, "GID_CAL", "long", TRUE, "raw_balance_validation_only",
     SIEC_HARD_COAL, "TI_EHG_MAP", "any", TRUE, "raw_balance_validation_only",
-    SIEC_HARD_COAL, "TI_CO", "any", FALSE, "validation_failed",
+    SIEC_HARD_COAL, "TI_CO", "any", FALSE, "handled_by_coking_resolver",
     SIEC_BROWN_COAL, "GID_CAL", "partial", TRUE, "raw_balance_validation_only",
     SIEC_BROWN_COAL, "GID_CAL", "long", TRUE, "raw_balance_validation_only",
     SIEC_BROWN_COAL, "TI_EHG_MAP", "any", TRUE, "raw_balance_validation_only",
@@ -378,18 +378,19 @@ COAL_ANNUAL_POWER_BALANCES <- c("TI_EHG_MAPE_E", "TI_EHG_MAPCHP_E")
     consumption <- reported_consumption$reported_value[
       match(year_dates, reported_consumption$time)
     ]
-    if (!is.null(ratio) && all(!is.na(consumption[replaceable]))) {
+    eligible <- replaceable & year_dates <= country_cutoff & is.finite(consumption)
+    if (!is.null(ratio) && any(eligible)) {
       return(tibble::tibble(
         iso2 = iso2,
         siec = siec,
         nrg_bal = nrg_bal,
         unit = unit,
-        time = year_dates[replaceable],
-        original_value = original[replaceable],
-        filled_value = pmax(0, consumption[replaceable] * tail(ratio, 1)),
-        replace_existing = !is.na(values[replaceable]),
+        time = year_dates[eligible],
+        original_value = original[eligible],
+        filled_value = pmax(0, consumption[eligible] * tail(ratio, 1)),
+        replace_existing = !is.na(values[eligible]),
         component_status = if_else(
-          !is.na(original[replaceable]), "reported_inconsistent", "missing"
+          !is.na(original[eligible]), "reported_inconsistent", "missing"
         ),
         annual_method = "previous_year_share_unconstrained",
         annual_input_years = paste(history$year, collapse = ","),
@@ -535,9 +536,29 @@ COAL_ANNUAL_POWER_BALANCES <- c("TI_EHG_MAPE_E", "TI_EHG_MAPCHP_E")
 .coal_detect_eu_omissions <- function(original, filled, annual_provenance) {
   if (nrow(annual_provenance) == 0) return(tibble::tibble())
   keys <- c("siec", "nrg_bal", "unit", "time")
-  contributors <- annual_provenance %>%
+  total_contributors <- annual_provenance %>%
     filter(nrg_bal == "GID_CAL", is.na(original_value), !is.na(filled_value)) %>%
-    select(contributor_iso2 = iso2, all_of(keys), contribution = filled_value)
+    transmute(
+      contributor_iso2 = iso2, across(all_of(keys)), contribution = filled_value,
+      repair_sector = NA_character_
+    )
+  power_contributors <- annual_provenance %>%
+    filter(
+      nrg_bal == "TI_EHG_MAP",
+      component_status == "reported_inconsistent",
+      original_value == 0,
+      !is.na(filled_value),
+      filled_value > 0
+    ) %>%
+    anti_join(
+      total_contributors,
+      by = c("iso2" = "contributor_iso2", "siec", "unit", "time")
+    ) %>%
+    transmute(
+      contributor_iso2 = iso2, across(all_of(keys)), contribution = filled_value,
+      repair_sector = SECTOR_ELEC
+    )
+  contributors <- bind_rows(total_contributors, power_contributors)
   if (nrow(contributors) == 0) return(tibble::tibble())
 
   provenance <- attr(original, "coal_gap_provenance")
@@ -567,6 +588,17 @@ COAL_ANNUAL_POWER_BALANCES <- c("TI_EHG_MAPE_E", "TI_EHG_MAPCHP_E")
 }
 
 #' Fill long monthly coal gaps from reported annual balances
+#'
+#' Reported annual anchors allocate residuals across all twelve months before
+#' predictions are restricted to the country's monthly coverage. Without a
+#' current-year anchor, stable historical shares estimate eligible power inputs
+#' from each month's finite reported consumption within that coverage. Missing
+#' consumption in other months does not block these estimates. Reported power
+#' zeros qualify for replacement only under the existing power-dominance evidence
+#' checks, and their original values remain in the reconstruction diagnostics.
+#' A reported EU power aggregate is adjusted only when it exactly matches the
+#' uncorrected country sum. The verified country correction then moves from the
+#' EU other-sector allocation to power, preserving total EU coal emissions.
 #'
 #' @keywords internal
 fill_raw_coal_annual_backed <- function(monthly, annual) {
@@ -717,9 +749,10 @@ apply_verified_coal_eu_repairs <- function(data, candidates) {
     return(data)
   }
   keys <- c("siec", "time", "unit")
+  if (!"repair_sector" %in% names(candidates)) candidates$repair_sector <- NA_character_
   verified <- candidates %>%
     filter(verified) %>%
-    distinct(contributor_iso2, across(all_of(keys)))
+    distinct(contributor_iso2, across(all_of(keys)), repair_sector)
   if (!is.null(prior_repairs) && nrow(prior_repairs) > 0) {
     # A replay of the same verified contribution must be idempotent.
     already_applied <- prior_repairs %>% filter(applied) %>%
@@ -729,15 +762,29 @@ apply_verified_coal_eu_repairs <- function(data, candidates) {
     verified <- verified %>% anti_join(already_applied, by = c("contributor_iso2", keys))
   }
   if (nrow(verified) == 0) return(data)
-  contributions <- data %>%
+  matched <- data %>%
     inner_join(
       verified,
       by = c("iso2" = "contributor_iso2", "siec", "time", "unit")
-    ) %>%
-    group_by(siec, time, unit, fuel, sector) %>%
+    )
+  total_contributions <- matched %>%
+    filter(is.na(repair_sector)) %>%
+    mutate(contribution_co2_tonne = value_co2_tonne)
+  power_contributions <- matched %>%
+    filter(!is.na(repair_sector), sector == repair_sector) %>%
+    mutate(contribution_co2_tonne = value_co2_tonne)
+  power_offsets <- power_contributions %>%
+    mutate(
+      sector = SECTOR_OTHERS,
+      contribution_co2_tonne = -contribution_co2_tonne
+    )
+  contributions <- bind_rows(
+    total_contributions, power_contributions, power_offsets
+  ) %>%
+    group_by(siec, time, unit, fuel, sector, repair_sector) %>%
     summarise(
       contributor_count = n_distinct(iso2),
-      contribution_co2_tonne = sum_or_na(value_co2_tonne),
+      contribution_co2_tonne = sum_or_na(contribution_co2_tonne),
       contributors = paste(sort(unique(iso2)), collapse = ","),
       .groups = "drop"
     )
@@ -751,14 +798,22 @@ apply_verified_coal_eu_repairs <- function(data, candidates) {
     filter(iso2 == "EU") %>%
     select(all_of(repair_keys), eu_value_before = value_co2_tonne) %>%
     inner_join(contributions, by = repair_keys) %>%
+    group_by(siec, time, unit, fuel, repair_sector) %>%
     mutate(
-      applied = !is.na(eu_value_before) & !is.na(contribution_co2_tonne),
+      repair_complete = is.na(repair_sector) | (
+        all(c(SECTOR_ELEC, SECTOR_OTHERS) %in% sector) &&
+          all(!is.na(eu_value_before)) &&
+          all(!is.na(contribution_co2_tonne))
+      ),
+      applied = repair_complete & !is.na(eu_value_before) &
+        !is.na(contribution_co2_tonne),
       eu_value_after = if_else(
         applied,
         eu_value_before + contribution_co2_tonne,
         eu_value_before
       )
-    )
+    ) %>%
+    ungroup()
   applied <- eu_rows %>% filter(applied)
   if (nrow(applied) > 0) {
     data <- data %>%

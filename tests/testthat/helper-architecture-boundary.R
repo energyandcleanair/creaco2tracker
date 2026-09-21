@@ -30,6 +30,10 @@ architecture_get_boundary_config <- function() {
       )]
     ),
     client_files = sort(all_r_files[grepl(layer_file_patterns$client, all_r_files, perl = TRUE)]),
+    source_boundary_files = sort(all_r_files[
+      !grepl(layer_file_patterns$client, all_r_files, perl = TRUE) &
+        !grepl(layer_file_patterns$access, all_r_files, perl = TRUE)
+    ]),
     front_layer_files = c(
       "model_co2.R",
       "model_demand_components.R",
@@ -59,6 +63,15 @@ architecture_get_boundary_config <- function() {
         ",
       "eurostat::get_eurostat\\s*\\(
         "
+    ),
+    forbidden_source_patterns = c(
+      "creahelpers::api.get\\s*\\(",
+      "entsoe\\.get_(power_generation|installed_capacity)\\s*\\(",
+      "ember\\.get_(power_generation|installed_capacity)\\s*\\(",
+      "agsi\\.get_storage_change\\s*\\(",
+      "get_eurostat_from_code\\s*\\(",
+      "eurostat::get_eurostat\\s*\\(",
+      "(?:utils::)?download\\.file\\s*\\("
     )
   )
 }

@@ -59,6 +59,44 @@ eurostat_data_access_get_indprod <- function(
 }
 
 
+#' Fetch a Eurostat dataset through the package client
+#'
+#' This is the data-access boundary for model and research code that needs a
+#' Eurostat table not covered by a more specialised access function.
+#'
+#' @param code Eurostat dataset code.
+#' @param iso2s Optional ISO2 filter.
+#' @param use_cache Whether to use the source-level cache.
+#' @param filters Optional Eurostat dimension filters.
+#'
+#' @return Raw Eurostat data.
+#' @keywords internal
+eurostat_data_access_get_dataset <- function(
+  code,
+  iso2s = NULL,
+  use_cache = TRUE,
+  filters = NULL
+) {
+  get_eurostat_from_code(
+    code = code,
+    iso2s = iso2s,
+    use_cache = use_cache,
+    filters = filters
+  )
+}
+
+
+#' Fetch Eurostat physical energy-flow accounts
+#'
+#' @param use_cache Whether to use the source-level cache.
+#'
+#' @return Raw `env_ac_pefasu` Eurostat data.
+#' @keywords internal
+eurostat_data_access_get_pefasu <- function(use_cache = TRUE) {
+  eurostat_data_access_get_dataset("env_ac_pefasu", use_cache = use_cache)
+}
+
+
 #' Collect oil consumption data from EUROSTAT
 #'
 #' @param use_cache Whether to use cached data

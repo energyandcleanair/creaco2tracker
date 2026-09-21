@@ -98,13 +98,48 @@ test_that("fuel total forecasts do not train on a changing unallocated residual"
   known$values <- 11
   result <- coal_prepare_total_forecasts(bind_rows(x, known), as.Date("2026-01-01"))
   expect_equal(filter(result, time == as.Date("2026-01-01"),
-    sector == SECTOR_ELEC)$values, 10)
+    sector == SECTOR_ELEC)$values, 11)
   expect_equal(filter(result, time == as.Date("2026-01-01"),
     sector == SECTOR_OTHERS)$values, 0)
   interrupted <- x
   interrupted$values[6] <- NA_real_
   result <- coal_prepare_total_forecasts(interrupted, as.Date("2026-06-01"))
   expect_true(is.na(filter(result, time == as.Date("2025-06-01"))$values))
+})
+
+test_that("forecast conflicts raise totals while preserving either known sector", {
+  history <- tibble(iso2 = "DE", siec = SIEC_BROWN_COAL_BRIQUETTES, fuel = FUEL_COAL,
+    unit = "THS_T", sector = SECTOR_UNKNOWN,
+    time = seq(as.Date("2023-01-01"), as.Date("2025-12-01"), by = "month"), values = 100)
+  diagnostics_folder <- tempfile("coal-forecasts-")
+  on.exit(unlink(diagnostics_folder, recursive = TRUE), add = TRUE)
+  for (method in c("previous_year", "three_year_average")) {
+    for (sector in c(SECTOR_ELEC, SECTOR_OTHERS)) {
+      for (value in c(90, 100, 110)) {
+        known <- history[1, ] %>% mutate(time = as.Date("2026-01-01"),
+          sector = .env$sector, values = value)
+        result <- coal_prepare_total_forecasts(bind_rows(history, known),
+          as.Date("2027-01-01"), diagnostics_folder, forecast_method = method)
+        current <- filter(result, time == known$time)
+        expect_equal(current$values[current$sector == sector], value)
+        expect_equal(current$values[current$sector != sector], max(100 - value, 0))
+        expect_equal(sum(current$values), max(100, value))
+        diagnostics <- attr(result, "coal_total_forecasts") %>% filter(time == known$time)
+        expect_equal(diagnostics$conflict, value > 100)
+        expect_equal(diagnostics$forecast_total, 100)
+        expect_equal(diagnostics$forecast_residual, 100 - value)
+        expect_equal(diagnostics$total, max(100, value))
+        expect_equal(diagnostics$residual, max(100 - value, 0))
+        expect_equal(diagnostics$method, paste0(method, "_total",
+          if (value > 100) "_raised_to_known_sectors" else ""))
+        # Neither ordinary nor revised forecasts become next year's history.
+        expect_true(all(is.na(filter(result, time == as.Date("2027-01-01"))$values)))
+        exported <- readr::read_csv(file.path(diagnostics_folder, "coal_total_forecasts.csv"),
+          show_col_types = FALSE) %>% filter(time == known$time)
+        expect_equal(exported, diagnostics, ignore_attr = TRUE)
+      }
+    }
+  }
 })
 
 test_that("annual-only forecasting includes an established zero power component", {

@@ -1,5 +1,21 @@
 # Release notes
 
+## creaco2tracker 1.4
+
+- Reconstructs supported gaps in hard-coal coking and coke consumption from validated country
+  history and industrial activity, while preserving reported observations and exposing the
+  evidence and validation used for each estimate.
+- Keeps historical coke reconstructions stable as later data arrive, and leaves long, unbounded,
+  duplicate, or insufficiently supported gaps unresolved.
+- Preserves known sector consumption when it exceeds a forecast total by raising the total and
+  retaining the original forecast and conflict diagnostics.
+- Repairs supported current-year coal-power allocations month by month, including Greek lignite
+  consumption when later months are unavailable.
+- Carries verified country power corrections into reported EU sector aggregates while preserving
+  total EU coal emissions.
+- Validates countries using complete, consecutive calendar years and routes external inputs
+  through dedicated data-access functions for more reliable testing and caching.
+
 ## creaco2tracker 1.3
 
 - Produces a more complete monthly coal-emissions history by filling gaps from annual Eurostat

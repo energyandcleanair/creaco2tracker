@@ -780,14 +780,7 @@ validate_co2_monthly <- function(co2, folder = "diagnostics") {
     rename(date = month)
 
 
-  url <- "https://datas.carbonmonitor.org/API/downloadFullDataset.php?source=carbon_eu"
-  filepath <- "data/CM_EU.csv"
-  if (!file.exists(filepath)) {
-    dir.create(dirname(filepath), showWarnings = FALSE, recursive = TRUE)
-    download.file(url, filepath)
-  }
-
-  co2_carbonmonitor <- read_csv(filepath) %>%
+  co2_carbonmonitor <- validation_data_access_get_carbon_monitor() %>%
     distinct(country, date, sector, .keep_all = TRUE)
 
   co2_validate <- bind_rows(
@@ -910,17 +903,7 @@ validate_co2_transport <- function(
       source = "EEA"
     )
 
-  url <- paste0(
-    "https://sdi.eea.europa.eu/webdav/datastore/public/eea_t",
-    "_national-emissions-reported_p_2024_v01_r00/CSV/UNFCCC_",
-    "v27.csv"
-  )
-  filepath <- file.path("data", basename(url))
-  if (!file.exists(filepath)) {
-    dir.create(dirname(filepath), showWarnings = FALSE, recursive = TRUE)
-    download.file(url, filepath)
-  }
-  eea_w_international <- read_csv(filepath) %>%
+  eea_w_international <- validation_data_access_get_eea_transport() %>%
     filter(.data[["Country_code"]] == "EUA") %>%
     filter(
       .data[["Sector_code"]] %in% c(

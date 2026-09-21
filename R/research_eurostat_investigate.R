@@ -240,7 +240,7 @@ investigate_coking_emissions <- function(yearly_solid) {
     rcrea::scale_y_zero()
 
 
-  yearly_gas <- get_eurostat_from_code(
+  yearly_gas <- eurostat_data_access_get_dataset(
     code = "nrg_cb_gas",
     use_cache = TRUE,
     filters = list(siec = "Coke oven gas")

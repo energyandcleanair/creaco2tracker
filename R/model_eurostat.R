@@ -56,6 +56,29 @@ get_eurostat_cons <- function(
     cons_raw_solid$monthly,
     cons_raw_solid$yearly
   )
+  industry <- eurostat_data_access_get_indprod(
+    use_cache = use_cache, data_masking = data_masking
+  )
+  coke_consumption <- .resolve_coke_consumption(
+    cons_raw_solid$monthly, cons_raw_solid$yearly, industry = industry
+  )
+  cons_raw_solid$monthly <- coke_consumption$monthly
+  coking <- .resolve_coal_coking(
+    cons_raw_solid$monthly, cons_raw_solid$yearly, industry = industry
+  )
+  cons_raw_solid$monthly <- coking$monthly
+  cons_raw_solid$yearly <- coking$yearly
+  if (!is_null_or_empty(diagnostics_folder)) {
+    readr::write_csv(coke_consumption$diagnostics,
+      file.path(diagnostics_folder, "coke_consumption_provenance.csv"))
+    readr::write_csv(coke_consumption$validation,
+      file.path(diagnostics_folder, "coke_consumption_validation.csv"))
+    readr::write_csv(coking$diagnostics,
+      file.path(diagnostics_folder, "coal_coking_provenance.csv"))
+    readr::write_csv(coking$validation,
+      file.path(diagnostics_folder, "coal_coking_validation.csv"))
+    write_coal_coking_diagnostic_plots(coking$diagnostics, diagnostics_folder)
+  }
   coal_eu_repair_candidates <- attr(
     cons_raw_solid$monthly,
     "coal_eu_repair_candidates"
@@ -117,6 +140,16 @@ get_eurostat_cons <- function(
       add_iso2() %>%
       select(iso2, sector, time, unit, siec, fuel, values)
   })
+  # A seasonal profile labelled reported must not contain coking imputations or
+  # the original unadjusted EU totals whose coking contribution was omitted.
+  disputed <- coking$diagnostics %>% filter(frequency == "monthly", conflict) %>%
+    select(iso2, time)
+  disputed_key <- paste(disputed$iso2, disputed$time)
+  disputed_row <- reported_solid$siec == SIEC_HARD_COAL &
+    reported_solid$nrg_bal == "TI_CO" &
+    paste(reported_solid$iso2, reported_solid$time) %in% disputed_key
+  reported_solid$values[disputed_row] <- NA_real_
+  attr(reported_solid, "coal_coking_resolved") <- TRUE
   attr(cons_monthly, "coal_reported_monthly") <- reported_solid %>%
     process_solid_monthly(pwr_generation) %>% eurostat_split_solid_elec_others()
 
@@ -140,7 +173,8 @@ get_eurostat_cons <- function(
   # Combine monthly and yearly data with cutoff filtering
   cons_combined <- log_timed_stage("combine_monthly_yearly_with_cutoff", {
     combine_monthly_yearly_with_cutoff(cons_yearly_monthly, cons_monthly) %>%
-      resolve_coal_unallocated_totals()
+      resolve_coal_unallocated_totals() %>%
+      resolve_coke_unallocated_totals()
   })
   coal_unallocated_sector <- attr(cons_combined, "coal_unallocated_sector")
   coal_downstream_completeness <- coal_downstream_completeness(
@@ -214,6 +248,7 @@ get_eurostat_cons <- function(
   attr(cons, "coal_downstream_completeness") <- coal_downstream_completeness
   attr(cons, "coal_unallocated_sector") <- coal_unallocated_sector
   attr(cons, "coal_allocation") <- coal_allocation
+  attr(cons, "coal_coking_provenance") <- coking$diagnostics
   return(cons)
 }
 
@@ -392,6 +427,24 @@ resolve_coal_unallocated_totals <- function(x, tolerance = 1e-6) {
 
   attr(result, "coal_unallocated_sector") <- stats
   result
+}
+
+#' Remove an annual unallocated coke total when monthly allocation is complete
+#'
+#' @keywords internal
+resolve_coke_unallocated_totals <- function(x) {
+  keys <- intersect(names(x), c("iso2", "time", "unit", "siec", "fuel"))
+  allocated <- x %>%
+    filter(siec == SIEC_COKE_OVEN_COKE, source == "monthly",
+      sector %in% c(SECTOR_ELEC, SECTOR_OTHERS), is.finite(values)) %>%
+    group_by(across(all_of(keys))) %>%
+    summarise(complete = all(c(SECTOR_ELEC, SECTOR_OTHERS) %in% sector), .groups = "drop") %>%
+    filter(complete) %>% select(-complete)
+  if (!nrow(allocated)) return(x)
+  x %>% anti_join(
+    allocated %>% mutate(sector = SECTOR_UNKNOWN, source = "yearly"),
+    by = c(keys, "sector", "source")
+  )
 }
 
 
