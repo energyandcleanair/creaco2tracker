@@ -3,7 +3,7 @@ The EU CO2 Emission Tracker is an initiative by the Centre for Research on Energ
 
 Live charts are available on [CREA's website](https://energyandcleanair.org/product/eu-co2-emission-tracker/).
 
-Latest methodology document is available [here](https://energyandcleanair.org/wp/wp-content/uploads/2026/01/CO2-methodology.pdf)
+Latest methodology document is available [here](https://energyandcleanair.org/product/eu-co2-emission-tracker/methodology/)
 
 For more details about the documentation for surpporting code:
 - [Revision analysis](./doc/revision-analysis.md)
