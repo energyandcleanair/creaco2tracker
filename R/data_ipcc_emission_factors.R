@@ -17,6 +17,7 @@
 #' @examples
 #' get_ipcc_emission_factors()
 get_ipcc_emission_factors <- function() {
+  on.exit(.pipeline_snapshot(returnValue(), "references", "ipcc_emission_factors"), add = TRUE)
   tibble::tribble(
     ~siec, ~co2_factor_t_per_TJ,
     SIEC_HARD_COAL, 92.8, # EFDB ID 110620

@@ -47,6 +47,7 @@ load_gcb <- function(source_name, region, ...) {
 
   filepath <- get_data_filepath("GCB2025v15_MtCO2_flat.csv")
   raw <- read_csv(filepath)
+  .pipeline_snapshot(raw, "validation", "gcb_decoded")
   gcb <- raw %>%
     select(iso3 = `ISO 3166-1 alpha-3`, Year, Total, Coal, Oil, Gas, Cement, Flaring, Other) %>%
     pivot_longer(-c(Year, iso3),
@@ -95,7 +96,8 @@ load_gcb <- function(source_name, region, ...) {
 load_carbonmonitor_raw <- function() {
   # Carbon Monitor EU snapshot from https://datas.carbonmonitor.org
   filepath <- get_data_filepath("CM_EU.csv.gz")
-  suppressWarnings(read_csv(filepath, col_types = cols()))
+  suppressWarnings(read_csv(filepath, col_types = cols())) %>%
+    .pipeline_snapshot("validation", tools::file_path_sans_ext(basename(filepath)))
 }
 
 # Load Carbon Monitor data
@@ -141,6 +143,7 @@ load_primap <- function(source_name, region, version = "2.6", ...) {
   with_mineral <- !grepl("excl", source_name, ignore.case = TRUE)
 
   suppressWarnings(read_csv(filepath, col_types = cols())) %>%
+    .pipeline_snapshot("validation", tools::file_path_sans_ext(basename(filepath))) %>%
     mutate(iso2 = countrycode(`area (ISO3)`, "iso3c", "iso2c",
       custom_match = c("EU27BX" = "EU")
     )) %>%
@@ -190,6 +193,7 @@ load_climatewatch_csv <- function(source_name, region, ...) {
 
   # Load and process data
   suppressWarnings(read_csv(filepath, col_types = cols())) %>%
+    .pipeline_snapshot("validation", tools::file_path_sans_ext(basename(filepath))) %>%
     filter(!grepl("Data source", iso)) %>%
     mutate(iso2 = countrycode(iso, "iso3c", "iso2c", custom_match = c("EUU" = "EU"))) %>%
     select(-iso) %>%

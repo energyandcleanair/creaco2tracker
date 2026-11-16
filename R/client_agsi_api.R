@@ -7,6 +7,7 @@ AGSI_COUNTRY_DAILY_CACHE_FILENAME <- "agsi_country_daily.parquet"
 
 
 .agsi_validate_bundle <- function(filepath) {
+  .pipeline_input_file(filepath, "agsi", "000_raw.parquet")
   dataset <- arrow::open_dataset(filepath, format = "parquet")
   required_columns <- c("country_code", "gas_day", "net_withdrawal")
   missing_columns <- setdiff(required_columns, dataset$schema$names)
@@ -127,6 +128,10 @@ agsi.get_storage_change <- function(date_from, date_to, iso2, use_cache = TRUE, 
     filepath = bundle_path,
     populate_fun = .agsi_download_bundle,
     consume_fun = function(filepath) {
+      .pipeline_input_file(filepath, "agsi", "000_raw.parquet")
+      if (!is.null(getOption("creaco2tracker.artifacts")$folder)) {
+        .pipeline_snapshot(arrow::read_parquet(filepath), "agsi", "010_decoded")
+      }
       .agsi_query_bundle(
         filepath = filepath,
         date_from = date_from,
@@ -135,7 +140,6 @@ agsi.get_storage_change <- function(date_from, date_to, iso2, use_cache = TRUE, 
       )
     },
     use_cache = use_cache,
-    is_fresh_fun = cache_file_modified_today,
     validate_fun = .agsi_validate_bundle
   ) %>%
     mutate(

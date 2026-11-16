@@ -1,72 +1,38 @@
-library(testthat)
-
-local_temp_cache_dir <- function() {
-  temp_dir <- tempfile("iea-client-test-")
-  dir.create(temp_dir, recursive = TRUE)
-  old_dir <- setwd(temp_dir)
-  list(temp_dir = temp_dir, old_dir = old_dir)
-}
-
-test_that("iea balance uses parquet cache and tempdir-backed misses", {
-  temp_cache <- local_temp_cache_dir()
-  on.exit(
-    {
-      setwd(temp_cache$old_dir)
-      unlink(temp_cache$temp_dir, recursive = TRUE)
-    },
-    add = TRUE
-  )
-
+test_that("IEA clients cache source CSV and decode on cache hits", {
+  cache <- withr::local_tempdir()
+  withr::local_options(creaco2tracker.cache_dir = cache)
   calls <- list()
-
-  local_mocked_bindings(
-    api.get = function(...) {
-      calls[[length(calls) + 1]] <<- list(...)
-      tibble::tibble(year = 2023, value = 1)
-    },
-    .package = "creahelpers"
-  )
-
-  result <- iea.get_balance(year_from = 2023, year_to = 2023, iso2 = "DE", use_cache = FALSE)
-  expect_length(list.files("cache", pattern = "^ieabalance_.*\\.parquet$"), 0)
-
-  cached_result <- iea.get_balance(year_from = 2023, year_to = 2023, iso2 = "DE", use_cache = TRUE)
-  cached_again <- iea.get_balance(year_from = 2023, year_to = 2023, iso2 = "DE", use_cache = TRUE)
-
-  expect_length(calls, 2)
-  expect_equal(result, tibble::tibble(year = 2023, value = 1))
-  expect_equal(cached_result, result)
-  expect_equal(cached_again, result)
-  expect_length(list.files("cache", pattern = "^ieabalance_.*\\.parquet$"), 1)
+  local_mocked_bindings(.raw_http_download = function(url, query, path, ...) {
+    calls[[length(calls) + 1L]] <<- list(url = url, query = query)
+    writeLines("year,value\n2023,2", path)
+  })
+  for (client in list(iea.get_balance, iea.get_conversion_factors)) {
+    first <- client(2023, 2023, "DE", use_cache = TRUE)
+    second <- client(2023, 2023, "DE", use_cache = TRUE)
+    fresh <- client(2023, 2023, "DE", use_cache = FALSE)
+    expect_identical(first, second)
+    expect_identical(first, fresh)
+    expect_equal(first$value, 2)
+  }
+  expect_length(calls, 4L)
+  expect_equal(calls[[1]]$query$country, "DE")
+  expect_equal(calls[[1]]$query$year_from, "2023")
+  expect_length(list.files(cache, recursive = TRUE, pattern = "csv$"), 2L)
+  expect_length(list.files(cache, recursive = TRUE, pattern = "parquet$"), 0L)
 })
 
-test_that("iea conversion factors use parquet cache", {
-  temp_cache <- local_temp_cache_dir()
-  on.exit(
-    {
-      setwd(temp_cache$old_dir)
-      unlink(temp_cache$temp_dir, recursive = TRUE)
-    },
-    add = TRUE
-  )
-
-  calls <- list()
-
-  local_mocked_bindings(
-    api.get = function(...) {
-      calls[[length(calls) + 1]] <<- list(...)
-      tibble::tibble(factor = 2)
-    },
-    .package = "creahelpers"
-  )
-
-  result <- iea.get_conversion_factors(year_from = 2023, year_to = 2023, iso2 = "DE", use_cache = FALSE)
-  cached_result <- iea.get_conversion_factors(year_from = 2023, year_to = 2023, iso2 = "DE", use_cache = TRUE)
-  cached_again <- iea.get_conversion_factors(year_from = 2023, year_to = 2023, iso2 = "DE", use_cache = TRUE)
-
-  expect_length(calls, 2)
-  expect_equal(result, tibble::tibble(factor = 2))
-  expect_equal(cached_result, result)
-  expect_equal(cached_again, result)
-  expect_length(list.files("cache", pattern = "^ieaconversion_.*\\.parquet$"), 1)
+test_that("fixed-year IEA inputs remain cached across calendar days", {
+  withr::local_options(creaco2tracker.cache_dir = withr::local_tempdir())
+  day <- as.Date("2026-01-01")
+  calls <- 0L
+  local_mocked_bindings(Sys.Date = function() day, .package = "base")
+  local_mocked_bindings(.raw_http_download = function(url, query, path, ...) {
+    calls <<- calls + 1L
+    writeLines("year,value\n2023,2", path)
+  })
+  first <- iea.get_conversion_factors(2023, 2023, "DE")
+  day <- day + 1
+  second <- iea.get_conversion_factors(2023, 2023, "DE")
+  expect_identical(first, second)
+  expect_equal(calls, 1L)
 })

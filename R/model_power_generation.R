@@ -131,9 +131,13 @@ get_power_generation <- function(
   # ---- Step 1: ENTSOE daily -> monthly ----
   entsoe_monthly <- .aggregate_entsoe_monthly(entsoe_daily)
 
+  .pipeline_snapshot(entsoe_monthly, "power_monthly")
+
   # ---- Step 2: monthly ratio with MAD outlier flagging, extended (ETS or last) ----
   ratio_monthly_raw <- .compute_ratio_monthly(entsoe_monthly, ember_monthly)
   ratio_monthly_raw <- .flag_outliers_mad(ratio_monthly_raw, threshold = mad_threshold)
+  .pipeline_snapshot(ratio_monthly_raw, "power_monthly_ratios")
+
   ratio_monthly_full <- .extend_ratio(
     ratio_monthly_raw,
     target_date = lubridate::floor_date(date_to, "month"),
@@ -142,8 +146,12 @@ get_power_generation <- function(
     method      = monthly_extend
   )
 
+  .pipeline_snapshot(ratio_monthly_full, "power_monthly_extended")
+
   # ---- Step 3: apply monthly scaling to ENTSOE daily ----
   scaled_step1 <- .apply_monthly_scaling(entsoe_daily, ratio_monthly_full)
+
+  .pipeline_snapshot(scaled_step1, "power_scaled")
 
   # ---- Step 4: Ember-only fallback. Triggered when ENTSOE has no meaningful
   # data for an (iso2, source) but Ember does (CY/MT absent from ENTSOE; SI/SK
@@ -168,10 +176,14 @@ get_power_generation <- function(
     scaled_step1 <- bind_rows(scaled_step1, fallback)
   }
 
+  .pipeline_snapshot(scaled_step1, "power_fallback")
+
   # ---- Step 5: yearly ratio (EMBER monthly -> EMBER yearly).
   # MAD outlier flagging applies; extension is always last-value carry-forward.
   ratio_yearly_raw <- .compute_ratio_yearly(ember_monthly, ember_yearly)
   ratio_yearly_raw <- .flag_outliers_mad(ratio_yearly_raw, threshold = mad_threshold)
+  .pipeline_snapshot(ratio_yearly_raw, "power_yearly_ratios")
+
   ratio_yearly_full <- .extend_ratio(
     ratio_yearly_raw,
     target_date = as.Date(paste0(year(date_to), "-01-01")),
@@ -179,8 +191,12 @@ get_power_generation <- function(
     method      = "last"
   )
 
+  .pipeline_snapshot(ratio_yearly_full, "power_yearly_extended")
+
   # ---- Step 6: apply yearly scaling to everything (ENTSOE-derived AND fallback) ----
   scaled_final <- .apply_yearly_scaling(scaled_step1, ratio_yearly_full)
+
+  .pipeline_snapshot(scaled_final, "power_reconciled")
 
   # ---- Step 7: re-attach country metadata, remap source names, finalise ----
   result <- scaled_final %>%

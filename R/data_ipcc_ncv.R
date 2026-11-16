@@ -14,6 +14,7 @@
 #' @examples
 #' get_ipcc_ncv()
 get_ipcc_ncv <- function() {
+  on.exit(.pipeline_snapshot(returnValue(), "references", "ipcc_ncv"), add = TRUE)
   tibble::tribble(
     ~siec, ~fuel, ~ncv_kjkg,
     SIEC_HARD_COAL, "Anthracite", 26700,

@@ -61,6 +61,9 @@ power_data_access_get_sources <- function(
       data_masking = data_masking
     )
 
+  .pipeline_snapshot(list(entsoe = entsoe_daily, ember_monthly = ember_monthly,
+    ember_yearly = ember_yearly), "power_inputs")
+
   list(
     entsoe_daily = entsoe_daily,
     ember_monthly = ember_monthly,

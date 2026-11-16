@@ -13,16 +13,15 @@ gas_data_access_get_entsog_flow <- function(
   verbose = FALSE,
   data_masking = NULL
 ) {
-  creahelpers::api.get(
+  .crea_raw_get(
     "https://api.russiafossiltracker.com/v0/entsogflow",
-    date_from = glue("{min(years)}-01-01}"),
-    date_to = glue("{max(years)}-12-31}"),
+    date_from = paste0(min(years), "-01-01"),
+    date_to = paste0(max(years), "-12-31"),
     type = "consumption,distribution,storage,crossborder,production",
     split_by = "year",
     verbose = verbose,
-    use_cache = TRUE,
-    refresh_cache = !use_cache,
-    cache_folder = creaco2tracker_cache_dir()
+    use_cache = use_cache,
+    stage = "entsog"
   ) %>%
     apply_source_data_mask(
       source_name = "entsog_flow_raw",

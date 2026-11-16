@@ -48,23 +48,31 @@ project_until_now <- function(
   co2_unprojected %>%
     filter(sector != SECTOR_UNKNOWN) %>%
     split_gas_to_elec_all() %>%
+    .pipeline_snapshot("projection_split") %>%
     project_until_now_elec(
       pwr_generation = pwr_generation, dts_month = dts_month, fill_mode =
         fill_mode
     ) %>%
+    .pipeline_snapshot("projection_elec") %>%
     project_until_now_gas(gas_demand = gas_demand, dts_month = dts_month, fill_mode = fill_mode) %>%
+    .pipeline_snapshot("projection_gas") %>%
     project_eu_from_countries(dts_month = dts_month, fill_mode = fill_mode) %>%
+    .pipeline_snapshot("projection_eu") %>%
     # We use industry for coal others
     project_until_now_coal_others(
       eurostat_indprod = eurostat_indprod, dts_month = dts_month,
       fill_mode = fill_mode
     ) %>%
+    .pipeline_snapshot("projection_coal") %>%
     fill_eu_internal_gaps() %>%
+    .pipeline_snapshot("projection_gaps") %>%
     # Then run projections
     project_until_now_forecast(dts_month = dts_month) %>%
+    .pipeline_snapshot("projection_forecast") %>%
     # Forecast expansion can introduce internal NA rows that did not exist when
     # the pre-forecast EU gap fill ran.
     fill_eu_internal_gaps() %>%
+    .pipeline_snapshot("projection_forecast_gaps") %>%
     # And detotalise, since data from total and other sectors may now overlap again
     bind_rows(unallocated) %>%
     bind_rows(separate) %>%

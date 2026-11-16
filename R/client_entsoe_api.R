@@ -12,19 +12,15 @@ entsoe.get_power_generation <- function(
   }
 
   base_url <- ifelse(use_local, "http://localhost:8080", "https://api.energyandcleanair.org")
-  pwr <- creahelpers::api.get(glue("{base_url}/energy/power_generation"),
+  pwr <- .crea_raw_get(glue("{base_url}/energy/power_generation"),
     date_from = date_from,
     date_to = date_to,
     aggregate_by = "country,source,date",
     country = paste(sort(iso2s_fetch), collapse = ","),
     data_source = "entsoe",
     split_by = "year",
-    # The meaning of use_cache is different
-    # for creahelpers, use_cache means whether or not to use memoise, and refresh_cache means
-    # whether or not to invalidate it
-    use_cache = TRUE,
-    refresh_cache = !use_cache,
-    cache_folder = creaco2tracker_cache_dir(),
+    use_cache = use_cache,
+    stage = "entsoe",
     verbose = TRUE
   )
 
@@ -38,6 +34,8 @@ entsoe.get_power_generation <- function(
       data_source = "entsoe"
     ) %>%
     bind_rows(pwr %>% filter(source != "Total"))
+
+  .pipeline_snapshot(pwr, "entsoe_totals")
 
   # Assume missing data is zero if the series ended with 0s (e.g. coal in Belgium)
   fill_with_zero_if_last_is_zero <- function(x) {
@@ -73,6 +71,8 @@ entsoe.get_power_generation <- function(
     ) %>%
     ungroup()
 
+
+  .pipeline_snapshot(pwr, "entsoe_completed")
 
   # add EU total if we have all EU countries, except Cyprus and Malta that are missing from ENTSOE
   if (all(setdiff(get_eu_iso2s(include_eu = FALSE), c("CY", "MT")) %in% pwr$iso2)) {
@@ -111,19 +111,15 @@ entsoe.get_installed_capacity <- function(
   }
 
   base_url <- ifelse(use_local, "http://localhost:8080", "https://api.energyandcleanair.org")
-  capacity <- creahelpers::api.get(glue("{base_url}/power/installed_capacity"),
+  capacity <- .crea_raw_get(glue("{base_url}/power/installed_capacity"),
     date_from = date_from,
     date_to = date_to,
     aggregate_by = "country,source,date",
     country = paste(iso2s, collapse = ","),
     data_source = "entsoe",
     split_by = "year",
-    # The meaning of use_cache is different
-    # for creahelpers, use_cache means whether or not to use memoise, and refresh
-    # cache means whether or not to invalidate it
-    use_cache = TRUE,
-    refresh_cache = !use_cache,
-    cache_folder = creaco2tracker_cache_dir(),
+    use_cache = use_cache && !refresh_cache,
+    stage = "entsoe",
     verbose = TRUE
   )
 

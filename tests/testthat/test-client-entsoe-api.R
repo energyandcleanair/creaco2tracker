@@ -17,11 +17,11 @@ test_that("entsoe.get_power_generation calls the API and recalculates totals", {
   )
 
   local_mocked_bindings(
-    `api.get` = function(endpoint, ...) {
+    `.crea_raw_get` = function(endpoint, ...) {
       api_calls[[length(api_calls) + 1]] <<- c(list(endpoint = endpoint), list(...))
       api_data
     },
-    .package = "creahelpers"
+    .package = "creaco2tracker"
   )
 
   result <- entsoe.get_power_generation(
@@ -39,8 +39,8 @@ test_that("entsoe.get_power_generation calls the API and recalculates totals", {
   expect_equal(api_calls[[1]]$country, "DE")
   expect_equal(api_calls[[1]]$aggregate_by, "country,source,date")
   expect_equal(api_calls[[1]]$data_source, "entsoe")
-  expect_true(api_calls[[1]]$use_cache)
-  expect_true(api_calls[[1]]$refresh_cache)
+  expect_false(api_calls[[1]]$use_cache)
+  expect_equal(api_calls[[1]]$stage, "entsoe")
 
   totals <- result %>%
     filter(.data$source == "Total") %>%
@@ -64,11 +64,11 @@ test_that("entsoe.get_installed_capacity calls the installed-capacity API", {
   )
 
   local_mocked_bindings(
-    `api.get` = function(endpoint, ...) {
+    `.crea_raw_get` = function(endpoint, ...) {
       api_calls[[length(api_calls) + 1]] <<- c(list(endpoint = endpoint), list(...))
       api_data
     },
-    .package = "creahelpers"
+    .package = "creaco2tracker"
   )
 
   result <- entsoe.get_installed_capacity(
@@ -84,7 +84,7 @@ test_that("entsoe.get_installed_capacity calls the installed-capacity API", {
   expect_equal(api_calls[[1]]$date_from, "2023-01-01")
   expect_equal(api_calls[[1]]$date_to, "2023-01-31")
   expect_equal(api_calls[[1]]$country, "DE")
-  expect_true(api_calls[[1]]$refresh_cache)
+  expect_equal(api_calls[[1]]$stage, "entsoe")
   expect_equal(result$value_mw, 1000)
   expect_equal(result$source, "Solar")
 })

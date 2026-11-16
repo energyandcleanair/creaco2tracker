@@ -222,12 +222,15 @@ add_ncv_iea <- function(x, diagnostics_folder = NULL, use_cache = TRUE, ...) {
 
   # Process conversion factors
   conversion <- process_conversion_factors(conversion_raw)
+  .pipeline_snapshot(conversion, "ncv_cleaned")
 
   # Calculate weighted means for missing values
   conversion_wmean <- calculate_weighted_means(conversion, x)
 
   # Fill missing conversion factors
   conversion_filled <- fill_missing_conversion_factors(conversion, conversion_wmean, x)
+
+  .pipeline_snapshot(conversion_filled, "ncv_filled")
 
   # Run comprehensive diagnostics if folder is provided
   if (!is_null_or_empty(diagnostics_folder)) {
@@ -267,6 +270,7 @@ add_ncv_iea_shared <- function(x, diagnostics_folder = NULL, use_cache = TRUE, .
 
   # Process conversion factors
   conversion <- process_conversion_factors(conversion_raw)
+  .pipeline_snapshot(conversion, "ncv_cleaned")
 
   # Calculate weighted means for missing values
   conversion_wmean <- calculate_weighted_means(conversion, x)
@@ -285,6 +289,8 @@ add_ncv_iea_shared <- function(x, diagnostics_folder = NULL, use_cache = TRUE, .
     distinct(iso2, siec, year = year(time)) %>%
     left_join(conversion_wmean) %>%
     mutate(source = "IEA (shared EU average)")
+
+  .pipeline_snapshot(conversion_filled, "ncv_filled")
 
   # Run comprehensive diagnostics if folder is provided
   if (!is_null_or_empty(diagnostics_folder)) {

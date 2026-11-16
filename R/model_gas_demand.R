@@ -117,6 +117,9 @@ get_gas_demand <- function(
   )
 
 
+  .pipeline_snapshot(list(consumption_distribution = consdist, apparent = apparent,
+    apparent_agsi = apparent_w_agsi), "gas_candidates")
+
   # Keep the best ones, and only those that match quality criteria
   gas_demand <- keep_best(
     consumption = bind_rows(
@@ -131,6 +134,8 @@ get_gas_demand <- function(
     use_cache = use_cache,
     data_masking = data_masking
   )
+
+  .pipeline_snapshot(gas_demand, "gas_selected")
 
   # Store raw gas demand for diagnostics
   gas_demand_raw <- gas_demand
@@ -150,7 +155,8 @@ get_gas_demand <- function(
     .generate_gas_diagnostics(
       gas_demand_raw = gas_demand_raw,
       gas_demand_corrected = if (correct_to_eurostat) gas_demand else NULL,
-      diagnostics_folder = diagnostics_folder
+      diagnostics_folder = diagnostics_folder,
+      use_cache = use_cache
     )
   }
 
@@ -453,6 +459,7 @@ keep_best <- function(
   }) %>%
     do.call(bind_rows, .)
 
+  .pipeline_snapshot(bests, "gas_scores")
   best <- bests %>%
     left_join(consumption_date_to) %>%
     filter(valid, count >= min_comparison_points) %>%
@@ -550,6 +557,7 @@ keep_best <- function(
     )
 
   # Join scale factors back to daily data and apply correction
+  .pipeline_snapshot(monthly_factors, "gas_factors")
   result <- gas_demand %>%
     mutate(
       year = lubridate::year(date),
@@ -586,18 +594,20 @@ keep_best <- function(
 #' @param gas_demand_raw Raw gas demand data (before correction)
 #' @param gas_demand_corrected Corrected gas demand data (NULL if no correction)
 #' @param diagnostics_folder Folder for diagnostics output
+#' @param use_cache Whether to reuse original Eurostat inputs.
 #'
 #' @keywords internal
 .generate_gas_diagnostics <- function(
   gas_demand_raw,
   gas_demand_corrected,
-  diagnostics_folder
+  diagnostics_folder,
+  use_cache = TRUE
 ) {
   log_info("Generating gas demand diagnostics...")
   create_dir(diagnostics_folder)
 
   # Get Eurostat data
-  eurostat <- get_eurostat_gas() %>%
+  eurostat <- get_eurostat_gas(use_cache = use_cache) %>%
     filter(type == "consumption")
 
   # Aggregate raw data to monthly
