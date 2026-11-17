@@ -20,7 +20,9 @@ requirements <- c(
                         dependencies = TRUE)$packages$system_packages)
 )
 installed <- pak::sysreqs_list_system_packages()
-missing <- setdiff(unique(requirements), installed$package[installed$status == "ii"])
+installed <- installed[installed$status == "ii", ]
+available <- c(installed$package, unlist(installed$provides))
+missing <- setdiff(unique(requirements), available)
 if (length(missing) > 0L) {
   stop(paste0("Add missing system dependencies to the Dockerfile apt-get layer: ",
               paste(sort(missing), collapse = ", ")), call. = FALSE)
