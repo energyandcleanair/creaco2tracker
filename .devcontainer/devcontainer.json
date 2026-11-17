@@ -1,10 +1,7 @@
 {
   "name": "R with pak and Posit binaries",
   "build": {
-    "dockerfile": "Dockerfile",
-    "args": {
-      "PPM_DISTRO": "bookworm"
-    }
+    "dockerfile": "Dockerfile"
   },
 
   "remoteUser": "rstudio",

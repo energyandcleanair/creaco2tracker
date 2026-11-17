@@ -1,10 +1,17 @@
 # syntax=docker/dockerfile:1.6
 
-FROM ghcr.io/rocker-org/devcontainer/tidyverse:4
+# Pinned by digest: Ubuntu 26.04 (resolute), R 4.6.2. Rocker's version tags carry no OS
+# suffix and move to new Ubuntu releases, so update the digest deliberately.
+FROM ghcr.io/rocker-org/devcontainer/tidyverse:4.6@sha256:19a7800a60cfb154158886794ea334b976ffb6a3764fca4d37935a5b4a42ddd6
 
-# For ubuntu 24.04 (noble) and R 4.4.x, use the following PPM URL:
-ARG PPM_DISTRO=noble
-ARG PPM_URL=https://packagemanager.posit.co/cran/__linux__/${PPM_DISTRO}/latest
+# The base image sets CRAN to the Posit Package Manager binary repository for its own
+# Ubuntu release. Binaries built for another release link against missing system
+# libraries, so stop the build if CRAN and /etc/os-release disagree.
+RUN . /etc/os-release \
+    && case "${CRAN}" in \
+        */__linux__/"${VERSION_CODENAME}"/*) ;; \
+        *) echo "CRAN=${CRAN} does not match Ubuntu ${VERSION_CODENAME}" >&2; exit 1 ;; \
+    esac
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bubblewrap \
@@ -32,16 +39,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mkdir -p /workspace /cache/pak/packages /cache/pak/metadata \
     && chown -R rstudio:rstudio /workspace /cache
 
-ENV CRAN=${PPM_URL}
-
 RUN Rscript -e 'options(repos = c(CRAN = Sys.getenv("CRAN"))); install.packages(c("remotes"))'
 
 WORKDIR /workspace
 COPY DESCRIPTION /workspace/DESCRIPTION
 
+# install_deps only warns when a package fails to install, so check that every
+# DESCRIPTION dependency (including creahelpers and rcrea) loads. The check runs in
+# the same layer so a failed install is never cached.
 RUN --mount=type=secret,id=github_pat \
     export GITHUB_PAT="$(cat /run/secrets/github_pat)" && \
-    Rscript -e 'options(repos = c(CRAN = Sys.getenv("CRAN")), Ncpus = 1); remotes::install_deps("/workspace", dependencies = TRUE, upgrade = "never", build = FALSE)'
+    Rscript -e 'options(repos = c(CRAN = Sys.getenv("CRAN")), Ncpus = 1); remotes::install_deps("/workspace", dependencies = TRUE, upgrade = "never", build = FALSE)' && \
+    Rscript -e ' \
+    pkgs <- setdiff(remotes::local_package_deps("/workspace", dependencies = TRUE), "R"); \
+    ok <- vapply(pkgs, function(pkg) tryCatch({ loadNamespace(pkg); TRUE }, \
+        error = function(e) { message(pkg, ": ", conditionMessage(e)); FALSE }), logical(1)); \
+    if (!all(ok)) { \
+        message("Packages missing or failing to load: ", paste(pkgs[!ok], collapse = ", ")); \
+        quit(status = 1) \
+    }; \
+    message("All ", length(pkgs), " DESCRIPTION dependencies load.")'
 
 RUN chown -R rstudio:rstudio /usr/local/lib/R/site-library /workspace
 
