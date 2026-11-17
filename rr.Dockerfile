@@ -6,15 +6,6 @@
 # releases, so update the digest deliberately.
 FROM docker.io/rocker/tidyverse:4.6@sha256:9241ac461c924334777dd3fb047c6e5e0fd1435a85acc171f1a32836861d0a69
 
-# The base image sets CRAN to the Posit Package Manager binary repository for its own
-# Ubuntu release. Binaries built for another release link against missing system
-# libraries, so stop the build if CRAN and /etc/os-release disagree.
-RUN . /etc/os-release \
-    && case "${CRAN}" in \
-        */__linux__/"${VERSION_CODENAME}"/*) ;; \
-        *) echo "CRAN=${CRAN} does not match Ubuntu ${VERSION_CODENAME}" >&2; exit 1 ;; \
-    esac
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bubblewrap \
     socat \
@@ -40,6 +31,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN mkdir -p /workspace /cache/pak/packages /cache/pak/metadata \
     && chown -R rstudio:rstudio /workspace /cache
+
+# The base image sets CRAN to the Posit Package Manager binary repository for its own
+# Ubuntu release. Binaries built for another release link against missing system
+# libraries, so stop the build if CRAN and /etc/os-release disagree.
+RUN . /etc/os-release \
+    && case "${CRAN}" in \
+        */__linux__/"${VERSION_CODENAME}"/*) ;; \
+        *) echo "CRAN=${CRAN} does not match Ubuntu ${VERSION_CODENAME}" >&2; exit 1 ;; \
+    esac
 
 RUN Rscript -e 'options(repos = c(CRAN = Sys.getenv("CRAN"))); install.packages(c("remotes"))'
 

@@ -1,5 +1,5 @@
 local({
-  ppm <- Sys.getenv("CRAN", unset = getOption("repos")[["CRAN"]])
+  ppm <- Sys.getenv("CRAN", unset = "https://packagemanager.posit.co/cran/latest")
 
   options(
     repos = c(CRAN = ppm),

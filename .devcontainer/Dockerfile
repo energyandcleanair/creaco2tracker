@@ -1,4 +1,5 @@
-# Pinned by digest: Ubuntu 26.04 (resolute), R 4.6.2, matching rr.Dockerfile.
+# Pinned by digest: Ubuntu 26.04 (resolute), R 4.6.2, the same OS and R as rr.Dockerfile.
+# This image is amd64 only, so on Apple silicon it runs under x86 emulation.
 FROM ghcr.io/rocker-org/devcontainer/tidyverse:4.6@sha256:19a7800a60cfb154158886794ea334b976ffb6a3764fca4d37935a5b4a42ddd6
 
 # The base image sets CRAN to the Posit Package Manager binary repository for its own
