@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1.6
 
-# Pinned by digest: Ubuntu 26.04 (resolute), R 4.6.2. Rocker's version tags carry no OS
-# suffix and move to new Ubuntu releases, so update the digest deliberately.
-FROM ghcr.io/rocker-org/devcontainer/tidyverse:4.6@sha256:19a7800a60cfb154158886794ea334b976ffb6a3764fca4d37935a5b4a42ddd6
+# Multi-arch (amd64 + arm64), so the image runs natively on Apple silicon rather than
+# under x86 emulation, where arrow crashes on load. Pinned by digest: Ubuntu 26.04
+# (resolute), R 4.6.2. Rocker's version tags carry no OS suffix and move to new Ubuntu
+# releases, so update the digest deliberately.
+FROM docker.io/rocker/tidyverse:4.6@sha256:9241ac461c924334777dd3fb047c6e5e0fd1435a85acc171f1a32836861d0a69
 
 # The base image sets CRAN to the Posit Package Manager binary repository for its own
 # Ubuntu release. Binaries built for another release link against missing system
