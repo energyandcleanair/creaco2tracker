@@ -1,10 +1,16 @@
-FROM ghcr.io/rocker-org/devcontainer/tidyverse:4
+# Pinned by digest: Ubuntu 26.04 (resolute), R 4.6.2, the same OS and R as rr.Dockerfile.
+# This image is amd64 only, so on Apple silicon it runs under x86 emulation.
+FROM ghcr.io/rocker-org/devcontainer/tidyverse:4.6@sha256:19a7800a60cfb154158886794ea334b976ffb6a3764fca4d37935a5b4a42ddd6
 
-ARG PPM_DISTRO=bookworm
-ARG PPM_URL=https://packagemanager.posit.co/cran/__linux__/${PPM_DISTRO}/latest
+# The base image sets CRAN to the Posit Package Manager binary repository for its own
+# Ubuntu release. Stop the build if CRAN and /etc/os-release disagree.
+RUN . /etc/os-release \
+    && case "${CRAN}" in \
+        */__linux__/"${VERSION_CODENAME}"/*) ;; \
+        *) echo "CRAN=${CRAN} does not match Ubuntu ${VERSION_CODENAME}" >&2; exit 1 ;; \
+    esac
 
-ENV CRAN=${PPM_URL}
-ENV PKG_CRAN_MIRROR=${PPM_URL}
+ENV PKG_CRAN_MIRROR=${CRAN}
 ENV PKG_SYSREQS=true
 ENV PKG_SYSREQS_SUDO=true
 ENV PKG_SYSREQS_RSPM_URL=https://packagemanager.posit.co

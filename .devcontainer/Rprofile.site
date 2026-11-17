@@ -1,5 +1,5 @@
 local({
-  ppm <- Sys.getenv("CRAN", unset = "https://packagemanager.posit.co/cran/__linux__/bookworm/latest")
+  ppm <- Sys.getenv("CRAN", unset = "https://packagemanager.posit.co/cran/latest")
 
   options(
     repos = c(CRAN = ppm),
