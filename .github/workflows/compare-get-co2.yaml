@@ -19,6 +19,7 @@ on:
       - 'scripts/compare_lib/*.R'
       - 'rr'
       - 'rr.Dockerfile'
+      - 'scripts/install-image-deps.R'
       - 'DESCRIPTION'
       - 'NAMESPACE'
       - 'tests/testthat/*.R'
@@ -78,7 +79,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .tmp/rr-image/creaco2tracker-rr.tar
-          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION') }}
+          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION', 'scripts/install-image-deps.R') }}
 
       - name: Test podman installed
         shell: bash
@@ -179,7 +180,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .tmp/rr-image/creaco2tracker-rr.tar
-          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION') }}
+          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION', 'scripts/install-image-deps.R') }}
 
       - name: Load rr runtime image
         shell: bash
@@ -278,7 +279,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .tmp/rr-image/creaco2tracker-rr.tar
-          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION') }}
+          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION', 'scripts/install-image-deps.R') }}
 
       - name: Load rr runtime image
         shell: bash
@@ -377,7 +378,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .tmp/rr-image/creaco2tracker-rr.tar
-          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION') }}
+          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION', 'scripts/install-image-deps.R') }}
 
       - name: Load rr runtime image
         shell: bash
@@ -455,7 +456,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .tmp/rr-image/creaco2tracker-rr.tar
-          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION') }}
+          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION', 'scripts/install-image-deps.R') }}
 
       - name: Load rr runtime image
         shell: bash
@@ -535,7 +536,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .tmp/rr-image/creaco2tracker-rr.tar
-          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION') }}
+          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION', 'scripts/install-image-deps.R') }}
 
       - name: Load rr runtime image
         shell: bash
