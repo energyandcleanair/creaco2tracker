@@ -645,6 +645,11 @@ data_masking_as_of_batch <- function(
 #' @return Data frame with unavailable rows removed.
 #' @export
 apply_source_data_mask <- function(x, source_name, data_masking = NULL) {
+  on.exit({
+    stage <- if (startsWith(source_name, "eurostat")) "eurostat_masked" else
+      if (grepl("power", source_name)) "power_inputs" else "gas_inputs"
+    .pipeline_snapshot(returnValue(), stage, source_name)
+  }, add = TRUE)
   if (is.null(data_masking)) {
     return(x)
   }

@@ -2,6 +2,9 @@ log_timed_stage <- function(stage_name, expr) {
     started_at <- Sys.time()
     log_info(glue::glue("START {stage_name}"))
     value <- expr
+    if (stage_name %in% names(PIPELINE_ARTIFACT_STAGES)) {
+      .pipeline_snapshot(value, stage_name)
+    }
     ended_at <- Sys.time()
     elapsed_s <- as.numeric(difftime(ended_at, started_at, units = "secs"))
     log_info(glue::glue("DONE {stage_name} ({round(elapsed_s, 2)}s)"))

@@ -57,6 +57,7 @@ calc_build_hash() {
   local files=(
     "${REPO_ROOT}/${DOCKERFILE_REL}"
     "${REPO_ROOT}/DESCRIPTION"
+    "${REPO_ROOT}/scripts/install-image-deps.R"
     "${REPO_ROOT}/rr"
   )
 

@@ -160,7 +160,7 @@ test_that("agsi.get_storage_change returns an empty typed result for no matches"
   expect_s3_class(result$date, "Date")
 })
 
-test_that("agsi.get_storage_change reuses today's cached bundle", {
+test_that("agsi.get_storage_change reuses a cached bundle", {
   cache_dir <- local_agsi_cache_dir()
   source_path <- tempfile(fileext = ".parquet")
   write_agsi_bundle(source_path)
@@ -180,7 +180,7 @@ test_that("agsi.get_storage_change reuses today's cached bundle", {
   expect_true(file.exists(file.path(cache_dir, AGSI_COUNTRY_DAILY_CACHE_FILENAME)))
 })
 
-test_that("agsi.get_storage_change refreshes a cache fetched before today", {
+test_that("agsi.get_storage_change reuses a cache fetched before today", {
   cache_dir <- local_agsi_cache_dir()
   source_path <- tempfile(fileext = ".parquet")
   write_agsi_bundle(source_path)
@@ -197,8 +197,8 @@ test_that("agsi.get_storage_change refreshes a cache fetched before today", {
     agsi.get_storage_change("2023-01-01", "2023-01-03", "DE")
   )
 
-  expect_equal(calls$count, 2L)
-  expect_true(cache_file_modified_today(cache_path))
+  expect_equal(calls$count, 1L)
+  expect_false(cache_file_modified_today(cache_path))
 })
 
 test_that("agsi.get_storage_change always downloads when caching is disabled", {
@@ -235,7 +235,7 @@ test_that("failed refresh retains the previous bundle and raises an error", {
 
   expect_error(
     suppressMessages(
-      agsi.get_storage_change("2023-01-01", "2023-01-03", "DE")
+      agsi.get_storage_change("2023-01-01", "2023-01-03", "DE", use_cache = FALSE)
     ),
     "simulated download failure"
   )
@@ -259,7 +259,7 @@ test_that("invalid refresh retains the previous bundle and raises an error", {
 
   expect_error(
     suppressMessages(
-      agsi.get_storage_change("2023-01-01", "2023-01-03", "DE")
+      agsi.get_storage_change("2023-01-01", "2023-01-03", "DE", use_cache = FALSE)
     ),
     "missing required columns"
   )

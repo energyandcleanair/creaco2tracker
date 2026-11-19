@@ -56,16 +56,19 @@ get_eurostat_cons <- function(
     cons_raw_solid$monthly,
     cons_raw_solid$yearly
   )
+  .pipeline_snapshot(cons_raw_solid, "solid_annual_backed")
   industry <- eurostat_data_access_get_indprod(
     use_cache = use_cache, data_masking = data_masking
   )
   coke_consumption <- .resolve_coke_consumption(
     cons_raw_solid$monthly, cons_raw_solid$yearly, industry = industry
   )
+  .pipeline_snapshot(coke_consumption, "coke_resolved")
   cons_raw_solid$monthly <- coke_consumption$monthly
   coking <- .resolve_coal_coking(
     cons_raw_solid$monthly, cons_raw_solid$yearly, industry = industry
   )
+  .pipeline_snapshot(coking, "coking_resolved")
   cons_raw_solid$monthly <- coking$monthly
   cons_raw_solid$yearly <- coking$yearly
   if (!is_null_or_empty(diagnostics_folder)) {
@@ -213,6 +216,7 @@ get_eurostat_cons <- function(
     })
   }
 
+  .pipeline_snapshot(cons_combined, "consumption_combined")
   cons <- cons_combined %>%
     select(-c(source))
 

@@ -1,23 +1,35 @@
 #' Get daily CO2 emissions from EUROSTAT, ENTSOG and ENTSOE data.
 #'
-#' @param diagnostics_folder
-#' @param use_cache whether to use cache for EUROSTAT, power and gas data.
-#' Save time for development. Should be Falsein production.
-#' @param iso2s
-#' @param downscale_daily
-#' @param min_year
+#' @param diagnostics_folder Directory for diagnostics and plots. NULL disables them.
+#' @param use_cache Reuse original fetched inputs regardless of age and cache missing inputs.
+#'   When FALSE, fetch fresh inputs without reading or updating the persistent cache.
+#' @param iso2s ISO2 region codes retained in the result.
+#' @param downscale_daily Whether to downscale monthly estimates to daily emissions.
+#' @param min_year Optional first year retained in the result.
 #' @param date_to End date for filtering data (YYYY-MM-DD). If NULL, no upper date filter is
 #' applied.
 #' @param ncv_source iea, iea_shared, ipcc
 #' @param fill_mode one of "missing", "overwrite", or "ratio". Default is "missing".
+#' @param downscale_cut_latest_days Number of latest days removed during daily downscaling.
+#' @param correct_gas_demand_to_eurostat Whether to scale gas demand to Eurostat consumption.
 #' @param data_masking One of `DATA_MASKING_NONE` or
 #'   `DATA_MASKING_HISTORICAL_DEFAULTS`, or a named masking config list in the
 #'   same structure as `get_data_masking_config()`.
 #'
-#' @return
+#' @param artifacts_folder Optional new or empty directory for pipeline snapshots. NULL disables
+#'   capture. Original fetched inputs retain their native formats; decoded inputs, key
+#'   intermediates, reference tables and final results are Parquet. Filenames have ordered
+#'   stage and substage prefixes, defined centrally in `PIPELINE_ARTIFACT_STAGES`.
+#'   Capture includes inputs used by enabled diagnostics. No index, manifest or request
+#'   metadata is written. A write failure stops the run and retains completed files.
+#'
+#' @return A table of CO2 emissions. Artifact capture does not alter the returned table.
 #' @export
 #'
 #' @examples
+#' \dontrun{
+#' co2 <- get_co2(use_cache = TRUE, artifacts_folder = "co2-snapshots")
+#' }
 get_co2 <- function(
   diagnostics_folder = "diagnostics",
   downscale_daily = TRUE,
@@ -29,8 +41,11 @@ get_co2 <- function(
   fill_mode = c("missing", "overwrite", "ratio"),
   downscale_cut_latest_days = 3,
   correct_gas_demand_to_eurostat = TRUE,
-  data_masking = DATA_MASKING_NONE
+  data_masking = DATA_MASKING_NONE,
+  artifacts_folder = NULL
 ) {
+  restore_artifacts <- .pipeline_artifacts_start(artifacts_folder, use_cache)
+  on.exit(restore_artifacts(), add = TRUE)
   run_started_at <- Sys.time()
   log_info(
     glue::glue(
@@ -86,7 +101,7 @@ get_co2 <- function(
   # Get fossil-fuel consumption based on Eurostat
   eurostat_cons <- log_timed_stage("get_eurostat_cons", {
     get_eurostat_cons(
-      diagnostics_folder = file.path(diagnostics_folder, "eurostat"),
+      diagnostics_folder = source_diagnostics_folder("eurostat"),
       pwr_generation = pwr_generation,
       use_cache = use_cache,
       data_masking = data_masking
@@ -97,7 +112,7 @@ get_co2 <- function(
   eurostat_indprod <- log_timed_stage("get_eurostat_indprod", {
     get_eurostat_indprod(
       use_cache = use_cache,
-      diagnostics_folder = file.path(diagnostics_folder, "eurostat"),
+      diagnostics_folder = source_diagnostics_folder("eurostat"),
       data_masking = data_masking
     )
   })
@@ -106,6 +121,7 @@ get_co2 <- function(
   eurostat_cons <- coal_prepare_total_forecasts(
     eurostat_cons, date_to, source_diagnostics_folder("eurostat")
   )
+  .pipeline_snapshot(eurostat_cons, "consumption_prepared")
   co2_unprojected <- log_timed_stage("get_co2_from_eurostat_cons", {
     get_co2_from_eurostat_cons(
       eurostat_cons,
@@ -153,6 +169,8 @@ get_co2 <- function(
   co2 <- co2 %>%
     filter(iso2 %in% iso2s)
 
+  .pipeline_snapshot(co2, "regions")
+
   # Downscale to daily data
   if (downscale_daily) {
     co2 <- log_timed_stage("downscale_daily", {
@@ -167,21 +185,26 @@ get_co2 <- function(
 
   # Resplit gas
   co2 <- split_gas_to_elec_others(co2)
+  .pipeline_snapshot(co2, "gas_split")
 
   # Re-combine fuels e.g. peat goes to coal
   co2 <- recombine_fuels(co2)
+  .pipeline_snapshot(co2, "fuels")
   fuel_completeness <- attr(co2, "fuel_completeness")
 
   # Ensure aggregate sector rows cannot coexist with disaggregated sector rows
   # before final fuel totals are calculated.
   co2 <- detotalise_co2(co2)
+  .pipeline_snapshot(co2, "detotalised")
 
   # Add total
   co2 <- add_total_co2(co2)
+  .pipeline_snapshot(co2, "totals")
   total_component_completeness <- attr(co2, "total_component_completeness")
 
   # Improve latest EU months using validated tail-estimate submodels.
   co2 <- stabilise_eu_tail_estimates(co2)
+  .pipeline_snapshot(co2, "tail")
   if (!is_null_or_empty(diagnostics_folder)) {
     for (name in c("fuel_completeness", "total_component_completeness")) {
       diagnostic <- get(name)
@@ -225,5 +248,6 @@ get_co2 <- function(
   total_elapsed_s <- as.numeric(difftime(run_ended_at, run_started_at, units = "secs"))
   log_info(glue::glue("DONE get_co2 ({round(total_elapsed_s, 2)}s)"))
 
+  .pipeline_snapshot(co2, "final")
   return(co2)
 }

@@ -233,6 +233,7 @@ collect_solid <- function(use_cache = FALSE, data_masking = NULL) {
   monthly <- filter_siec(cons_monthly_raw) %>% add_iso2() %>% filter(!is.na(iso2))
   yearly <- filter_siec(cons_yearly_raw) %>% add_iso2() %>% filter(!is.na(iso2))
   monthly <- fill_raw_coal_monthly(monthly, yearly)
+  .pipeline_snapshot(monthly, "solid_filled")
 
   list(monthly = monthly, yearly = yearly)
 }

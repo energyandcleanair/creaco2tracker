@@ -21,6 +21,7 @@ get_co2_from_eurostat_cons <- function(
   repair_candidates <- attr(eurostat_cons, "coal_eu_repair_candidates")
   converted <- eurostat_cons %>%
     add_ncv_fn(diagnostics_folder = diagnostics_folder, use_cache = use_cache) %>%
+    .pipeline_snapshot("consumption_ncv") %>%
     add_emission_factor() %>%
     mutate(
       value_co2_tonne =
@@ -32,6 +33,7 @@ get_co2_from_eurostat_cons <- function(
     ) %>%
     filter(unit %in% c(EUROSTAT_UNIT_THOUSAND_TONNES, EUROSTAT_UNIT_TJ_GCV)) %>%
     apply_verified_coal_eu_repairs(repair_candidates)
+  .pipeline_snapshot(converted, "emissions_detailed")
   repair_diagnostics <- attr(converted, "coal_eu_emissions_repairs")
   if (!is_null_or_empty(diagnostics_folder) && !is.null(repair_diagnostics)) {
     readr::write_csv(

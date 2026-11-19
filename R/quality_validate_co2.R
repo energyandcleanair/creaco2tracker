@@ -892,6 +892,7 @@ validate_co2_transport <- function(
 
   eea_filepath <- get_data_filepath("greenhouse_gas emissions from transport in europe.csv")
   eea <- read_csv(eea_filepath, skip = 10) %>%
+    .pipeline_snapshot("validation", "eea_transport_decoded") %>%
     `names<-`(c("value", "value_proj1", "value_proj2", "year", "x", "y")) %>%
     select(year, value) %>%
     filter(

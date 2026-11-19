@@ -6,6 +6,7 @@
 .Ruserdata
 .Rproj.user
 .cache
+.compare
 .codex
 .tmp
 .vscode

@@ -7,6 +7,7 @@
 #' @return A tibble describing affected source observations and their evidence.
 #' @keywords internal
 get_coal_coking_conflicts <- function() {
+  on.exit(.pipeline_snapshot(returnValue(), "references", "coal_coking_conflicts"), add = TRUE)
   tibble::tibble(
     iso2 = "FR",
     year_from = 2021L,

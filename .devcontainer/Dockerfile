@@ -1,18 +1,32 @@
-FROM ghcr.io/rocker-org/devcontainer/tidyverse:4
+FROM ghcr.io/rocker-org/devcontainer/tidyverse:4.5@sha256:289c5d02d8115aa209f4a8a49ee9378dccbf623897eed9cc46c87dfbbca9015b
 
-ARG PPM_DISTRO=bookworm
+ARG PPM_DISTRO=noble
 ARG PPM_URL=https://packagemanager.posit.co/cran/__linux__/${PPM_DISTRO}/latest
 
 ENV CRAN=${PPM_URL}
 ENV PKG_CRAN_MIRROR=${PPM_URL}
-ENV PKG_SYSREQS=true
-ENV PKG_SYSREQS_SUDO=true
+ENV PKG_SYSREQS=false
 ENV PKG_SYSREQS_RSPM_URL=https://packagemanager.posit.co
 ENV PKG_CACHE_DIR=/workspaces/.cache/pak
 ENV PKG_PACKAGE_CACHE_DIR=/workspaces/.cache/pak/packages
 ENV PKG_METADATA_CACHE_DIR=/workspaces/.cache/pak/metadata
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake \
+    gdal-bin \
+    git \
+    gsfonts \
+    libabsl-dev \
+    libgit2-dev \
+    libicu-dev \
+    libpq-dev \
+    libsqlite3-dev \
+    libuv1-dev \
+    libwebp-dev \
+    libx11-dev \
+    make \
+    pandoc \
+    zlib1g-dev \
     bubblewrap \
     socat \
     libcurl4-openssl-dev \

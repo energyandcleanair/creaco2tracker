@@ -3,7 +3,7 @@
   "build": {
     "dockerfile": "Dockerfile",
     "args": {
-      "PPM_DISTRO": "bookworm"
+      "PPM_DISTRO": "noble"
     }
   },
 

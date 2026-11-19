@@ -19,10 +19,13 @@ on:
       - 'scripts/compare_lib/*.R'
       - 'rr'
       - 'rr.Dockerfile'
+      - 'scripts/install-image-deps.R'
       - 'DESCRIPTION'
       - 'NAMESPACE'
       - 'tests/testthat/*.R'
       - '.github/workflows/compare-get-co2.yaml'
+      - 'scripts/publish-comparison-comment.py'
+      - 'scripts/tests/test_publish_comparison_comment.py'
 
 permissions:
   contents: read
@@ -78,7 +81,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .tmp/rr-image/creaco2tracker-rr.tar
-          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION') }}
+          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION', 'scripts/install-image-deps.R') }}
 
       - name: Test podman installed
         shell: bash
@@ -179,7 +182,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .tmp/rr-image/creaco2tracker-rr.tar
-          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION') }}
+          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION', 'scripts/install-image-deps.R') }}
 
       - name: Load rr runtime image
         shell: bash
@@ -278,7 +281,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .tmp/rr-image/creaco2tracker-rr.tar
-          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION') }}
+          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION', 'scripts/install-image-deps.R') }}
 
       - name: Load rr runtime image
         shell: bash
@@ -377,7 +380,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .tmp/rr-image/creaco2tracker-rr.tar
-          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION') }}
+          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION', 'scripts/install-image-deps.R') }}
 
       - name: Load rr runtime image
         shell: bash
@@ -455,7 +458,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .tmp/rr-image/creaco2tracker-rr.tar
-          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION') }}
+          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION', 'scripts/install-image-deps.R') }}
 
       - name: Load rr runtime image
         shell: bash
@@ -535,7 +538,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .tmp/rr-image/creaco2tracker-rr.tar
-          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION') }}
+          key: ${{ runner.os }}-rr-image-${{ hashFiles('rr', 'rr.Dockerfile', 'DESCRIPTION', 'scripts/install-image-deps.R') }}
 
       - name: Load rr runtime image
         shell: bash
@@ -587,7 +590,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: iterative/setup-cml@959663fc0e5258fc9090894d1256920beab89d47
+      - name: Install GitHub CLI with attachment support
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_VERSION: '2.99.0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cli_dir="${RUNNER_TEMP}/gh-attachments"
+          mkdir -p "$cli_dir"
+          gh release download "v${GH_VERSION}" --repo cli/cli --dir "$cli_dir" \
+            --pattern "gh_${GH_VERSION}_linux_amd64.tar.gz" \
+            --pattern "gh_${GH_VERSION}_checksums.txt"
+          (
+            cd "$cli_dir"
+            grep " gh_${GH_VERSION}_linux_amd64.tar.gz$" \
+              "gh_${GH_VERSION}_checksums.txt" | sha256sum --check
+            tar -xzf "gh_${GH_VERSION}_linux_amd64.tar.gz"
+          )
+          echo "${cli_dir}/gh_${GH_VERSION}_linux_amd64/bin" >> "$GITHUB_PATH"
+
+      - name: Test comparison comment publisher
+        run: python -B -m unittest discover -s scripts/tests -v
+
+      - name: Validate attachment token and repository permissions
+        if: github.event_name == 'pull_request'
+        env:
+          # Attachments require a user token; permissions on github.token cannot
+          # enable uploads. Fine-grained PAT: select this repository and grant
+          # Pull requests: Read and write. Token owner needs repository write
+          # access. Classic PAT: public_repo scope (repo for private repositories).
+          GH_TOKEN: ${{ secrets.IMAGE_UPLOAD_TOKEN }}
+        run: >-
+          python scripts/publish-comparison-comment.py
+          --repo "$GITHUB_REPOSITORY" --check-auth
 
       - name: Download version comparison artifact
         if: needs.version_comparison.result == 'success'
@@ -660,17 +697,14 @@ jobs:
         shell: bash
         run: cat "${{ steps.combined-summary.outputs.summary_md }}" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Publish persistent CML PR comment
+      - name: Publish PR comparison comment with inline images
         if: >-
           github.event_name == 'pull_request' &&
           steps.combined-summary.outputs.summary_md != ''
         env:
-          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          summary_md="${{ steps.combined-summary.outputs.summary_md }}"
-          (
-            cd "$(dirname "$summary_md")"
-            cml comment create --publish --update "$(basename "$summary_md")"
-          )
+          GH_TOKEN: ${{ secrets.IMAGE_UPLOAD_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SUMMARY_MD: ${{ steps.combined-summary.outputs.summary_md }}
+        run: >-
+          python scripts/publish-comparison-comment.py
+          --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --summary "$SUMMARY_MD"

@@ -15,12 +15,14 @@ get_data_filepath <- function(filename) {
   # First try development location (inst/extdata)
   dev_path <- file.path("inst", "extdata", filename)
   if (file.exists(dev_path)) {
+    .pipeline_input_file(dev_path, "validation", basename(dev_path))
     return(dev_path)
   }
 
   # Then try installed package location
   pkg_path <- system.file("extdata", filename, package = "creaco2tracker")
   if (pkg_path != "") {
+    .pipeline_input_file(pkg_path, "validation", basename(pkg_path))
     return(pkg_path)
   }
 
